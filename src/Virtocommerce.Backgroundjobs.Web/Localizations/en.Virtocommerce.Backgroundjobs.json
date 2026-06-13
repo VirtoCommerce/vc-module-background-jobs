@@ -1,0 +1,24 @@
+{
+  "background-jobs": {
+    "blades": {
+      "hello-world": {
+        "title": "Hello world blade"
+      }
+    }
+  },
+  "permissions": {
+    "background-jobs:access": "Open BackgroundJobs menu",
+    "background-jobs:create": "Create BackgroundJobs related data",
+    "background-jobs:read": "View BackgroundJobs related data",
+    "background-jobs:update": "Update BackgroundJobs related data",
+    "background-jobs:delete": "Delete BackgroundJobs related data"
+  },
+  "settings": {
+    "Backgroundjobs": {
+      "Enabled": {
+        "title": "BackgroundJobs Enabled",
+        "description": "BackgroundJobs Enabled setting"
+      }
+    }
+  }
+}
