@@ -1,0 +1,84 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.4.11605.240 stable
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{DB253607-58BB-46C5-A569-FCF678F1216B}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VirtoCommerce.BackgroundJobs.Web", "src\VirtoCommerce.BackgroundJobs.Web\VirtoCommerce.BackgroundJobs.Web.csproj", "{71729636-3D50-450A-8277-0677AD82E1E6}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VirtoCommerce.BackgroundJobs.Data", "src\VirtoCommerce.BackgroundJobs.Data\VirtoCommerce.BackgroundJobs.Data.csproj", "{A13C97DE-727B-4218-B0A9-E10DDF8ECF66}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VirtoCommerce.BackgroundJobs.Core", "src\VirtoCommerce.BackgroundJobs.Core\VirtoCommerce.BackgroundJobs.Core.csproj", "{91CF23D5-A172-4A0A-BC89-8BC27A1F3FAD}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VirtoCommerce.BackgroundJobs.Data.MySql", "src\VirtoCommerce.BackgroundJobs.Data.MySql\VirtoCommerce.BackgroundJobs.Data.MySql.csproj", "{AFB58E7B-349F-4AC0-8C73-274EF401C9A0}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VirtoCommerce.BackgroundJobs.Data.PostgreSql", "src\VirtoCommerce.BackgroundJobs.Data.PostgreSql\VirtoCommerce.BackgroundJobs.Data.PostgreSql.csproj", "{0B1AD339-A2A9-4D60-A206-775ED59C7676}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VirtoCommerce.BackgroundJobs.Data.SqlServer", "src\VirtoCommerce.BackgroundJobs.Data.SqlServer\VirtoCommerce.BackgroundJobs.Data.SqlServer.csproj", "{3A848A0F-982F-4274-9684-481189288199}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{BDFB6872-92F4-4F40-B22A-68E06BD9D9A4}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VirtoCommerce.BackgroundJobs.Tests", "tests\VirtoCommerce.BackgroundJobs.Tests\VirtoCommerce.BackgroundJobs.Tests.csproj", "{F888009F-9224-42FD-AC05-9B6465D63572}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{34ED4F1A-6E2F-4F5E-ADF3-EDE74F85D8C5}"
+	ProjectSection(SolutionItems) = preProject
+		.editorconfig = .editorconfig
+		.gitignore = .gitignore
+		Directory.Build.props = Directory.Build.props
+		LICENSE = LICENSE
+		module.ignore = module.ignore
+		README.md = README.md
+		VirtoCommerce.BackgroundJobs.sln.DotSettings = VirtoCommerce.BackgroundJobs.sln.DotSettings
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{71729636-3D50-450A-8277-0677AD82E1E6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{71729636-3D50-450A-8277-0677AD82E1E6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{71729636-3D50-450A-8277-0677AD82E1E6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{71729636-3D50-450A-8277-0677AD82E1E6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A13C97DE-727B-4218-B0A9-E10DDF8ECF66}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A13C97DE-727B-4218-B0A9-E10DDF8ECF66}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A13C97DE-727B-4218-B0A9-E10DDF8ECF66}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A13C97DE-727B-4218-B0A9-E10DDF8ECF66}.Release|Any CPU.Build.0 = Release|Any CPU
+		{91CF23D5-A172-4A0A-BC89-8BC27A1F3FAD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{91CF23D5-A172-4A0A-BC89-8BC27A1F3FAD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{91CF23D5-A172-4A0A-BC89-8BC27A1F3FAD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{91CF23D5-A172-4A0A-BC89-8BC27A1F3FAD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AFB58E7B-349F-4AC0-8C73-274EF401C9A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AFB58E7B-349F-4AC0-8C73-274EF401C9A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AFB58E7B-349F-4AC0-8C73-274EF401C9A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AFB58E7B-349F-4AC0-8C73-274EF401C9A0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0B1AD339-A2A9-4D60-A206-775ED59C7676}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0B1AD339-A2A9-4D60-A206-775ED59C7676}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0B1AD339-A2A9-4D60-A206-775ED59C7676}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0B1AD339-A2A9-4D60-A206-775ED59C7676}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3A848A0F-982F-4274-9684-481189288199}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3A848A0F-982F-4274-9684-481189288199}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3A848A0F-982F-4274-9684-481189288199}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3A848A0F-982F-4274-9684-481189288199}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F888009F-9224-42FD-AC05-9B6465D63572}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F888009F-9224-42FD-AC05-9B6465D63572}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F888009F-9224-42FD-AC05-9B6465D63572}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F888009F-9224-42FD-AC05-9B6465D63572}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{71729636-3D50-450A-8277-0677AD82E1E6} = {DB253607-58BB-46C5-A569-FCF678F1216B}
+		{A13C97DE-727B-4218-B0A9-E10DDF8ECF66} = {DB253607-58BB-46C5-A569-FCF678F1216B}
+		{91CF23D5-A172-4A0A-BC89-8BC27A1F3FAD} = {DB253607-58BB-46C5-A569-FCF678F1216B}
+		{AFB58E7B-349F-4AC0-8C73-274EF401C9A0} = {DB253607-58BB-46C5-A569-FCF678F1216B}
+		{0B1AD339-A2A9-4D60-A206-775ED59C7676} = {DB253607-58BB-46C5-A569-FCF678F1216B}
+		{3A848A0F-982F-4274-9684-481189288199} = {DB253607-58BB-46C5-A569-FCF678F1216B}
+		{F888009F-9224-42FD-AC05-9B6465D63572} = {BDFB6872-92F4-4F40-B22A-68E06BD9D9A4}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {64EF57B5-4469-42C2-8DA4-4F02B47BF3FD}
+	EndGlobalSection
+EndGlobal
