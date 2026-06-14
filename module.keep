@@ -8,3 +8,4 @@ Hangfire.MySql.dll
 Hangfire.NetCore.dll
 Hangfire.PostgreSql.dll
 Hangfire.SqlServer.dll
+VirtoCommerce.Platform.Hangfire.dll
