@@ -4,7 +4,7 @@
   <version>3.1000.0</version>
   <version-tag></version-tag>
 
-  <platformVersion>3.1037.0</platformVersion>
+  <platformVersion>3.1038.0-alpha.13303-vcst-5245</platformVersion>
   <dependencies>
     <!--<dependency id="VirtoCommerce.Core" version="3.1001.2" />-->
   </dependencies>
@@ -25,6 +25,7 @@
 
   <assemblyFile>VirtoCommerce.BackgroundJobs.Web.dll</assemblyFile>
   <moduleType>VirtoCommerce.BackgroundJobs.Web.Module, VirtoCommerce.BackgroundJobs.Web</moduleType>
+  <startupType>VirtoCommerce.BackgroundJobs.Web.PlatformStartup, VirtoCommerce.BackgroundJobs.Web</startupType>
 
   <releaseNotes>First version.</releaseNotes>
   <copyright>Copyright © 2026 VirtoCommerce. All rights reserved</copyright>

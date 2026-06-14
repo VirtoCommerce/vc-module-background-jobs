@@ -9,6 +9,9 @@
 *.userosscache
 *.sln.docstates
 
+# Local-only NuGet config for linking against a locally-built platform feed (machine-specific paths)
+nuget.config
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
