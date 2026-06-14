@@ -1,8 +1,10 @@
-VirtoCommerce.Platform.Hangfire.dll
-Hangfire.Core.dll
+Dapper.dll
 Hangfire.AspNetCore.dll
-Hangfire.SqlServer.dll
-Hangfire.PostgreSql.dll
-Hangfire.MySql.dll
-Hangfire.MemoryStorage.dll
 Hangfire.Console.dll
+Hangfire.Core.dll
+Hangfire.Core.resources.dll
+Hangfire.MemoryStorage.dll
+Hangfire.MySql.dll
+Hangfire.NetCore.dll
+Hangfire.PostgreSql.dll
+Hangfire.SqlServer.dll

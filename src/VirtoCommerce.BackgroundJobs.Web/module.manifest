@@ -20,7 +20,7 @@
   </owners>
 
   <projectUrl>https://github.com/VirtoCommerce/vc-module-background-jobs</projectUrl>
-  <iconUrl>Modules/$(VirtoCommerce.BackgroundJobs)/Content/logo.png</iconUrl>
+  <iconUrl>Modules/$(VirtoCommerce.BackgroundJobs)/Content/logo.svg</iconUrl>
   <requireLicenseAcceptance>false</requireLicenseAcceptance>
 
   <assemblyFile>VirtoCommerce.BackgroundJobs.Web.dll</assemblyFile>
