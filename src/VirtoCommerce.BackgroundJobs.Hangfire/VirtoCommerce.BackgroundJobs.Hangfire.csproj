@@ -21,7 +21,7 @@
     <PackageReference Include="Hangfire.PostgreSql" Version="1.21.1" />
     <PackageReference Include="HangFire.SqlServer" Version="1.8.23" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="10.0.7" />
-    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1038.0-alpha.13303-vcst-5245" />
+    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1038.0-alpha.13304-vcst-5245" />
   </ItemGroup>
 
 </Project>

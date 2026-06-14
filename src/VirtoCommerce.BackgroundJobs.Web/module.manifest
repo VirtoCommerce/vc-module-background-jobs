@@ -4,7 +4,7 @@
   <version>3.1000.0</version>
   <version-tag></version-tag>
 
-  <platformVersion>3.1038.0-alpha.13303-vcst-5245</platformVersion>
+  <platformVersion>3.1038.0-alpha.13304-vcst-5245</platformVersion>
   <dependencies>
     <!--<dependency id="VirtoCommerce.Core" version="3.1001.2" />-->
   </dependencies>
@@ -31,4 +31,8 @@
   <copyright>Copyright © 2026 VirtoCommerce. All rights reserved</copyright>
   <tags>extension module</tags>
   <useFullTypeNameInSwagger>false</useFullTypeNameInSwagger>
+
+  <groups>
+    <group>commerce</group>
+  </groups>
 </module>

@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <PackageReference Include="RabbitMQ.Client" Version="7.2.1" />
-    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1038.0-alpha.13303-vcst-5245" />
+    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1038.0-alpha.13304-vcst-5245" />
   </ItemGroup>
 
 </Project>
