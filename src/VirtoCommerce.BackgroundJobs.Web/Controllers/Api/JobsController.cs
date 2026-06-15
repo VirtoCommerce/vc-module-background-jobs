@@ -1,52 +1,40 @@
-using System.Linq;
-using Hangfire;
-using Hangfire.States;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using VirtoCommerce.BackgroundJobs.Core.Services;
 using VirtoCommerce.Platform.Core;
 using VirtoCommerce.Platform.Core.Jobs;
 
 namespace VirtoCommerce.BackgroundJobs.Web.Controllers.Api
 {
     /// <summary>
-    /// Background-job monitoring API. Moved from the platform into the Hangfire engine module (it reads
-    /// Hangfire's <see cref="JobStorage"/>). The route is preserved so existing admin UI clients keep working
-    /// when the module is installed.
+    /// Engine-agnostic background-job monitoring API. Reads status from the active <see cref="IJobEngine"/>
+    /// (Hangfire, RabbitMQ, …). The route is preserved so existing admin UI clients keep working.
     /// </summary>
     [Produces("application/json")]
     [Route("api/platform/jobs")]
     [Authorize(PlatformConstants.Security.Permissions.BackgroundJobsManage)]
     public class JobsController : Controller
     {
-        private static readonly string[] _finalStates = { DeletedState.StateName, FailedState.StateName, SucceededState.StateName };
+        private readonly IJobEngine _jobEngine;
 
-        /// <summary>
-        /// Get background job status
-        /// </summary>
-        /// <param name="id">Job ID.</param>
-        /// <returns></returns>
-        [HttpGet]
-        [Route("{id}")]
-        public ActionResult<Job> GetStatus(string id)
+        public JobsController(IJobEngine jobEngine)
         {
-            var result = GetJob(id);
-            return Ok(result);
+            _jobEngine = jobEngine;
         }
 
-        private static Job GetJob(string jobId)
+        /// <summary>
+        /// Get background job status.
+        /// </summary>
+        /// <param name="id">Job ID.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        [HttpGet]
+        [Route("{id}")]
+        public async Task<ActionResult<Job>> GetStatus(string id, CancellationToken cancellationToken)
         {
-            var result = new Job { Id = jobId };
-
-            var state = JobStorage.Current.GetConnection().GetStateData(jobId);
-
-            if (state != null)
-            {
-                result.State = state.Name;
-            }
-
-            result.Completed = (state == null || _finalStates.Contains(result.State));
-
-            return result;
+            var result = await _jobEngine.GetStatus(id, cancellationToken);
+            return Ok(result);
         }
     }
 }

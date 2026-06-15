@@ -1,58 +1,188 @@
-# BackgroundJobs
+# Virto Commerce Background Jobs Module
+
+[![CI status](https://github.com/VirtoCommerce/vc-module-background-jobs/workflows/Module%20CI/badge.svg?branch=dev)](https://github.com/VirtoCommerce/vc-module-background-jobs/actions?query=workflow%3A%22Module+CI%22)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=VirtoCommerce_vc-module-background-jobs&metric=alert_status&branch=dev)](https://sonarcloud.io/dashboard?id=VirtoCommerce_vc-module-background-jobs)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=VirtoCommerce_vc-module-background-jobs&metric=reliability_rating&branch=dev)](https://sonarcloud.io/dashboard?id=VirtoCommerce_vc-module-background-jobs)
 
 ## Overview
 
-Short overview of what the new module is.
+The Background Jobs module is the Virto Commerce **background-processing engine**. The platform itself no longer
+depends on Hangfire directly — it depends only on a small, engine-agnostic abstraction in
+`VirtoCommerce.Platform.Core`, and this module provides the actual engine that runs the work.
 
-- What is the new or updated experience?
+A module (or the platform) defines a serializable **payload** and an `IBackgroundJobHandler<TPayload>` **handler**, then
+enqueues it through the `IBackgroundJob` facade. Exactly **one engine per platform instance** — chosen by
+configuration — executes it: **Hangfire** (the default, shipped) or **RabbitMQ** (in progress). The same enqueue
+code runs unchanged on any engine, with or without live progress reported to the admin UI.
 
-- Does this module replace an existing module/experience? If yes, what is the transition plan?
+This module replaces the platform's previously built-in Hangfire integration **without breaking existing
+modules**: it ships a type-forwarding `VirtoCommerce.Platform.Hangfire.dll`, so modules that referenced the old
+platform Hangfire assembly keep working once this module is installed.
 
-- Does this module has dependency on other ? If yes, list/explain the dependencies.
+## Key Features
 
-- List the key deployment scenarios - why would people use this module?
+* **Engine-agnostic job API** — define a payload + `IBackgroundJobHandler<TPayload>` handler and enqueue via the
+  `IBackgroundJob` facade. Consumer modules reference only `VirtoCommerce.Platform.Core`.
+* **Pluggable engines behind one port** (`IJobEngine`) — Hangfire shipped; RabbitMQ in progress; selected by a
+  single configuration key, like the search providers.
+* **Fire-and-forget with or without progress** — opt into live progress streamed to the admin notification UI over
+  SignalR.
+* **Instance modes** — the same container image runs as `Producer` (enqueue only), `Worker` (process only) or
+  `Both`, controlled by configuration.
+* **No breaking changes** — a type-forwarding shim keeps existing `VirtoCommerce.Platform.Hangfire.*` consumers
+  working; the Hangfire storage, dashboard, queues, retry and recurring jobs are unchanged.
+* **Extensible by partners** — override a handler via DI (last registration wins) and extend a payload via
+  `AbstractTypeFactory`, using the same tools partners already use across Virto.
+* **Graceful when absent** — if no engine module is installed, the platform boots and surfaces an actionable
+  "install via the Virto Commerce CLI" message instead of silently dropping work.
 
-## Functional Requirements
+## Configuration
 
-Short description of the new module functional requirements.
+Background processing is configured under `VirtoCommerce:BackgroundJobs`. Provider-specific options keep their own
+sections (`VirtoCommerce:Hangfire`, `VirtoCommerce:RabbitMQ`), so the existing Hangfire configuration is untouched.
 
-## Scenarios
+```jsonc
+"VirtoCommerce": {
+  "BackgroundJobs": {
+    "Provider": "Hangfire",     // Hangfire | RabbitMQ  (one engine per instance)
+    "Mode": "Both",              // Producer | Worker | Both
+    "DefaultQueue": "default",
+    "MaxRetryAttempts": 3
+  },
+  "Hangfire": { /* existing Hangfire options — storage, dashboard, queues, worker count */ },
+  "RabbitMQ": { "HostName": "localhost", "Port": 5672, "UserName": "guest", "Password": "guest", "VirtualHost": "/" }
+}
+```
 
-List of scenarios that the new module implements
+### Application Settings
 
-1. [Scenario 1](/doc/scenario-name1.md)
-1. [Scenario 2](/doc/scenario-name2.md)
-1. [Scenario 3](/doc/scenario-name3.md)
-    1. [Scenario 3.1](/doc/scenario-name31.md)
-    1. [Scenario 3.2](/doc/scenario-name32.md)
-1. [Scenario 4](/doc/scenario-name4.md)
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `BackgroundJobs.Provider` | ShortText (`Hangfire`/`RabbitMQ`) | `Hangfire` | Active engine (mirrors the config key; requires restart). |
+| `BackgroundJobs.DefaultQueue` | ShortText | `default` | Default queue for enqueued jobs. |
+| `BackgroundJobs.MaxRetryAttempts` | Integer | `3` | Default automatic retry attempts on failure. |
 
-## Web API
+> The active `Provider` and `Mode` are read from configuration at startup; the settings above surface them in the
+> admin UI and require a restart to apply.
 
-Web API documentation for each module is built out automatically and can be accessed by following the link bellow:
-<https://link-to-swager-api>
+### Permissions
 
-## Database Model
+| Permission | Description |
+|---|---|
+| `platform:background:jobs:manage` | View the Hangfire dashboard (`/hangfire`) and the jobs status API. |
 
-![DB model](./docs/media/diagram-db-model.png)
+## Architecture
 
-## Related topics
+Contracts live in the platform; engine internals live in this module.
 
-[Some Article1](some-article1.md)
+```
+Module / Platform code
+   │  IBackgroundJob.Enqueue(payload, options)        ← VirtoCommerce.Platform.Core.Jobs
+   ▼
+JobEngineBackgroundJob  ── builds JobEnvelope (serializes payload) ──►  IJobEngine (one active)
+                                                                          │
+                                  ┌───────────────────────────────────────┴───────────────┐
+                                  ▼                                                         ▼
+                          HangfireJobEngine                                        RabbitMqJobEngine (in progress)
+                                  │  enqueues a job whose body calls…                       │  publishes the envelope;
+                                  ▼                                                         ▼  an in-process consumer…
+                          IJobDispatcher.Dispatch(envelope) ──► resolves IBackgroundJobHandler<TPayload> from DI ──► Execute(...)
+                                                                                            │
+                                                                 progress ──► IJobProgress ──► SignalR ──► admin UI
+```
 
-[Some Article2](some-article2.md)
+* **Producer/Worker/Both** decides whether this instance runs the processing host (Hangfire server / RabbitMQ
+  consumer) — so you can scale producers and workers independently from one image.
+* **Progress** is engine-independent: handlers call `context.Progress.Report(...)`, surfaced to the admin
+  notification UI over SignalR.
+
+## Components
+
+### Projects
+
+| Project | Layer | Purpose |
+|---|---|---|
+| `VirtoCommerce.BackgroundJobs.Core` | Core | Engine-internal contracts (`IJobEngine`, `IJobDispatcher`, `JobEnvelope`, options) and engine-agnostic implementations (facade, dispatcher, progress, serializer). |
+| `VirtoCommerce.BackgroundJobs.Hangfire` | Engine | Hangfire implementation of `IJobEngine`; reuses the platform's former Hangfire storage/dashboard. Published as a NuGet. |
+| `VirtoCommerce.Platform.Hangfire.Shim` | Compat | Produces a type-forwarding `VirtoCommerce.Platform.Hangfire.dll` for binary compatibility with existing modules. |
+| `VirtoCommerce.BackgroundJobs.RabbitMQ` | Engine | RabbitMQ implementation (connection plumbing in place; engine + consumer in progress). |
+| `VirtoCommerce.BackgroundJobs.Web` | Web | Module host: `PlatformStartup` (engine/mode selection), `JobsController`, settings & permissions. |
+| `VirtoCommerce.BackgroundJobs.Data` | Data | Module persistence (EF Core). |
+
+### Key Services
+
+| Service | Interface | Responsibility |
+|---|---|---|
+| Enqueue facade | `IBackgroundJob` | Engine-agnostic enqueue (message-based + Hangfire expression sugar). |
+| Job handler | `IBackgroundJobHandler<TPayload>` | Your job logic; resolved from DI, overridable. |
+| Engine port | `IJobEngine` | The active engine (Hangfire/RabbitMQ). One per instance. |
+| Dispatcher | `IJobDispatcher` | Shared execution path: deserialize → resolve handler → run. |
+| Progress | `IJobProgress` | Reports progress to the admin UI (SignalR). |
+| Recurring jobs | `IRecurringJobService` | Register cron/setting-driven recurring jobs. |
+
+### REST API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `api/platform/jobs/{id}` | Get the status of a background job (engine-agnostic). |
+
+## Usage
+
+```csharp
+// 1) Payload — created via AbstractTypeFactory so partners can extend it.
+public class SendOrderEmailPayload : ValueObject
+{
+    public string OrderId { get; set; }
+    public string CustomerEmail { get; set; }
+}
+
+// 2) Handler.
+public class SendOrderEmailJob(IEmailSender sender) : IBackgroundJobHandler<SendOrderEmailPayload>
+{
+    public async Task Execute(SendOrderEmailPayload payload, IJobExecutionContext context, CancellationToken cancellationToken = default)
+    {
+        await context.Progress.Report(new() { Message = "Sending…", TotalCount = 1 }, cancellationToken);
+        await sender.Send(payload.CustomerEmail, payload.OrderId, cancellationToken);
+    }
+}
+
+// 3) Register in the module's Initialize(IServiceCollection).
+services.AddBackgroundJob<SendOrderEmailPayload, SendOrderEmailJob>();
+
+// 4) Enqueue (engine-agnostic).
+var payload = AbstractTypeFactory<SendOrderEmailPayload>.TryCreateInstance();
+payload.OrderId = order.Id;
+payload.CustomerEmail = order.Email;
+
+await jobs.Enqueue(payload);                                            // fire-and-forget
+await jobs.Enqueue(payload, new EnqueueOptions { ReportProgress = true }); // with progress
+```
+
+A complete, runnable example lives in [`samples/VirtoCommerce.BackgroundJobs.SampleModule`](samples/VirtoCommerce.BackgroundJobs.SampleModule/README.md).
+
+## Documentation
+
+* [Background processing developer guide](https://docs.virtocommerce.org/)
+* [REST API](https://virtostart-demo-admin.govirto.com/docs/index.html?urls.primaryName=VirtoCommerce.BackgroundJobs)
+* [View on GitHub](https://github.com/VirtoCommerce/vc-module-background-jobs/)
+
+## References
+
+* [Deployment](https://docs.virtocommerce.org/platform/developer-guide/Tutorials-and-How-tos/Tutorials/deploy-module-from-source-code/)
+* [Installation](https://docs.virtocommerce.org/platform/user-guide/modules-installation/)
+* [Home](https://virtocommerce.com)
+* [Community](https://www.virtocommerce.org)
+* [Download latest release](https://github.com/VirtoCommerce/vc-module-background-jobs/releases/latest)
 
 ## License
 
 Copyright (c) Virto Solutions LTD.  All rights reserved.
 
-Licensed under the Virto Commerce Open Software License (the "License"); you
+This software is licensed under the Virto Commerce Open Software License (the "License"); you
 may not use this file except in compliance with the License. You may
-obtain a copy of the License at
+obtain a copy of the License at http://virtocommerce.com/opensourcelicense.
 
-<https://virtocommerce.com/open-source-license>
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
+Unless required to applicable law or written form, the software
+distributed under the License is provided on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 implied.

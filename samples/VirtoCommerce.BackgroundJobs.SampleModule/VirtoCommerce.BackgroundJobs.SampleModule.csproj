@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>1591;NU1608</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    A sample CONSUMER module. It references ONLY VirtoCommerce.Platform.Core — there is no compile-time
+    dependency on the BackgroundJobs module or any engine. The runtime dependency on the engine module is
+    declared in module.manifest. This proves a module can define and enqueue background jobs using only the
+    platform contracts.
+  -->
+  <ItemGroup>
+    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1039.0-alpha.13312-vcst-5245" />
+  </ItemGroup>
+
+</Project>

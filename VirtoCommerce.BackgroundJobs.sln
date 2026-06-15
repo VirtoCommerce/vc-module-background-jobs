@@ -33,6 +33,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VirtoCommerce.Platform.Hang
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VirtoCommerce.BackgroundJobs.RabbitMQ", "src\VirtoCommerce.BackgroundJobs.RabbitMQ\VirtoCommerce.BackgroundJobs.RabbitMQ.csproj", "{9337DCEE-CE12-4502-A55B-66C7DD8C7EAF}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{5D20AA90-6969-D8BD-9DCD-8634F4692FDA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VirtoCommerce.BackgroundJobs.SampleModule", "samples\VirtoCommerce.BackgroundJobs.SampleModule\VirtoCommerce.BackgroundJobs.SampleModule.csproj", "{91ACF631-4964-473A-94FD-7B5CB2BE374B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -127,6 +131,18 @@ Global
 		{9337DCEE-CE12-4502-A55B-66C7DD8C7EAF}.Release|x64.Build.0 = Release|Any CPU
 		{9337DCEE-CE12-4502-A55B-66C7DD8C7EAF}.Release|x86.ActiveCfg = Release|Any CPU
 		{9337DCEE-CE12-4502-A55B-66C7DD8C7EAF}.Release|x86.Build.0 = Release|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Debug|x64.Build.0 = Debug|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Debug|x86.Build.0 = Debug|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Release|x64.ActiveCfg = Release|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Release|x64.Build.0 = Release|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Release|x86.ActiveCfg = Release|Any CPU
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -139,6 +155,7 @@ Global
 		{8F64EA3A-6341-4F46-A7E7-0EE946E0FE51} = {DB253607-58BB-46C5-A569-FCF678F1216B}
 		{1D2DC2B6-BA21-4207-A7DD-AC1B8EFF8E2C} = {DB253607-58BB-46C5-A569-FCF678F1216B}
 		{9337DCEE-CE12-4502-A55B-66C7DD8C7EAF} = {DB253607-58BB-46C5-A569-FCF678F1216B}
+		{91ACF631-4964-473A-94FD-7B5CB2BE374B} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {64EF57B5-4469-42C2-8DA4-4F02B47BF3FD}

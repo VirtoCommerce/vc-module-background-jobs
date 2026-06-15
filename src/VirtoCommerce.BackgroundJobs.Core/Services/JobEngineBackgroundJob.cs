@@ -1,0 +1,79 @@
+using System;
+using System.Linq.Expressions;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Options;
+using VirtoCommerce.BackgroundJobs.Core.Models;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
+using VirtoCommerce.Platform.Core.Jobs;
+using VirtoCommerce.Platform.Core.PushNotifications;
+using VirtoCommerce.Platform.Core.Security;
+
+namespace VirtoCommerce.BackgroundJobs.Core.Services;
+
+/// <summary>
+/// Engine-agnostic implementation of the developer-facing <see cref="IBackgroundJob"/> facade. Builds a
+/// <see cref="JobEnvelope"/> from a payload and delegates to the active <see cref="IJobEngine"/>; expression
+/// enqueue is forwarded to <see cref="IExpressionJobEngine"/> when the active engine supports it.
+/// </summary>
+public sealed class JobEngineBackgroundJob(
+    IJobEngine engine,
+    IJobPayloadSerializer serializer,
+    IOptions<BackgroundJobsOptions> options,
+    IPushNotificationManager pushNotificationManager,
+    IUserNameResolver userNameResolver) : IBackgroundJob
+{
+    private readonly BackgroundJobsOptions _options = options.Value;
+
+    public string Enqueue(Expression<Action> methodCall) => EnqueueExpression(e => e.Enqueue(methodCall));
+
+    public string Enqueue(Expression<Func<Task>> methodCall) => EnqueueExpression(e => e.Enqueue(methodCall));
+
+    public async Task<string> Enqueue<TPayload>(TPayload payload, EnqueueOptions? options = null,
+        CancellationToken cancellationToken = default)
+        where TPayload : class
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        var (payloadType, payloadJson) = serializer.Serialize(payload);
+        var userName = userNameResolver.GetCurrentUserName();
+
+        var progressNotificationId = options?.ProgressNotificationId;
+        if (options?.ReportProgress == true && string.IsNullOrEmpty(progressNotificationId))
+        {
+            var notification = new JobProgressPushNotification(userName ?? "system")
+            {
+                Title = $"Background job: {typeof(TPayload).Name}",
+                Description = "Queued",
+                Started = DateTime.UtcNow,
+            };
+            await pushNotificationManager.SendAsync(notification);
+            progressNotificationId = notification.Id;
+        }
+
+        var envelope = new JobEnvelope
+        {
+            JobType = typeof(TPayload).AssemblyQualifiedName!,
+            PayloadType = payloadType,
+            PayloadJson = payloadJson,
+            Queue = options?.Queue ?? _options.DefaultQueue,
+            UniqueKey = options?.UniqueKey,
+            ProgressNotificationId = progressNotificationId,
+            UserName = userName,
+        };
+
+        return await engine.Enqueue(envelope, options ?? new EnqueueOptions(), cancellationToken);
+    }
+
+    private string EnqueueExpression(Func<IExpressionJobEngine, string> enqueue)
+    {
+        if (engine is IExpressionJobEngine expressionEngine)
+        {
+            return enqueue(expressionEngine);
+        }
+
+        throw new NotSupportedException(
+            $"Expression-based enqueue requires the Hangfire provider; the active provider is '{engine.ProviderName}'. " +
+            "Use Enqueue(payload) with an IBackgroundJob<TPayload> handler instead.");
+    }
+}

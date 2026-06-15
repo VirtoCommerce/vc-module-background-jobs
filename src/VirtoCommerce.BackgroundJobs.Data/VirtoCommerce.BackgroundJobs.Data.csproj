@@ -4,7 +4,7 @@
     <SonarQubeTestProject>false</SonarQubeTestProject>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1038.0-alpha.13304-vcst-5245" />
+    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1039.0-alpha.13312-vcst-5245" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Core\VirtoCommerce.BackgroundJobs.Core.csproj" />
