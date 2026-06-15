@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Core\VirtoCommerce.BackgroundJobs.Core.csproj" />
     <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Hangfire\VirtoCommerce.BackgroundJobs.Hangfire.csproj" />
+    <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.RabbitMQ\VirtoCommerce.BackgroundJobs.RabbitMQ.csproj" />
     <ProjectReference Include="..\VirtoCommerce.Platform.Hangfire.Shim\VirtoCommerce.Platform.Hangfire.Shim.csproj" />
     <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Data\VirtoCommerce.BackgroundJobs.Data.csproj" />
   </ItemGroup>

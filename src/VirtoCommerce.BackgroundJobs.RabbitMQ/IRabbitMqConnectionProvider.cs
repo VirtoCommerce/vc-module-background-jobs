@@ -17,6 +17,7 @@ public interface IRabbitMqConnectionProvider : IAsyncDisposable
 
     /// <summary>
     /// Opens a new channel on the shared connection. The caller owns the channel and must dispose it.
+    /// Pass <paramref name="options"/> (e.g. with publisher confirmations enabled) to control channel behavior.
     /// </summary>
-    Task<IChannel> CreateChannelAsync(CancellationToken cancellationToken = default);
+    Task<IChannel> CreateChannelAsync(CreateChannelOptions? options = null, CancellationToken cancellationToken = default);
 }

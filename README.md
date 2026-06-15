@@ -12,7 +12,7 @@ depends on Hangfire directly — it depends only on a small, engine-agnostic abs
 
 A module (or the platform) defines a serializable **payload** and an `IBackgroundJobHandler<TPayload>` **handler**, then
 enqueues it through the `IBackgroundJob` facade. Exactly **one engine per platform instance** — chosen by
-configuration — executes it: **Hangfire** (the default, shipped) or **RabbitMQ** (in progress). The same enqueue
+configuration — executes it: **Hangfire** (the default) or **RabbitMQ**. The same enqueue
 code runs unchanged on any engine, with or without live progress reported to the admin UI.
 
 This module replaces the platform's previously built-in Hangfire integration **without breaking existing
@@ -23,7 +23,7 @@ platform Hangfire assembly keep working once this module is installed.
 
 * **Engine-agnostic job API** — define a payload + `IBackgroundJobHandler<TPayload>` handler and enqueue via the
   `IBackgroundJob` facade. Consumer modules reference only `VirtoCommerce.Platform.Core`.
-* **Pluggable engines behind one port** (`IJobEngine`) — Hangfire shipped; RabbitMQ in progress; selected by a
+* **Pluggable engines behind one port** (`IJobEngine`) — Hangfire and RabbitMQ ship in the box; selected by a
   single configuration key, like the search providers.
 * **Fire-and-forget with or without progress** — opt into live progress streamed to the admin notification UI over
   SignalR.
@@ -50,9 +50,24 @@ sections (`VirtoCommerce:Hangfire`, `VirtoCommerce:RabbitMQ`), so the existing H
     "MaxRetryAttempts": 3
   },
   "Hangfire": { /* existing Hangfire options — storage, dashboard, queues, worker count */ },
-  "RabbitMQ": { "HostName": "localhost", "Port": 5672, "UserName": "guest", "Password": "guest", "VirtualHost": "/" }
+  "RabbitMQ": {
+    "HostName": "localhost", "Port": 5672, "UserName": "guest", "Password": "guest", "VirtualHost": "/",
+    // "Uri": "amqp://guest:guest@localhost:5672/",  // alternative to the host/port/credential fields above
+    "PrefetchCount": 1,        // unacknowledged messages a consumer prefetches (QoS)
+    "Queues": [],              // extra queues the consumer drains besides BackgroundJobs.DefaultQueue
+    "UseDeadLetterQueue": true,    // route retry-exhausted jobs to "{queue}.dlq" instead of dropping them
+    "DeadLetterQueueSuffix": ".dlq"
+  }
 }
 ```
+
+When `Provider` is `RabbitMQ`, the engine publishes each job as a persistent message to a durable queue; an
+in-process consumer (running when `Mode` is `Worker`/`Both`) drains it and dispatches the handler, retrying a
+failed job by re-publishing with an incremented attempt up to `MaxRetryAttempts`. Once retries are exhausted the
+job is routed to a dead-letter queue (`{queue}.dlq`, carrying `x-original-queue`/`x-attempts`/`x-death-reason`
+headers) for inspection or replay — or dropped if `UseDeadLetterQueue` is `false`. RabbitMQ keeps no job ledger,
+so `GET api/platform/jobs/{id}` reports `Unknown` and job deletion is unsupported — observe jobs via progress
+notifications instead. Recurring jobs are Hangfire-only.
 
 ### Application Settings
 
@@ -83,7 +98,7 @@ JobEngineBackgroundJob  ── builds JobEnvelope (serializes payload) ──►
                                                                           │
                                   ┌───────────────────────────────────────┴───────────────┐
                                   ▼                                                         ▼
-                          HangfireJobEngine                                        RabbitMqJobEngine (in progress)
+                          HangfireJobEngine                                        RabbitMqJobEngine
                                   │  enqueues a job whose body calls…                       │  publishes the envelope;
                                   ▼                                                         ▼  an in-process consumer…
                           IJobDispatcher.Dispatch(envelope) ──► resolves IBackgroundJobHandler<TPayload> from DI ──► Execute(...)
@@ -105,7 +120,7 @@ JobEngineBackgroundJob  ── builds JobEnvelope (serializes payload) ──►
 | `VirtoCommerce.BackgroundJobs.Core` | Core | Engine-internal contracts (`IJobEngine`, `IJobDispatcher`, `JobEnvelope`, options) and engine-agnostic implementations (facade, dispatcher, progress, serializer). |
 | `VirtoCommerce.BackgroundJobs.Hangfire` | Engine | Hangfire implementation of `IJobEngine`; reuses the platform's former Hangfire storage/dashboard. Published as a NuGet. |
 | `VirtoCommerce.Platform.Hangfire.Shim` | Compat | Produces a type-forwarding `VirtoCommerce.Platform.Hangfire.dll` for binary compatibility with existing modules. |
-| `VirtoCommerce.BackgroundJobs.RabbitMQ` | Engine | RabbitMQ implementation (connection plumbing in place; engine + consumer in progress). |
+| `VirtoCommerce.BackgroundJobs.RabbitMQ` | Engine | RabbitMQ implementation of `IJobEngine` + the in-process consumer (`RabbitMqJobConsumer`). Published as a NuGet. |
 | `VirtoCommerce.BackgroundJobs.Web` | Web | Module host: `PlatformStartup` (engine/mode selection), `JobsController`, settings & permissions. |
 | `VirtoCommerce.BackgroundJobs.Data` | Data | Module persistence (EF Core). |
 
@@ -118,7 +133,7 @@ JobEngineBackgroundJob  ── builds JobEnvelope (serializes payload) ──►
 | Engine port | `IJobEngine` | The active engine (Hangfire/RabbitMQ). One per instance. |
 | Dispatcher | `IJobDispatcher` | Shared execution path: deserialize → resolve handler → run. |
 | Progress | `IJobProgress` | Reports progress to the admin UI (SignalR). |
-| Recurring jobs | `IRecurringJobService` | Register cron/setting-driven recurring jobs. |
+| Recurring jobs | `IRecurringJobService` | Register cron/setting-driven recurring jobs (Hangfire only). |
 
 ### REST API
 

@@ -56,10 +56,10 @@ public sealed class RabbitMqConnectionProvider : IRabbitMqConnectionProvider
         }
     }
 
-    public async Task<IChannel> CreateChannelAsync(CancellationToken cancellationToken = default)
+    public async Task<IChannel> CreateChannelAsync(CreateChannelOptions? options = null, CancellationToken cancellationToken = default)
     {
         var connection = await GetConnectionAsync(cancellationToken);
-        return await connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        return await connection.CreateChannelAsync(options, cancellationToken);
     }
 
     private ConnectionFactory CreateConnectionFactory()

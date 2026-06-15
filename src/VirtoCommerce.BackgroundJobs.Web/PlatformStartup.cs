@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Services;
 using VirtoCommerce.BackgroundJobs.Hangfire;
+using VirtoCommerce.BackgroundJobs.RabbitMQ.Extensions;
 using VirtoCommerce.Platform.Core.Common;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Modularity;
@@ -75,6 +76,13 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
                 }
             });
         }
+        else if (IsRabbitMq(options) && processes)
+        {
+            // The in-process RabbitMQ consumer drains the queue and dispatches handlers on this instance
+            // (Mode = Worker/Both).
+            Logger.LogInformation("Background jobs: starting RabbitMQ in-process consumer (Mode = {Mode}).", options.Mode);
+            services.AddRabbitMqJobConsumer();
+        }
     }
 
     public void ConfigureServices(IServiceCollection services, IConfiguration config)
@@ -104,16 +112,20 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
             Logger.LogInformation("Background jobs: Hangfire engine registered as the active IJobEngine.");
         }
-        else if (options.Provider.Equals(RabbitMq, StringComparison.OrdinalIgnoreCase))
+        else if (IsRabbitMq(options))
         {
-            // Wired in step 3b (the Web project will reference the RabbitMQ engine project).
-            throw new NotSupportedException(
-                "The 'RabbitMQ' background-job provider is not available yet. Set VirtoCommerce:BackgroundJobs:Provider to 'Hangfire'.");
+            // RabbitMQ options bind from the provider-specific VirtoCommerce:RabbitMQ section; the engine publishes
+            // job envelopes that the in-process consumer (registered in ConfigureHostServices for Worker/Both)
+            // dispatches. RabbitMQ has no recurring-job support, so IRecurringJobService is left to the platform's
+            // NoEngine fallback.
+            services.AddRabbitMqJobEngine(config);
+
+            Logger.LogInformation("Background jobs: RabbitMQ engine registered as the active IJobEngine.");
         }
         else
         {
             throw new NotSupportedException(
-                $"Unknown background-job provider '{options.Provider}'. Supported values: 'Hangfire'.");
+                $"Unknown background-job provider '{options.Provider}'. Supported values: 'Hangfire', 'RabbitMQ'.");
         }
     }
 
@@ -133,4 +145,7 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
     private static bool IsHangfire(BackgroundJobsOptions options) =>
         string.IsNullOrEmpty(options.Provider) || options.Provider.Equals(Hangfire, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsRabbitMq(BackgroundJobsOptions options) =>
+        !string.IsNullOrEmpty(options.Provider) && options.Provider.Equals(RabbitMq, StringComparison.OrdinalIgnoreCase);
 }

@@ -1,3 +1,4 @@
+using System;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,11 +41,22 @@ public class Module : IModule, IHasConfiguration
         // the recurring-job setting watcher and the developer tool. This must run AFTER the platform database is
         // migrated — PostInitialize executes inside the platform's synchronized critical section, after platform
         // migrations, which is exactly where the platform used to call UseHangfire.
-        appBuilder.UseHangfire(Configuration);
+        // Only when Hangfire is the active provider: with another provider (e.g. RabbitMQ) the Hangfire services
+        // are never registered, so UseHangfire would fail resolving Hangfire.IGlobalConfiguration.
+        if (IsHangfireProvider())
+        {
+            appBuilder.UseHangfire(Configuration);
+        }
     }
 
     public void Uninstall()
     {
         // Nothing to do here
+    }
+
+    private bool IsHangfireProvider()
+    {
+        var provider = Configuration.GetValue<string>("VirtoCommerce:BackgroundJobs:Provider");
+        return string.IsNullOrEmpty(provider) || provider.Equals("Hangfire", StringComparison.OrdinalIgnoreCase);
     }
 }
