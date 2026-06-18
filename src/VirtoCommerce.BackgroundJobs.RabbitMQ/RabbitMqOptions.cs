@@ -31,6 +31,12 @@ public class RabbitMqOptions
     public string ClientProvidedName { get; set; } = "VirtoCommerce.BackgroundJobs";
 
     /// <summary>
+    /// URL of the RabbitMQ management UI, surfaced as a developer tool in the platform admin. When not set it
+    /// defaults to <c>http://{HostName}:15672</c> (the management plugin's default endpoint).
+    /// </summary>
+    public string? ManagementUri { get; set; }
+
+    /// <summary>
     /// Number of unacknowledged messages a single consumer prefetches (QoS). Defaults to 1 for fair dispatch.
     /// </summary>
     public ushort PrefetchCount { get; set; } = 1;

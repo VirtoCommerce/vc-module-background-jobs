@@ -15,10 +15,8 @@ using VirtoCommerce.BackgroundJobs.Data.Recurring;
 using VirtoCommerce.BackgroundJobs.Hangfire;
 using VirtoCommerce.BackgroundJobs.RabbitMQ.Extensions;
 using VirtoCommerce.Platform.Core.Common;
-using VirtoCommerce.Platform.Core.Events;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Modularity;
-using VirtoCommerce.Platform.Core.Settings.Events;
 using VirtoCommerce.Platform.Hangfire.Extensions;
 
 namespace VirtoCommerce.BackgroundJobs.Web;
@@ -174,10 +172,10 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
         // The applier (owned by this engine module) drives the active scheduler: it discovers every recurring job
         // declared via AddRecurringJob (platform + modules), resolves the effective cron from settings, and applies
-        // it — re-applying live on setting changes.
+        // it. It runs as a hosted service; live re-application on setting changes is wired in Module.PostInitialize
+        // via RegisterEventHandler (the in-process bus only dispatches to handlers registered that way).
         services.AddSingleton<RecurringJobsApplier>();
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<RecurringJobsApplier>());
-        services.AddSingleton<IEventHandler<ObjectSettingChangedEvent>>(sp => sp.GetRequiredService<RecurringJobsApplier>());
     }
 
     public void Configure(IApplicationBuilder app, IConfiguration config)
