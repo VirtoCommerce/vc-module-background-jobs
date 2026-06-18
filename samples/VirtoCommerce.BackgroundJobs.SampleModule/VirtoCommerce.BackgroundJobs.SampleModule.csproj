@@ -16,7 +16,7 @@
     platform contracts.
   -->
   <ItemGroup>
-    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1039.0-alpha.13312-vcst-5245" />
+    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1039.0-alpha.13313-vcst-5245" />
   </ItemGroup>
 
 </Project>
