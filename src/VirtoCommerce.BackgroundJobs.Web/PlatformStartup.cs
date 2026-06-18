@@ -7,13 +7,18 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using StackExchange.Redis;
 using VirtoCommerce.BackgroundJobs.Core;
+using VirtoCommerce.BackgroundJobs.Core.Recurring;
 using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs.Data.Recurring;
 using VirtoCommerce.BackgroundJobs.Hangfire;
 using VirtoCommerce.BackgroundJobs.RabbitMQ.Extensions;
 using VirtoCommerce.Platform.Core.Common;
+using VirtoCommerce.Platform.Core.Events;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Modularity;
+using VirtoCommerce.Platform.Core.Settings.Events;
 using VirtoCommerce.Platform.Hangfire.Extensions;
 
 namespace VirtoCommerce.BackgroundJobs.Web;
@@ -116,8 +121,8 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
         {
             // RabbitMQ options bind from the provider-specific VirtoCommerce:RabbitMQ section; the engine publishes
             // job envelopes that the in-process consumer (registered in ConfigureHostServices for Worker/Both)
-            // dispatches. RabbitMQ has no recurring-job support, so IRecurringJobService is left to the platform's
-            // NoEngine fallback.
+            // dispatches. The legacy expression-based IRecurringJobService stays Hangfire-only (NoEngine fallback),
+            // but message-based recurring jobs work via the engine-agnostic scheduler registered below.
             services.AddRabbitMqJobEngine(config);
 
             Logger.LogInformation("Background jobs: RabbitMQ engine registered as the active IJobEngine.");
@@ -127,6 +132,52 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
             throw new NotSupportedException(
                 $"Unknown background-job provider '{options.Provider}'. Supported values: 'Hangfire', 'RabbitMQ'.");
         }
+
+        AddRecurringJobScheduler(services, options);
+    }
+
+    /// <summary>
+    /// Registers the engine's <see cref="IRecurringJobScheduler"/> implementation that the platform's applier drives:
+    /// Hangfire uses its native recurring manager; other engines use the in-process cron scheduler backed by a shared
+    /// occurrence marker store (Redis when configured, in-memory otherwise). Settings/enable evaluation and applying
+    /// the declared recurring jobs are owned by the platform's RecurringJobsApplier.
+    /// </summary>
+    private void AddRecurringJobScheduler(IServiceCollection services, BackgroundJobsOptions options)
+    {
+        if (IsHangfire(options))
+        {
+            services.AddTransient<IRecurringJobInvoker, RecurringJobInvoker>();
+            services.AddSingleton<IRecurringJobScheduler, HangfireRecurringJobScheduler>();
+
+            Logger.LogInformation("Background jobs: Hangfire-native recurring scheduler registered.");
+        }
+        else if (IsRabbitMq(options))
+        {
+            services.AddSingleton<IRecurringJobStateStore>(serviceProvider =>
+            {
+                var connection = serviceProvider.GetService<IConnectionMultiplexer>();
+                return connection is not null
+                    ? new RedisRecurringJobStateStore(connection)
+                    : new InMemoryRecurringJobStateStore();
+            });
+
+            services.AddSingleton<GenericRecurringJobScheduler>();
+            services.AddSingleton<IRecurringJobScheduler>(sp => sp.GetRequiredService<GenericRecurringJobScheduler>());
+            services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<GenericRecurringJobScheduler>());
+
+            Logger.LogInformation("Background jobs: in-process recurring scheduler registered.");
+        }
+        else
+        {
+            return;
+        }
+
+        // The applier (owned by this engine module) drives the active scheduler: it discovers every recurring job
+        // declared via AddRecurringJob (platform + modules), resolves the effective cron from settings, and applies
+        // it — re-applying live on setting changes.
+        services.AddSingleton<RecurringJobsApplier>();
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<RecurringJobsApplier>());
+        services.AddSingleton<IEventHandler<ObjectSettingChangedEvent>>(sp => sp.GetRequiredService<RecurringJobsApplier>());
     }
 
     public void Configure(IApplicationBuilder app, IConfiguration config)

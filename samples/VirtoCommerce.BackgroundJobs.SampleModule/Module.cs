@@ -18,6 +18,12 @@ public class Module : IModule
 
         // Register the handler so the active engine's dispatcher can resolve and run it.
         serviceCollection.AddBackgroundJob<SampleJobPayload, SampleJob>();
+
+        // A recurring job is just a handler + a schedule. The active engine (Hangfire/RabbitMQ) fires it on cron
+        // and runs the handler on a worker — identical code on either engine.
+        serviceCollection.AddRecurringJob<SampleRecurringJobPayload, SampleRecurringJob>(schedule => schedule
+            .WithId("BackgroundJobs.Sample.Heartbeat")
+            .WithCron("*/5 * * * *"));
     }
 
     public void PostInitialize(IApplicationBuilder appBuilder)

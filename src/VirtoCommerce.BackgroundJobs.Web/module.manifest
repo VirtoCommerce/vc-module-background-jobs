@@ -4,19 +4,18 @@
   <version>3.1000.0</version>
   <version-tag></version-tag>
 
-  <platformVersion>3.1039.0-alpha.13312-vcst-5245</platformVersion>
+  <platformVersion>3.1039.0-alpha.13313-vcst-5245</platformVersion>
   <dependencies>
-    <!--<dependency id="VirtoCommerce.Core" version="3.1001.2" />-->
   </dependencies>
 
-  <title>VirtoCommerce BackgroundJobs</title>
-  <description>VirtoCommerce BackgroundJobs</description>
+  <title>Background Jobs</title>
+  <description>Handles asynchronous processing, allowing applications to offload time-consuming, repetitive, or resource-heavy tasks outside the platform</description>
 
   <authors>
     <author>Oleg Zhuk</author>
   </authors>
   <owners>
-    <owner>VirtoCommerce</owner>
+    <owner>Virto Commerce</owner>
   </owners>
 
   <projectUrl>https://github.com/VirtoCommerce/vc-module-background-jobs</projectUrl>

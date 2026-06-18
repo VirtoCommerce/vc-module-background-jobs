@@ -1,8 +1,8 @@
 # Background Jobs — Sample Module
 
 A minimal, runnable **consumer module** that demonstrates how to use the Virto Commerce background-jobs
-abstraction: define a payload, implement a handler, register it, and enqueue fire-and-forget jobs **with or
-without progress** — on whichever engine is active (Hangfire or RabbitMQ).
+abstraction: define a payload, implement a handler, register it, enqueue fire-and-forget jobs **with or without
+progress**, and declare a **recurring (cron) job** — on whichever engine is active (Hangfire or RabbitMQ).
 
 It is a single project and references **only `VirtoCommerce.Platform.Core`** — there is no compile-time dependency
 on the Background Jobs module or any engine. The runtime dependency on the engine is declared in `module.manifest`.
@@ -13,7 +13,8 @@ on the Background Jobs module or any engine. The runtime dependency on the engin
 |---|---|
 | [`Jobs/SampleJobPayload.cs`](Jobs/SampleJobPayload.cs) | A serializable payload (`ValueObject`), created via `AbstractTypeFactory` so partners can extend it. |
 | [`Jobs/SampleJob.cs`](Jobs/SampleJob.cs) | An `IBackgroundJobHandler<SampleJobPayload>` handler that reports progress step-by-step via `context.Progress.Report(...)`. |
-| [`Module.cs`](Module.cs) | Registering the handler with `services.AddBackgroundJob<SampleJobPayload, SampleJob>()`. |
+| [`Jobs/SampleRecurringJob.cs`](Jobs/SampleRecurringJob.cs) | A recurring job — the same `IBackgroundJobHandler<TPayload>` contract, no recurring-specific code. |
+| [`Module.cs`](Module.cs) | Registering the handler (`AddBackgroundJob`) and a recurring schedule (`AddRecurringJob`). |
 | [`Controllers/Api/SampleJobsController.cs`](Controllers/Api/SampleJobsController.cs) | Enqueuing via the `IBackgroundJob` facade, with and without progress. |
 
 ## Run it
@@ -67,6 +68,30 @@ var payload = AbstractTypeFactory<SampleJobPayload>.TryCreateInstance();
 payload.Message = "hello";
 await backgroundJob.Enqueue(payload, new EnqueueOptions { ReportProgress = true });
 ```
+
+### Recurring job
+
+A recurring job is just a handler + a schedule — declared once at registration, no recurring-specific contract.
+It runs on whichever engine is active (Hangfire-native scheduling, or the in-process cron scheduler for RabbitMQ).
+
+```csharp
+// A plain handler.
+public class SampleRecurringJob(ILogger<SampleRecurringJob> logger) : IBackgroundJobHandler<SampleRecurringJobPayload>
+{
+    public Task Execute(SampleRecurringJobPayload payload, IJobExecutionContext context, CancellationToken ct = default)
+    {
+        logger.LogInformation("SampleRecurringJob fired at {Utc:o}", DateTime.UtcNow);
+        return Task.CompletedTask;
+    }
+}
+
+// Register handler + schedule (Module.Initialize).
+services.AddRecurringJob<SampleRecurringJobPayload, SampleRecurringJob>(s => s
+    .WithId("BackgroundJobs.Sample.Heartbeat")
+    .WithCron("*/5 * * * *"));   // every 5 minutes
+```
+With Hangfire it appears in the `/hangfire` Recurring Jobs dashboard; with RabbitMQ the in-process scheduler fires
+it (exactly once across the fleet) and enqueues it for a worker.
 
 ## License
 

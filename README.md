@@ -67,7 +67,15 @@ failed job by re-publishing with an incremented attempt up to `MaxRetryAttempts`
 job is routed to a dead-letter queue (`{queue}.dlq`, carrying `x-original-queue`/`x-attempts`/`x-death-reason`
 headers) for inspection or replay — or dropped if `UseDeadLetterQueue` is `false`. RabbitMQ keeps no job ledger,
 so `GET api/platform/jobs/{id}` reports `Unknown` and job deletion is unsupported — observe jobs via progress
-notifications instead. Recurring jobs are Hangfire-only.
+notifications instead.
+
+**Recurring jobs** work on **either** engine. A recurring job is an ordinary `IBackgroundJobHandler<TPayload>` plus a
+schedule declared with `AddRecurringJob` (see Usage). On Hangfire they use Hangfire's native recurring scheduler
+(persisted, shown in the dashboard); on RabbitMQ (or any non-Hangfire engine) an in-process cron scheduler fires
+each occurrence and enqueues the payload, with fleet-safe exactly-once firing via a distributed lock + a shared
+occurrence marker (Redis when configured, in-memory for a single instance). The legacy expression-based
+`IRecurringJobService` remains Hangfire-only for backward compatibility. If no engine module is installed, the
+platform still boots and logs a warning that recurring jobs are not scheduled.
 
 ### Application Settings
 
@@ -133,7 +141,9 @@ JobEngineBackgroundJob  ── builds JobEnvelope (serializes payload) ──►
 | Engine port | `IJobEngine` | The active engine (Hangfire/RabbitMQ). One per instance. |
 | Dispatcher | `IJobDispatcher` | Shared execution path: deserialize → resolve handler → run. |
 | Progress | `IJobProgress` | Reports progress to the admin UI (SignalR). |
-| Recurring jobs | `IRecurringJobService` | Register cron/setting-driven recurring jobs (Hangfire only). |
+| Recurring registration | `AddRecurringJob<TPayload,THandler>` | Declare a handler + cron/setting-driven schedule (engine-agnostic). |
+| Recurring scheduler port | `IRecurringJobScheduler` | Engine impl that schedules recurring jobs (Hangfire-native / in-process cron); NoEngine fallback warns. |
+| Legacy recurring | `IRecurringJobService` | Expression-based cron registration (Hangfire only; back-compat). |
 
 ### REST API
 
@@ -172,6 +182,26 @@ payload.CustomerEmail = order.Email;
 await jobs.Enqueue(payload);                                            // fire-and-forget
 await jobs.Enqueue(payload, new EnqueueOptions { ReportProgress = true }); // with progress
 ```
+
+### Recurring jobs
+
+A recurring job is the same handler declared with a schedule — no recurring-specific contract. Works identically on
+Hangfire and RabbitMQ.
+
+```csharp
+// Explicit cron
+services.AddRecurringJob<SendDigestPayload, SendDigestJob>(s => s
+    .WithId("SendDigest")
+    .WithCron("0 7 * * *")        // 5- or 6-field cron
+    .WithQueue("maintenance"));   // optional
+
+// Setting-driven (enabler on/off + cron setting; re-applied live when either setting changes)
+services.AddRecurringJob<PrunePayload, PruneHandler>(s => s
+    .WithId("Prune")
+    .FromSettings(EnablePruneSetting, CronPruneSetting));
+```
+On each occurrence the active engine runs the handler on a worker. The platform applies these declarations to the
+active `IRecurringJobScheduler`; with no engine installed it logs a warning instead of failing.
 
 A complete, runnable example lives in [`samples/VirtoCommerce.BackgroundJobs.SampleModule`](samples/VirtoCommerce.BackgroundJobs.SampleModule/README.md).
 

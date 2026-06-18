@@ -1,15 +1,13 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <SonarQubeTestProject>false</SonarQubeTestProject>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1039.0-alpha.13312-vcst-5245" />
+    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1039.0-alpha.13313-vcst-5245" />
+    <PackageReference Include="StackExchange.Redis" Version="2.13.17" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Core\VirtoCommerce.BackgroundJobs.Core.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Repositories\" />
   </ItemGroup>
 </Project>

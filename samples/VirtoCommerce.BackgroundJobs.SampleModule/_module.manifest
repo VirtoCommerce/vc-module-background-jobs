@@ -4,7 +4,7 @@
   <version>3.1000.0</version>
   <version-tag></version-tag>
 
-  <platformVersion>3.1038.0-alpha.13304-vcst-5245</platformVersion>
+  <platformVersion>3.1039.0-alpha.13313-vcst-5245</platformVersion>
   <dependencies>
     <dependency id="VirtoCommerce.BackgroundJobs" version="3.1000.0" />
   </dependencies>
@@ -13,10 +13,10 @@
   <description>Sample consumer module demonstrating background-job usage: define a payload + handler and enqueue fire-and-forget jobs with or without progress, on whichever engine is active.</description>
 
   <authors>
-    <author>Virto Commerce</author>
+    <author>Oleg Zhuk</author>
   </authors>
   <owners>
-    <owner>VirtoCommerce</owner>
+    <owner>Virto Commerce</owner>
   </owners>
 
   <projectUrl>https://github.com/VirtoCommerce/vc-module-background-jobs</projectUrl>
