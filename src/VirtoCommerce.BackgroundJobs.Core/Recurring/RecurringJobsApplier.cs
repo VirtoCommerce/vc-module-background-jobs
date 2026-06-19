@@ -24,15 +24,17 @@ namespace VirtoCommerce.BackgroundJobs.Core.Recurring;
 public sealed class RecurringJobsApplier : BackgroundService, IEventHandler<ObjectSettingChangedEvent>
 {
     private readonly IReadOnlyList<RecurringJobRegistration> _registrations;
-    private readonly IRecurringJobScheduler _scheduler;
+    private readonly IRecurringJobScheduler? _scheduler;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<RecurringJobsApplier> _logger;
 
     public RecurringJobsApplier(
         IEnumerable<RecurringJobRegistration> registrations,
-        IRecurringJobScheduler scheduler,
         IServiceProvider serviceProvider,
-        ILogger<RecurringJobsApplier> logger)
+        ILogger<RecurringJobsApplier> logger,
+        // Optional: supplied by the active engine (Hangfire-native or the in-process cron scheduler). Null when no
+        // engine registered one — every declared recurring job is then skipped with an actionable warning.
+        IRecurringJobScheduler? scheduler = null)
     {
         _registrations = registrations.ToList();
         _scheduler = scheduler;
@@ -44,6 +46,14 @@ public sealed class RecurringJobsApplier : BackgroundService, IEventHandler<Obje
     {
         if (_registrations.Count == 0)
         {
+            return;
+        }
+
+        if (_scheduler is null)
+        {
+            _logger.LogWarning(
+                "Background jobs: {Count} recurring job(s) are declared but no engine registered a recurring scheduler, so none will run. {Message}",
+                _registrations.Count, BackgroundJobEngineNotInstalledException.DefaultMessage);
             return;
         }
 
@@ -65,6 +75,11 @@ public sealed class RecurringJobsApplier : BackgroundService, IEventHandler<Obje
 
     public async Task Handle(ObjectSettingChangedEvent message)
     {
+        if (_scheduler is null)
+        {
+            return;
+        }
+
         var changed = message.ChangedEntries
             .Where(x => x.EntryState is EntryState.Modified or EntryState.Added)
             .Select(x => x.NewEntry.Name)
@@ -110,13 +125,14 @@ public sealed class RecurringJobsApplier : BackgroundService, IEventHandler<Obje
             cron = registration.CronExpression;
         }
 
+        // Both callers (ExecuteAsync / Handle) return early when _scheduler is null, so it is non-null here.
         if (enabled && !string.IsNullOrWhiteSpace(cron))
         {
-            await _scheduler.AddOrUpdate(registration, cron!, cancellationToken);
+            await _scheduler!.AddOrUpdate(registration, cron!, cancellationToken);
         }
         else
         {
-            await _scheduler.Remove(registration.Id, cancellationToken);
+            await _scheduler!.Remove(registration.Id, cancellationToken);
         }
     }
 }

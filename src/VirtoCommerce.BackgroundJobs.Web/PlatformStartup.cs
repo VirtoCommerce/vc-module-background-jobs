@@ -5,10 +5,11 @@ using Hangfire;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using StackExchange.Redis;
 using VirtoCommerce.BackgroundJobs.Core;
+using VirtoCommerce.BackgroundJobs.Web.Infrastructure.HealthChecks;
 using VirtoCommerce.BackgroundJobs.Core.Recurring;
 using VirtoCommerce.BackgroundJobs.Core.Services;
 using VirtoCommerce.BackgroundJobs.Data.Recurring;
@@ -32,9 +33,6 @@ namespace VirtoCommerce.BackgroundJobs.Web;
 /// </summary>
 public class PlatformStartup : IPlatformStartup, IHasLogger
 {
-    private const string Hangfire = "Hangfire";
-    private const string RabbitMq = "RabbitMQ";
-
     /// <summary>
     /// Logger assigned by the platform during startup discovery (the platform injects it because this class
     /// implements <see cref="IHasLogger"/>).
@@ -95,14 +93,21 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
         Logger.LogInformation(
             "Background jobs: selected provider '{Provider}', mode '{Mode}', default queue '{DefaultQueue}'.",
-            IsHangfire(options) ? Hangfire : options.Provider, options.Mode, options.DefaultQueue);
+            IsHangfire(options) ? BackgroundJobsProviders.Hangfire : options.Provider, options.Mode, options.DefaultQueue);
 
-        // Engine-agnostic services (always registered — producers need to enqueue).
+        // Engine-agnostic services (always registered — producers need to enqueue; the facade's IJobEngine is an
+        // optional dependency, so it resolves even with no engine and throws an actionable error on use).
         services.AddSingleton<IJobPayloadSerializer, JsonJobPayloadSerializer>();
         services.AddSingleton<IJobDispatcher, DefaultJobDispatcher>();
         services.AddScoped<IBackgroundJob, JobEngineBackgroundJob>();
 
-        // Select the active engine.
+        // The recurring applier is engine-agnostic and always registered; it drives whatever IRecurringJobScheduler
+        // the active engine (built-in or custom) registers, and warns when none is present.
+        services.AddSingleton<RecurringJobsApplier>();
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<RecurringJobsApplier>());
+
+        // Select the active engine. Built-in engines register here; an unknown provider is left for a custom engine
+        // module to satisfy (it self-activates in its own IPlatformStartup and registers IJobEngine).
         if (IsHangfire(options))
         {
             // Hangfire storage/DI (custom extension moved from the platform) + the legacy
@@ -117,21 +122,26 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
         }
         else if (IsRabbitMq(options))
         {
-            // RabbitMQ options bind from the provider-specific VirtoCommerce:RabbitMQ section; the engine publishes
-            // job envelopes that the in-process consumer (registered in ConfigureHostServices for Worker/Both)
-            // dispatches. The legacy expression-based IRecurringJobService stays Hangfire-only (NoEngine fallback),
-            // but message-based recurring jobs work via the engine-agnostic scheduler registered below.
             services.AddRabbitMqJobEngine(config);
 
             Logger.LogInformation("Background jobs: RabbitMQ engine registered as the active IJobEngine.");
         }
         else
         {
-            throw new NotSupportedException(
-                $"Unknown background-job provider '{options.Provider}'. Supported values: 'Hangfire', 'RabbitMQ'.");
+            Logger.LogInformation(
+                "Background jobs: provider '{Provider}' is not built-in; expecting a custom engine module to register IJobEngine.",
+                options.Provider);
         }
 
         AddRecurringJobScheduler(services, options);
+
+        // Surface background-job readiness on /health: unhealthy when no engine is registered for the configured
+        // provider. The check resolves IJobEngine optionally, so it reports the problem instead of failing.
+        services.AddHealthChecks()
+            .AddCheck<BackgroundJobsHealthCheck>(
+                "Background jobs",
+                failureStatus: HealthStatus.Unhealthy,
+                tags: ["BackgroundJobs"]);
     }
 
     /// <summary>
@@ -144,6 +154,7 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
     {
         if (IsHangfire(options))
         {
+            // Hangfire schedules recurring jobs natively (persisted, shown in the dashboard).
             services.AddTransient<IRecurringJobInvoker, RecurringJobInvoker>();
             services.AddSingleton<IRecurringJobScheduler, HangfireRecurringJobScheduler>();
 
@@ -151,31 +162,14 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
         }
         else if (IsRabbitMq(options))
         {
-            services.AddSingleton<IRecurringJobStateStore>(serviceProvider =>
-            {
-                var connection = serviceProvider.GetService<IConnectionMultiplexer>();
-                return connection is not null
-                    ? new RedisRecurringJobStateStore(connection)
-                    : new InMemoryRecurringJobStateStore();
-            });
-
-            services.AddSingleton<GenericRecurringJobScheduler>();
-            services.AddSingleton<IRecurringJobScheduler>(sp => sp.GetRequiredService<GenericRecurringJobScheduler>());
-            services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<GenericRecurringJobScheduler>());
+            // RabbitMQ has no native recurring scheduler — reuse the in-process cron scheduler.
+            services.AddInProcessRecurringScheduler();
 
             Logger.LogInformation("Background jobs: in-process recurring scheduler registered.");
         }
-        else
-        {
-            return;
-        }
 
-        // The applier (owned by this engine module) drives the active scheduler: it discovers every recurring job
-        // declared via AddRecurringJob (platform + modules), resolves the effective cron from settings, and applies
-        // it. It runs as a hosted service; live re-application on setting changes is wired in Module.PostInitialize
-        // via RegisterEventHandler (the in-process bus only dispatches to handlers registered that way).
-        services.AddSingleton<RecurringJobsApplier>();
-        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<RecurringJobsApplier>());
+        // For a custom (non-built-in) provider, the engine module registers its own IRecurringJobScheduler — or calls
+        // AddInProcessRecurringScheduler(). The always-registered RecurringJobsApplier (ConfigureServices) drives it.
     }
 
     public void Configure(IApplicationBuilder app, IConfiguration config)
@@ -193,8 +187,8 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
     }
 
     private static bool IsHangfire(BackgroundJobsOptions options) =>
-        string.IsNullOrEmpty(options.Provider) || options.Provider.Equals(Hangfire, StringComparison.OrdinalIgnoreCase);
+        string.IsNullOrEmpty(options.Provider) || options.Provider.Equals(BackgroundJobsProviders.Hangfire, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsRabbitMq(BackgroundJobsOptions options) =>
-        !string.IsNullOrEmpty(options.Provider) && options.Provider.Equals(RabbitMq, StringComparison.OrdinalIgnoreCase);
+        !string.IsNullOrEmpty(options.Provider) && options.Provider.Equals(BackgroundJobsProviders.RabbitMq, StringComparison.OrdinalIgnoreCase);
 }

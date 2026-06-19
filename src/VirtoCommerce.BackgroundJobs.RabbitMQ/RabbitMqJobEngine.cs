@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using RabbitMQ.Client;
+using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs.Core.Services;
 using VirtoCommerce.Platform.Core.Jobs;
@@ -29,7 +30,7 @@ namespace VirtoCommerce.BackgroundJobs.RabbitMQ;
 /// </summary>
 public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
 {
-    public const string ProviderNameValue = "RabbitMQ";
+    public const string ProviderNameValue = BackgroundJobsProviders.RabbitMq;
 
     private static readonly CreateChannelOptions _publishChannelOptions = new(
         publisherConfirmationsEnabled: true,

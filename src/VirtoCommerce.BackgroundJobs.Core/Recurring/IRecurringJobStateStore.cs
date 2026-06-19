@@ -6,7 +6,7 @@ namespace VirtoCommerce.BackgroundJobs.Core.Recurring;
 
 /// <summary>
 /// Shared, durable store of the last fired occurrence per recurring job. Used by the scheduler to de-duplicate
-/// firing across a multi-instance fleet (see <see cref="RecurringJobSchedulerHostedService"/>): the distributed
+/// firing across a multi-instance fleet (see <see cref="GenericRecurringJobScheduler"/>): the distributed
 /// lock serializes the check-and-set, and this marker guarantees a given occurrence is enqueued exactly once even
 /// when instances tick at slightly different times.
 /// <para>The default implementation is DB-backed so it is shared across all instances and survives a cache flush.</para>

@@ -79,14 +79,10 @@ platform still boots and logs a warning that recurring jobs are not scheduled.
 
 ### Application Settings
 
-| Setting | Type | Default | Description |
-|---|---|---|---|
-| `BackgroundJobs.Provider` | ShortText (`Hangfire`/`RabbitMQ`) | `Hangfire` | Active engine (mirrors the config key; requires restart). |
-| `BackgroundJobs.DefaultQueue` | ShortText | `default` | Default queue for enqueued jobs. |
-| `BackgroundJobs.MaxRetryAttempts` | Integer | `3` | Default automatic retry attempts on failure. |
-
-> The active `Provider` and `Mode` are read from configuration at startup; the settings above surface them in the
-> admin UI and require a restart to apply.
+This module exposes **no platform settings**. All background-job configuration — `Provider`, `Mode`, `DefaultQueue`,
+`MaxRetryAttempts`, and the provider-specific sections — is a deployment-time concern configured **only** in
+`appsettings.json` (`VirtoCommerce:BackgroundJobs`, `VirtoCommerce:Hangfire`, `VirtoCommerce:RabbitMQ`) and read at
+startup. These are ops decisions, not admin-UI toggles.
 
 ### Permissions
 
@@ -125,12 +121,12 @@ JobEngineBackgroundJob  ── builds JobEnvelope (serializes payload) ──►
 
 | Project | Layer | Purpose |
 |---|---|---|
-| `VirtoCommerce.BackgroundJobs.Core` | Core | Engine-internal contracts (`IJobEngine`, `IJobDispatcher`, `JobEnvelope`, options) and engine-agnostic implementations (facade, dispatcher, progress, serializer). |
+| `VirtoCommerce.BackgroundJobs.Core` | Core | Engine-internal contracts (`IJobEngine`, `IJobDispatcher`, `JobEnvelope`, options) and engine-agnostic implementations (facade, dispatcher, progress, serializer). Published as a NuGet so custom engines can reference the port. |
 | `VirtoCommerce.BackgroundJobs.Hangfire` | Engine | Hangfire implementation of `IJobEngine`; reuses the platform's former Hangfire storage/dashboard. Published as a NuGet. |
 | `VirtoCommerce.Platform.Hangfire.Shim` | Compat | Produces a type-forwarding `VirtoCommerce.Platform.Hangfire.dll` for binary compatibility with existing modules. |
 | `VirtoCommerce.BackgroundJobs.RabbitMQ` | Engine | RabbitMQ implementation of `IJobEngine` + the in-process consumer (`RabbitMqJobConsumer`). Published as a NuGet. |
 | `VirtoCommerce.BackgroundJobs.Web` | Web | Module host: `PlatformStartup` (engine/mode selection), `JobsController`, settings & permissions. |
-| `VirtoCommerce.BackgroundJobs.Data` | Data | Module persistence (EF Core). |
+| `VirtoCommerce.BackgroundJobs.Data` | Data | Module persistence (EF Core) + the reusable in-process recurring scheduler (`AddInProcessRecurringScheduler`) and its Redis/in-memory occurrence-marker stores. Published as a NuGet. |
 
 ### Key Services
 
@@ -204,6 +200,63 @@ On each occurrence the active engine runs the handler on a worker. The platform 
 active `IRecurringJobScheduler`; with no engine installed it logs a warning instead of failing.
 
 A complete, runnable example lives in [`samples/VirtoCommerce.BackgroundJobs.SampleModule`](samples/VirtoCommerce.BackgroundJobs.SampleModule/README.md).
+
+## Writing a custom engine
+
+The engine selector is open: any provider name other than `Hangfire`/`RabbitMQ` is left for a custom module to
+satisfy. A custom engine ships as a normal Virto Commerce module that depends on this one, references
+`VirtoCommerce.BackgroundJobs.Core` (the engine port + agnostic implementations) and, optionally,
+`VirtoCommerce.BackgroundJobs.Data` (the reusable in-process recurring scheduler). Both are published as NuGet
+packages.
+
+### What you implement vs. reuse
+
+| Concern | What to do |
+|---|---|
+| Engine port (**required**) | Implement `IJobEngine` — `ProviderName`, `Enqueue(JobEnvelope, EnqueueOptions, ct)`, `GetStatus(jobId, ct)`, `Delete(jobId, ct)`. |
+| Expression enqueue (optional) | Implement `IExpressionJobEngine` only if your engine supports it. Most don't — the facade already throws `NotSupportedException` for expression enqueue when it's absent. |
+| Processing host | An `IHostedService` (like `RabbitMqJobConsumer`) that consumes/receives and calls `IJobDispatcher.Dispatch(envelope, context, ct)`. Register it only when active **and** `Mode != Producer`. A push engine instead exposes an inbound callback controller. |
+| Recurring | Either call `services.AddInProcessRecurringScheduler()` (reuses the Cronos + distributed-lock + occurrence-marker scheduler, enqueues via `IBackgroundJob`), **or** implement `IRecurringJobScheduler` natively. |
+| Reuse — do **not** reimplement | `IBackgroundJob`, `IJobDispatcher`, `IJobPayloadSerializer`, `JobEnvelope`, `JobExecutionContext`, progress, `RecurringJobsApplier`, `IRecurringJobStateStore` + its Redis/in-memory impls. The host module registers these once. |
+
+### Recipe
+
+```csharp
+// module.manifest — depend on the engine host module
+//   <dependency id="VirtoCommerce.BackgroundJobs" version="3.x" />
+
+// PlatformStartup : IPlatformStartup — self-activate on the configured provider name.
+// Use the host module's IConfiguration.IsBackgroundJobsProvider(...) helper instead of re-implementing the check.
+public void ConfigureServices(IServiceCollection services, IConfiguration config)
+{
+    if (!config.IsBackgroundJobsProvider("MyEngine")) return;   // VirtoCommerce:BackgroundJobs:Provider == "MyEngine"
+
+    services.Configure<MyEngineOptions>(config.GetSection("VirtoCommerce:MyEngine"));
+    services.AddSingleton<IJobEngine, MyJobEngine>();   // REQUIRED
+    services.AddInProcessRecurringScheduler();          // reuse cron recurring, OR register your own IRecurringJobScheduler
+}
+
+public void ConfigureHostServices(IServiceCollection services, IConfiguration config)
+{
+    if (config.IsBackgroundJobsProvider("MyEngine") && GetMode(config) != BackgroundJobsMode.Producer)
+        services.AddHostedService<MyJobConsumer>();      // drain + IJobDispatcher.Dispatch
+}
+```
+
+`IsBackgroundJobsProvider` / `GetBackgroundJobsProvider` (in `VirtoCommerce.BackgroundJobs.Core`) read
+`VirtoCommerce:BackgroundJobs:Provider` and treat an empty value as `Hangfire`, so every engine module checks the
+selector the same way without duplicating string comparisons.
+
+Because the facade (`IBackgroundJob`) takes `IJobEngine` as an **optional** dependency, the platform boots even with
+no engine: enqueue then throws `BackgroundJobEngineNotInstalledException` with an actionable message, and declared
+recurring jobs are skipped with a warning. On startup the host module logs whether the active engine's `ProviderName`
+matches the configured `Provider`, and a **`Background jobs` health check** reports on `/health` (Unhealthy when no
+engine is registered, Degraded on a provider/engine mismatch) — so a missing or mis-named custom engine is easy to spot.
+
+A complete, buildable **push-based** engine — Google Cloud Tasks, which POSTs to an HTTP callback instead of running a
+consumer — lives in [`samples/VirtoCommerce.BackgroundJobs.GoogleCloudTasks`](samples/VirtoCommerce.BackgroundJobs.GoogleCloudTasks/README.md).
+It confirms the contracts don't assume a pull/consumer model: a push engine adds an inbound callback controller and
+reuses `IJobDispatcher` — no new platform contract needed.
 
 ## Documentation
 

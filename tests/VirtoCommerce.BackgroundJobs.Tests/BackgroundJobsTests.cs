@@ -85,11 +85,11 @@ public class BackgroundJobsTests
         userResolver.Setup(x => x.GetCurrentUserName()).Returns("tester");
 
         var sut = new JobEngineBackgroundJob(
-            engine.Object,
             new JsonJobPayloadSerializer(),
             Options.Create(new BackgroundJobsOptions { DefaultQueue = "default" }),
             Mock.Of<IPushNotificationManager>(),
-            userResolver.Object);
+            userResolver.Object,
+            engine.Object);
 
         var jobId = await sut.Enqueue(new TestPayload { Value = "hi" }, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -109,13 +109,31 @@ public class BackgroundJobsTests
         engine.SetupGet(x => x.ProviderName).Returns("RabbitMQ");
 
         var sut = new JobEngineBackgroundJob(
-            engine.Object,
             new JsonJobPayloadSerializer(),
             Options.Create(new BackgroundJobsOptions()),
             Mock.Of<IPushNotificationManager>(),
-            Mock.Of<IUserNameResolver>());
+            Mock.Of<IUserNameResolver>(),
+            engine.Object);
 
         Assert.Throws<NotSupportedException>(() => sut.Enqueue(() => Noop()));
+    }
+
+    [Fact]
+    public async Task Enqueue_Throws_BackgroundJobEngineNotInstalled_When_No_Engine()
+    {
+        // The facade is always registered; with no engine installed (IJobEngine == null) enqueue must throw the
+        // actionable BackgroundJobEngineNotInstalledException instead of failing DI resolution.
+        var sut = new JobEngineBackgroundJob(
+            new JsonJobPayloadSerializer(),
+            Options.Create(new BackgroundJobsOptions()),
+            Mock.Of<IPushNotificationManager>(),
+            Mock.Of<IUserNameResolver>(),
+            engine: null);
+
+        await Assert.ThrowsAsync<BackgroundJobEngineNotInstalledException>(
+            () => sut.Enqueue(new TestPayload { Value = "x" }, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Throws<BackgroundJobEngineNotInstalledException>(() => sut.Enqueue(() => Noop()));
     }
 
     private static void Noop()

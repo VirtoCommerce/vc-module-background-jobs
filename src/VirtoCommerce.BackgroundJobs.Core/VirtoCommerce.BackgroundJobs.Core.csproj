@@ -3,6 +3,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <SonarQubeTestProject>false</SonarQubeTestProject>
+    <!-- Packable so custom engine modules (in other repos) can reference the engine port + reusable implementations. -->
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <NoWarn>1591;NU5048;NU1608</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1039.0-alpha.13313-vcst-5245" />

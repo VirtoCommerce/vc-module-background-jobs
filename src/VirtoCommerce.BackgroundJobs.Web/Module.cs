@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Recurring;
+using VirtoCommerce.BackgroundJobs.Core.Services;
 using VirtoCommerce.BackgroundJobs.RabbitMQ;
 using VirtoCommerce.Platform.Core;
 using VirtoCommerce.Platform.Core.DeveloperTools;
@@ -36,9 +38,8 @@ public class Module : IModule, IHasConfiguration
     {
         var serviceProvider = appBuilder.ApplicationServices;
 
-        // Register settings
-        var settingsRegistrar = serviceProvider.GetRequiredService<ISettingsRegistrar>();
-        settingsRegistrar.RegisterSettings(ModuleConstants.Settings.AllSettings, ModuleInfo.Id);
+        // No platform settings: all background-job configuration (provider, mode, default queue, retries) is a
+        // deployment-time concern read from appsettings.json (VirtoCommerce:BackgroundJobs) at startup.
 
         // Register permissions
         var permissionsRegistrar = serviceProvider.GetRequiredService<IPermissionsRegistrar>();
@@ -60,6 +61,10 @@ public class Module : IModule, IHasConfiguration
             RegisterRabbitMqDeveloperTool(serviceProvider);
         }
 
+        // Validate that an engine matching the configured provider is actually active (catches "Provider=X but
+        // nothing registered an IJobEngine for X" — e.g. a custom engine module is missing or didn't self-activate).
+        ValidateActiveEngine(serviceProvider);
+
         // Re-apply setting-driven recurring jobs live when their enabler/cron settings change. The in-process bus
         // only dispatches to handlers registered via RegisterEventHandler (not via DI IEventHandler<> resolution),
         // so the applier must be registered here.
@@ -71,17 +76,34 @@ public class Module : IModule, IHasConfiguration
         // Nothing to do here
     }
 
-    private bool IsHangfireProvider()
+    private void ValidateActiveEngine(IServiceProvider serviceProvider)
     {
-        var provider = Configuration.GetValue<string>("VirtoCommerce:BackgroundJobs:Provider");
-        return string.IsNullOrEmpty(provider) || provider.Equals("Hangfire", StringComparison.OrdinalIgnoreCase);
+        var logger = serviceProvider.GetService<ILoggerFactory>()?.CreateLogger<Module>();
+        var configuredProvider = Configuration.GetBackgroundJobsProvider();
+
+        var engine = serviceProvider.GetService<IJobEngine>();
+        switch (BackgroundJobsEngineStatusEvaluator.Evaluate(engine, configuredProvider))
+        {
+            case BackgroundJobsEngineStatus.NoEngine:
+                logger?.LogWarning(
+                    "Background jobs: provider '{Provider}' is configured but no IJobEngine is registered. " +
+                    "Enqueue will fail until an engine module for this provider is installed and self-activates.",
+                    configuredProvider);
+                break;
+            case BackgroundJobsEngineStatus.ProviderMismatch:
+                logger?.LogWarning(
+                    "Background jobs: configured provider '{Provider}' does not match the active engine '{EngineProvider}'.",
+                    configuredProvider, engine!.ProviderName);
+                break;
+            default:
+                logger?.LogInformation("Background jobs: active engine '{EngineProvider}' is ready.", engine!.ProviderName);
+                break;
+        }
     }
 
-    private bool IsRabbitMqProvider()
-    {
-        var provider = Configuration.GetValue<string>("VirtoCommerce:BackgroundJobs:Provider");
-        return provider is not null && provider.Equals("RabbitMQ", StringComparison.OrdinalIgnoreCase);
-    }
+    private bool IsHangfireProvider() => Configuration.IsBackgroundJobsProvider(BackgroundJobsProviders.Hangfire);
+
+    private bool IsRabbitMqProvider() => Configuration.IsBackgroundJobsProvider(BackgroundJobsProviders.RabbitMq);
 
     private static void RegisterRabbitMqDeveloperTool(IServiceProvider serviceProvider)
     {

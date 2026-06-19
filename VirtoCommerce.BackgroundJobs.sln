@@ -37,6 +37,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{5D20
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VirtoCommerce.BackgroundJobs.SampleModule", "samples\VirtoCommerce.BackgroundJobs.SampleModule\VirtoCommerce.BackgroundJobs.SampleModule.csproj", "{91ACF631-4964-473A-94FD-7B5CB2BE374B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VirtoCommerce.BackgroundJobs.GoogleCloudTasks", "samples\VirtoCommerce.BackgroundJobs.GoogleCloudTasks\VirtoCommerce.BackgroundJobs.GoogleCloudTasks.csproj", "{781B19C6-C376-4A2D-A9EC-45EF2F620047}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -143,6 +145,18 @@ Global
 		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Release|x64.Build.0 = Release|Any CPU
 		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Release|x86.ActiveCfg = Release|Any CPU
 		{91ACF631-4964-473A-94FD-7B5CB2BE374B}.Release|x86.Build.0 = Release|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Debug|x64.Build.0 = Debug|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Debug|x86.Build.0 = Debug|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Release|Any CPU.Build.0 = Release|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Release|x64.ActiveCfg = Release|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Release|x64.Build.0 = Release|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Release|x86.ActiveCfg = Release|Any CPU
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -156,6 +170,7 @@ Global
 		{1D2DC2B6-BA21-4207-A7DD-AC1B8EFF8E2C} = {DB253607-58BB-46C5-A569-FCF678F1216B}
 		{9337DCEE-CE12-4502-A55B-66C7DD8C7EAF} = {DB253607-58BB-46C5-A569-FCF678F1216B}
 		{91ACF631-4964-473A-94FD-7B5CB2BE374B} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
+		{781B19C6-C376-4A2D-A9EC-45EF2F620047} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {64EF57B5-4469-42C2-8DA4-4F02B47BF3FD}

@@ -17,11 +17,13 @@ namespace VirtoCommerce.BackgroundJobs.Core.Services;
 /// enqueue is forwarded to <see cref="IExpressionJobEngine"/> when the active engine supports it.
 /// </summary>
 public sealed class JobEngineBackgroundJob(
-    IJobEngine engine,
     IJobPayloadSerializer serializer,
     IOptions<BackgroundJobsOptions> options,
     IPushNotificationManager pushNotificationManager,
-    IUserNameResolver userNameResolver) : IBackgroundJob
+    IUserNameResolver userNameResolver,
+    // Optional: provided by the active engine module. Null when no engine is installed — enqueue then throws the
+    // actionable BackgroundJobEngineNotInstalledException instead of failing DI resolution of this facade.
+    IJobEngine? engine = null) : IBackgroundJob
 {
     private readonly BackgroundJobsOptions _options = options.Value;
 
@@ -34,6 +36,11 @@ public sealed class JobEngineBackgroundJob(
         where TPayload : class
     {
         ArgumentNullException.ThrowIfNull(payload);
+
+        if (engine is null)
+        {
+            throw new BackgroundJobEngineNotInstalledException();
+        }
 
         var (payloadType, payloadJson) = serializer.Serialize(payload);
         var userName = userNameResolver.GetCurrentUserName();
@@ -67,6 +74,11 @@ public sealed class JobEngineBackgroundJob(
 
     private string EnqueueExpression(Func<IExpressionJobEngine, string> enqueue)
     {
+        if (engine is null)
+        {
+            throw new BackgroundJobEngineNotInstalledException();
+        }
+
         if (engine is IExpressionJobEngine expressionEngine)
         {
             return enqueue(expressionEngine);
@@ -74,6 +86,6 @@ public sealed class JobEngineBackgroundJob(
 
         throw new NotSupportedException(
             $"Expression-based enqueue requires the Hangfire provider; the active provider is '{engine.ProviderName}'. " +
-            "Use Enqueue(payload) with an IBackgroundJob<TPayload> handler instead.");
+            "Use Enqueue(payload) with an IBackgroundJobHandler<TPayload> handler instead.");
     }
 }

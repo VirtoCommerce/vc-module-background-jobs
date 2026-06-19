@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<module>
+  <id>VirtoCommerce.BackgroundJobs.GoogleCloudTasks</id>
+  <version>3.1000.0</version>
+  <version-tag></version-tag>
+
+  <platformVersion>3.1039.0-alpha.13313-vcst-5245</platformVersion>
+  <dependencies>
+    <dependency id="VirtoCommerce.BackgroundJobs" version="3.1000.0" />
+  </dependencies>
+
+  <title>Google Cloud Tasks Engine</title>
+  <description>Worked-example custom engine: a push-based background-job provider backed by Google Cloud Tasks. Self-activates when VirtoCommerce:BackgroundJobs:Provider is "GoogleCloudTasks"; enqueues HTTP-target tasks that POST back to an in-platform callback endpoint, which dispatches the job handler.</description>
+
+  <authors>
+    <author>Oleg Zhuk</author>
+  </authors>
+  <owners>
+    <owner>Virto Commerce</owner>
+  </owners>
+
+  <projectUrl>https://github.com/VirtoCommerce/vc-module-background-jobs</projectUrl>
+  <requireLicenseAcceptance>false</requireLicenseAcceptance>
+
+  <assemblyFile>VirtoCommerce.BackgroundJobs.GoogleCloudTasks.dll</assemblyFile>
+  <moduleType>VirtoCommerce.BackgroundJobs.GoogleCloudTasks.Module, VirtoCommerce.BackgroundJobs.GoogleCloudTasks</moduleType>
+
+  <releaseNotes>Worked-example Google Cloud Tasks engine module.</releaseNotes>
+  <copyright>Copyright © 2026 VirtoCommerce. All rights reserved</copyright>
+  <tags>sample background-jobs google-cloud-tasks</tags>
+  <useFullTypeNameInSwagger>false</useFullTypeNameInSwagger>
+</module>

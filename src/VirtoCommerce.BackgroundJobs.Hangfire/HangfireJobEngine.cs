@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Hangfire;
 using Hangfire.States;
 using Newtonsoft.Json;
+using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs.Core.Services;
 using VirtoCommerce.Platform.Core.Jobs;
@@ -24,7 +25,7 @@ public sealed class HangfireJobEngine(IBackgroundJobClient client) : IJobEngine,
 {
     private static readonly string[] _finalStates = [DeletedState.StateName, FailedState.StateName, SucceededState.StateName];
 
-    public string ProviderName => "Hangfire";
+    public string ProviderName => BackgroundJobsProviders.Hangfire;
 
     public Task<string> Enqueue(JobEnvelope envelope, EnqueueOptions options, CancellationToken cancellationToken = default)
     {

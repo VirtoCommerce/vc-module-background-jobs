@@ -20,7 +20,7 @@ public enum BackgroundJobsMode
 public sealed class BackgroundJobsOptions
 {
     /// <summary>Active engine for this instance: <c>Hangfire</c> (default) or <c>RabbitMQ</c>. One per instance.</summary>
-    public string Provider { get; set; } = "Hangfire";
+    public string Provider { get; set; } = BackgroundJobsProviders.Hangfire;
 
     /// <summary>Instance role: Producer, Worker, or Both (default).</summary>
     public BackgroundJobsMode Mode { get; set; } = BackgroundJobsMode.Both;

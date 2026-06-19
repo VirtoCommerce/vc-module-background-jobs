@@ -157,11 +157,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
         try
         {
-            IJobProgress progress = string.IsNullOrEmpty(envelope.ProgressNotificationId)
-                ? NoOpJobProgress.Instance
-                : new PushNotificationJobProgress(_pushNotificationManager, envelope.ProgressNotificationId!, envelope.UserName);
-
-            var context = new JobExecutionContext(jobId, progress, envelope.Headers);
+            var context = JobExecutionContextFactory.Create(_pushNotificationManager, envelope, jobId);
 
             _logger.LogInformation("Dispatching job {JobId} ({JobType})", jobId, envelope.JobType);
 
