@@ -48,7 +48,7 @@ public sealed class RecurringJobsApplier : BackgroundService, IEventHandler<Obje
         }
 
         using var scope = _serviceProvider.CreateScope();
-        var settingsManager = scope.ServiceProvider.GetService<ISettingsManager>();
+        var settingsManager = scope.ServiceProvider.GetRequiredService<ISettingsManager>();
 
         foreach (var registration in _registrations)
         {
@@ -94,12 +94,12 @@ public sealed class RecurringJobsApplier : BackgroundService, IEventHandler<Obje
         }
     }
 
-    private async Task ApplyAsync(RecurringJobRegistration registration, ISettingsManager? settingsManager, CancellationToken cancellationToken)
+    private async Task ApplyAsync(RecurringJobRegistration registration, ISettingsManager settingsManager, CancellationToken cancellationToken)
     {
         bool enabled;
         string? cron;
 
-        if (registration.EnablerSetting is not null && registration.CronSetting is not null && settingsManager is not null)
+        if (registration.EnablerSetting is not null && registration.CronSetting is not null)
         {
             enabled = await settingsManager.GetValueAsync<bool>(registration.EnablerSetting);
             cron = await settingsManager.GetValueAsync<string>(registration.CronSetting);

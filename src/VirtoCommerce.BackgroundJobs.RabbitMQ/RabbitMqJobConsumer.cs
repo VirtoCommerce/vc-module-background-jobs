@@ -80,31 +80,50 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
     private async Task StartConsumingAsync(CancellationToken cancellationToken)
     {
-        _channel = await _connectionProvider.CreateChannelAsync(cancellationToken: cancellationToken);
-
-        await _channel.BasicQosAsync(prefetchSize: 0, prefetchCount: _rabbitMqOptions.PrefetchCount, global: false, cancellationToken);
-
-        var consumer = new AsyncEventingBasicConsumer(_channel);
-        consumer.ReceivedAsync += OnReceivedAsync;
-
-        foreach (var queue in GetQueues())
+        // Dispose any channel left over from a previous failed attempt so retries don't leak channels.
+        if (_channel is not null)
         {
-            await _channel.QueueDeclareAsync(
-                queue: queue,
-                durable: true,
-                exclusive: false,
-                autoDelete: false,
-                arguments: null,
-                cancellationToken: cancellationToken);
+            await _channel.DisposeAsync();
+            _channel = null;
+        }
 
-            var consumerTag = await _channel.BasicConsumeAsync(queue, autoAck: false, consumer: consumer, cancellationToken: cancellationToken);
-            _logger.LogInformation("RabbitMQ consumer '{ConsumerTag}' subscribed to queue '{Queue}'", consumerTag, queue);
+        // Build the channel locally and publish it to the field only after full setup succeeds; on partial failure
+        // dispose it so we never leak a half-initialized channel.
+        var channel = await _connectionProvider.CreateChannelAsync(cancellationToken: cancellationToken);
+        try
+        {
+            await channel.BasicQosAsync(prefetchSize: 0, prefetchCount: _rabbitMqOptions.PrefetchCount, global: false, cancellationToken);
+
+            var consumer = new AsyncEventingBasicConsumer(channel);
+            consumer.ReceivedAsync += OnReceivedAsync;
+
+            foreach (var queue in GetQueues())
+            {
+                await channel.QueueDeclareAsync(
+                    queue: queue,
+                    durable: true,
+                    exclusive: false,
+                    autoDelete: false,
+                    arguments: null,
+                    cancellationToken: cancellationToken);
+
+                var consumerTag = await channel.BasicConsumeAsync(queue, autoAck: false, consumer: consumer, cancellationToken: cancellationToken);
+                _logger.LogInformation("RabbitMQ consumer '{ConsumerTag}' subscribed to queue '{Queue}'", consumerTag, queue);
+            }
+
+            _channel = channel;
+        }
+        catch
+        {
+            await channel.DisposeAsync();
+            throw;
         }
     }
 
     private async Task OnReceivedAsync(object sender, BasicDeliverEventArgs eventArgs)
     {
-        var channel = _channel;
+        // Use the channel the delivery arrived on (avoids racing the _channel field during startup).
+        var channel = (sender as AsyncEventingBasicConsumer)?.Channel ?? _channel;
         if (channel is null)
         {
             _logger.LogWarning("RabbitMQ delivery {DeliveryTag} received but the channel is null; skipping", eventArgs.DeliveryTag);
@@ -123,17 +142,18 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Discarding malformed RabbitMQ job message (delivery tag {DeliveryTag})", eventArgs.DeliveryTag);
-            await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false);
+            await TryAckAsync(channel, eventArgs.DeliveryTag);
             return;
         }
 
         if (envelope is null)
         {
-            await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false);
+            await TryAckAsync(channel, eventArgs.DeliveryTag);
             return;
         }
 
         var jobId = eventArgs.BasicProperties.MessageId ?? string.Empty;
+        var dispatched = false;
 
         try
         {
@@ -146,18 +166,51 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             _logger.LogInformation("Dispatching job {JobId} ({JobType})", jobId, envelope.JobType);
 
             await _dispatcher.Dispatch(envelope, context, CancellationToken.None);
+            dispatched = true;
 
             await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false);
-
             _logger.LogInformation("Completed and acked job {JobId} ({JobType})", jobId, envelope.JobType);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!dispatched)
         {
-            await HandleFailureAsync(channel, eventArgs, envelope, jobId, ex);
+            // The handler itself failed: re-route to retry/DLQ, then ack the original — but only if re-routing
+            // succeeds, otherwise leave it unacked so the broker redelivers it (no silent loss).
+            try
+            {
+                await HandleFailureAsync(channel, envelope, jobId, ex);
+                await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false);
+            }
+            catch (Exception failureEx)
+            {
+                _logger.LogError(failureEx, "Failed to route failed job {JobId} to retry/dead-letter; leaving it unacked for redelivery", jobId);
+            }
+        }
+        catch (Exception ackEx)
+        {
+            // The handler ran but the ack failed: do NOT re-route (that would double-execute). The broker may
+            // redeliver, so handlers should be idempotent.
+            _logger.LogError(ackEx, "Job {JobId} executed but acknowledgement failed; it may be redelivered", jobId);
         }
     }
 
-    private async Task HandleFailureAsync(IChannel channel, BasicDeliverEventArgs eventArgs, JobEnvelope envelope, string jobId, Exception ex)
+    private async Task TryAckAsync(IChannel channel, ulong deliveryTag)
+    {
+        try
+        {
+            await channel.BasicAckAsync(deliveryTag, multiple: false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to acknowledge RabbitMQ delivery {DeliveryTag}", deliveryTag);
+        }
+    }
+
+    /// <summary>
+    /// Re-routes a failed job: requeue (incremented attempt) until <see cref="BackgroundJobsOptions.MaxRetryAttempts"/>,
+    /// then dead-letter (or drop). Does NOT ack — the caller acks the original only after this succeeds, so a failure
+    /// here leaves the original unacked for redelivery rather than losing it.
+    /// </summary>
+    private async Task HandleFailureAsync(IChannel channel, JobEnvelope envelope, string jobId, Exception ex)
     {
         var maxAttempts = Math.Max(1, _jobsOptions.MaxRetryAttempts);
 
@@ -191,10 +244,6 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             _logger.LogError(ex, "Job {JobId} ({JobType}) failed on final attempt {Attempt}/{MaxAttempts}; dropping (dead-letter queue disabled)",
                 jobId, envelope.JobType, envelope.Attempt, maxAttempts);
         }
-
-        // Always ack the original delivery: retry/dead-letter (if any) was re-published as a fresh message above, so
-        // requeuing the original would double-deliver.
-        await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false);
     }
 
     private async Task PublishToDeadLetterAsync(IChannel channel, JobEnvelope envelope, string jobId, Exception ex)

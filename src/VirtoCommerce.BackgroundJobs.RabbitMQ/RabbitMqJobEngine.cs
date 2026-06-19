@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,15 +17,35 @@ namespace VirtoCommerce.BackgroundJobs.RabbitMQ;
 /// durable queue via the default exchange; the in-process <see cref="RabbitMqJobConsumer"/> drains it and runs the
 /// handler through <see cref="IJobDispatcher"/>.
 /// <para>
+/// Publishing reuses a single long-lived channel with publisher confirmations enabled (so each publish completes
+/// only after the broker accepts it). The channel is not thread-safe, so publishes are serialized by a semaphore;
+/// it is re-created transparently if it drops.
+/// </para>
+/// <para>
 /// RabbitMQ has no native job store, so <see cref="GetStatus"/> and <see cref="Delete"/> are best-effort: status is
 /// reported as <c>Unknown</c> and delete is unsupported (progress is observed over SignalR instead). It does NOT
 /// implement <see cref="IExpressionJobEngine"/> — delegates cannot be serialized onto a queue.
 /// </para>
 /// </summary>
-public sealed class RabbitMqJobEngine(IRabbitMqConnectionProvider connectionProvider, ILogger<RabbitMqJobEngine> logger)
-    : IJobEngine
+public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
 {
     public const string ProviderNameValue = "RabbitMQ";
+
+    private static readonly CreateChannelOptions _publishChannelOptions = new(
+        publisherConfirmationsEnabled: true,
+        publisherConfirmationTrackingEnabled: true);
+
+    private readonly IRabbitMqConnectionProvider _connectionProvider;
+    private readonly ILogger<RabbitMqJobEngine> _logger;
+    private readonly SemaphoreSlim _publishLock = new(1, 1);
+    private readonly HashSet<string> _declaredQueues = new(StringComparer.Ordinal);
+    private IChannel? _channel;
+
+    public RabbitMqJobEngine(IRabbitMqConnectionProvider connectionProvider, ILogger<RabbitMqJobEngine> logger)
+    {
+        _connectionProvider = connectionProvider;
+        _logger = logger;
+    }
 
     public string ProviderName => ProviderNameValue;
 
@@ -32,25 +53,7 @@ public sealed class RabbitMqJobEngine(IRabbitMqConnectionProvider connectionProv
     {
         var queue = string.IsNullOrEmpty(envelope.Queue) ? "default" : envelope.Queue!;
         var jobId = Guid.NewGuid().ToString("N");
-
         var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(envelope));
-
-        // Publisher confirmations make BasicPublishAsync complete only after the broker has accepted the message.
-        // Without them the publish is fire-and-forget into the client's write pipe, and disposing this short-lived
-        // channel right after would race the unflushed write — silently dropping the job.
-        var channelOptions = new CreateChannelOptions(
-            publisherConfirmationsEnabled: true,
-            publisherConfirmationTrackingEnabled: true);
-
-        await using var channel = await connectionProvider.CreateChannelAsync(channelOptions, cancellationToken);
-
-        await channel.QueueDeclareAsync(
-            queue: queue,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: null,
-            cancellationToken: cancellationToken);
 
         var properties = new BasicProperties
         {
@@ -59,17 +62,59 @@ public sealed class RabbitMqJobEngine(IRabbitMqConnectionProvider connectionProv
             ContentType = "application/json",
         };
 
-        await channel.BasicPublishAsync(
-            exchange: string.Empty,
-            routingKey: queue,
-            mandatory: false,
-            basicProperties: properties,
-            body: body,
-            cancellationToken: cancellationToken);
+        // The channel isn't thread-safe; serialize publishes (and the lazy declare) on the shared channel.
+        await _publishLock.WaitAsync(cancellationToken);
+        try
+        {
+            var channel = await EnsureChannelAsync(cancellationToken);
 
-        logger.LogInformation("Published job {JobId} ({JobType}) to RabbitMQ queue '{Queue}' (broker confirmed)", jobId, envelope.JobType, queue);
+            // Declare each queue once per channel lifetime (idempotent, but avoids a round-trip per publish).
+            if (_declaredQueues.Add(queue))
+            {
+                await channel.QueueDeclareAsync(
+                    queue: queue,
+                    durable: true,
+                    exclusive: false,
+                    autoDelete: false,
+                    arguments: null,
+                    cancellationToken: cancellationToken);
+            }
+
+            await channel.BasicPublishAsync(
+                exchange: string.Empty,
+                routingKey: queue,
+                mandatory: false,
+                basicProperties: properties,
+                body: body,
+                cancellationToken: cancellationToken);
+        }
+        finally
+        {
+            _publishLock.Release();
+        }
+
+        _logger.LogInformation("Published job {JobId} ({JobType}) to RabbitMQ queue '{Queue}' (broker confirmed)", jobId, envelope.JobType, queue);
 
         return jobId;
+    }
+
+    // Caller holds _publishLock.
+    private async Task<IChannel> EnsureChannelAsync(CancellationToken cancellationToken)
+    {
+        if (_channel is { IsOpen: true })
+        {
+            return _channel;
+        }
+
+        if (_channel is not null)
+        {
+            await _channel.DisposeAsync();
+            _channel = null;
+            _declaredQueues.Clear(); // re-declare queues on the fresh channel
+        }
+
+        _channel = await _connectionProvider.CreateChannelAsync(_publishChannelOptions, cancellationToken);
+        return _channel;
     }
 
     /// <summary>
@@ -90,4 +135,15 @@ public sealed class RabbitMqJobEngine(IRabbitMqConnectionProvider connectionProv
 
     /// <summary>Not supported on RabbitMQ — a published message cannot be recalled by id. Always returns false.</summary>
     public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_channel is not null)
+        {
+            await _channel.DisposeAsync();
+            _channel = null;
+        }
+
+        _publishLock.Dispose();
+    }
 }
