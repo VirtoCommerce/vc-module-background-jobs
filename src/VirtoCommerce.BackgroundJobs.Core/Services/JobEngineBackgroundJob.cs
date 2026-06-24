@@ -44,18 +44,21 @@ public sealed class JobEngineBackgroundJob(
 
         var (payloadType, payloadJson) = serializer.Serialize(payload);
         var userName = userNameResolver.GetCurrentUserName();
+        var title = string.IsNullOrEmpty(options?.Title) ? $"Background job: {typeof(TPayload).Name}" : options.Title;
 
         var progressNotificationId = options?.ProgressNotificationId;
+        var ownsNotification = false;
         if (options?.ReportProgress == true && string.IsNullOrEmpty(progressNotificationId))
         {
             var notification = new JobProgressPushNotification(userName ?? "system")
             {
-                Title = $"Background job: {typeof(TPayload).Name}",
+                Title = title,
                 Description = "Queued",
                 Started = DateTime.UtcNow,
             };
             await pushNotificationManager.SendAsync(notification);
             progressNotificationId = notification.Id;
+            ownsNotification = true;
         }
 
         var envelope = new JobEnvelope
@@ -66,6 +69,8 @@ public sealed class JobEngineBackgroundJob(
             Queue = options?.Queue ?? _options.DefaultQueue,
             UniqueKey = options?.UniqueKey,
             ProgressNotificationId = progressNotificationId,
+            Title = title,
+            CompletesProgressNotification = ownsNotification,
             UserName = userName,
         };
 

@@ -121,7 +121,9 @@ public sealed class RecurringJobsApplier : BackgroundService, IEventHandler<Obje
         }
         else
         {
-            enabled = true;
+            // Fixed-cron schedule: honor the registration's Enabled flag so a job disabled by configuration is
+            // removed from engine storage (not left scheduled from a previous run when it was enabled).
+            enabled = registration.Enabled;
             cron = registration.CronExpression;
         }
 

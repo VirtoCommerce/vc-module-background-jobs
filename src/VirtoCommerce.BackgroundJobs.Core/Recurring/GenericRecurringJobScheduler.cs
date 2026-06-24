@@ -52,7 +52,12 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
         }
         catch (CronFormatException ex)
         {
-            _logger.LogError(ex, "Recurring job '{JobId}' has an invalid cron '{Cron}'; not scheduled.", registration.Id, cronExpression);
+            // Remove any existing schedule so a previously-valid cron stops firing after settings change to a bad value.
+            _logger.LogError(ex, "Recurring job '{JobId}' has an invalid cron '{Cron}'; removing any existing schedule.", registration.Id, cronExpression);
+            lock (_sync)
+            {
+                _jobs.Remove(registration.Id);
+            }
             return Task.CompletedTask;
         }
 
@@ -89,9 +94,10 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
             foreach (var job in DueJobs(now))
             {
                 var occurrence = job.NextUtc!.Value;
+                var settled = false;
                 try
                 {
-                    await FireOnceAsync(job.Registration, occurrence, stoppingToken);
+                    settled = await FireOnceAsync(job.Registration, occurrence, stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -99,12 +105,20 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
                 }
                 catch (Exception ex)
                 {
+                    // A genuine enqueue error (not lock contention) — advance so a poison occurrence doesn't loop forever.
                     _logger.LogError(ex, "Recurring job '{JobId}' failed to enqueue", job.Registration.Id);
+                    settled = true;
                 }
 
-                lock (_sync)
+                // Only advance past the occurrence once it is settled (fired here, or confirmed handled by another
+                // instance). On lock contention we leave NextUtc so the next tick retries — recovering the occurrence
+                // if the lock holder failed before enqueuing.
+                if (settled)
                 {
-                    job.NextUtc = job.Parsed.GetNextOccurrence(occurrence, job.Registration.TimeZone);
+                    lock (_sync)
+                    {
+                        job.NextUtc = job.Parsed.GetNextOccurrence(occurrence, job.Registration.TimeZone);
+                    }
                 }
             }
 
@@ -137,7 +151,9 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
         }
     }
 
-    private async Task FireOnceAsync(RecurringJobRegistration registration, DateTime occurrenceUtc, CancellationToken cancellationToken)
+    // Returns true when the occurrence is settled (we fired it, or confirmed another instance already did); false on
+    // lock contention, so the caller retries the occurrence instead of skipping it.
+    private async Task<bool> FireOnceAsync(RecurringJobRegistration registration, DateTime occurrenceUtc, CancellationToken cancellationToken)
     {
         try
         {
@@ -165,10 +181,13 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
                 tryLockTimeout: TimeSpan.FromSeconds(5),
                 retryInterval: TimeSpan.FromMilliseconds(250),
                 cancellationToken: cancellationToken);
+
+            return true;
         }
         catch (PlatformException)
         {
-            _logger.LogDebug("Recurring job '{JobId}' skipped: lock held by another instance.", registration.Id);
+            _logger.LogDebug("Recurring job '{JobId}' could not acquire the lock; will retry the occurrence.", registration.Id);
+            return false;
         }
     }
 

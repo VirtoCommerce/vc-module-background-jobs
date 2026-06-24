@@ -61,14 +61,22 @@ namespace VirtoCommerce.Platform.Hangfire.Extensions
 
             appBuilder.UseHangfireDashboard("/hangfire", new DashboardOptions { Authorization = new[] { new HangfireAuthorizationHandler() } });
 
+            // Reuse the host's Newtonsoft MVC settings when present; don't crash Hangfire wiring if they aren't registered.
             var mvcJsonOptions = appBuilder.ApplicationServices.GetService<IOptions<MvcNewtonsoftJsonOptions>>();
-            GlobalConfiguration.Configuration.UseSerializerSettings(mvcJsonOptions.Value.SerializerSettings);
+            if (mvcJsonOptions?.Value?.SerializerSettings is { } serializerSettings)
+            {
+                GlobalConfiguration.Configuration.UseSerializerSettings(serializerSettings);
+            }
 
             appBuilder.RegisterEventHandler<ObjectSettingChangedEvent, RecurringJobService>();
 
-            // Add Hangfire filters/middlewares
-            var userNameResolver = appBuilder.ApplicationServices.CreateScope().ServiceProvider.GetRequiredService<IUserNameResolver>();
-            GlobalJobFilters.Filters.Add(new HangfireUserContextMiddleware(userNameResolver));
+            // Add Hangfire filters/middlewares. The user-context resolver stores into a thread slot, so a single
+            // instance is reused by the global filter; dispose the scope used to resolve it instead of leaking it.
+            using (var scope = appBuilder.ApplicationServices.CreateScope())
+            {
+                var userNameResolver = scope.ServiceProvider.GetRequiredService<IUserNameResolver>();
+                GlobalJobFilters.Filters.Add(new HangfireUserContextMiddleware(userNameResolver));
+            }
 
             var toolRegistrar = appBuilder.ApplicationServices.GetService<IDeveloperToolRegistrar>();
             toolRegistrar.RegisterDeveloperTool(new DeveloperToolDescriptor

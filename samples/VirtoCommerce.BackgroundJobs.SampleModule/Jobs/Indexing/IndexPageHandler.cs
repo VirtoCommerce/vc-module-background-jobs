@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using VirtoCommerce.BackgroundJobs.Core.MapReduce;
 using VirtoCommerce.Platform.Core.Jobs;
 
@@ -12,14 +13,35 @@ namespace VirtoCommerce.BackgroundJobs.SampleModule.Jobs.Indexing;
 /// <c>IIndexingManager.IndexDocuments(...)</c>; this stand-in simulates indexing (and treats ids prefixed "bad-" as
 /// failures) so the sample stays self-contained — no dependency on the Search module.
 /// </summary>
-public sealed class IndexPageHandler : IMapJobHandler<IndexPage, IndexPageResult>
+public sealed class IndexPageHandler(ILogger<IndexPageHandler> logger) : IMapJobHandler<IndexPage, IndexPageResult>
 {
+    // Number of map handlers running concurrently on THIS instance. Bounded by the engine's worker concurrency
+    // (Hangfire WorkerCount, default ~ProcessorCount*5; RabbitMQ PrefetchCount, default 1) — map tasks share the
+    // same worker pool as every other background job. Shared across all (transient) handler instances.
+    private static int _running;
+
     public Task<IndexPageResult> Map(IndexPage page, IJobExecutionContext context, CancellationToken cancellationToken = default)
     {
-        var failed = page.DocumentIds.Where(id => id.StartsWith("bad-", StringComparison.OrdinalIgnoreCase)).ToArray();
-        var indexed = page.DocumentIds.Length - failed.Length;
+        var running = Interlocked.Increment(ref _running);
+        logger.LogInformation(
+            "MAP START job {JobId} ({Count} ids) — {Running} map handler(s) running in parallel on this instance.",
+            context.JobId, page.DocumentIds.Length, running);
 
-        // (real work would go here: indexer.IndexDocuments(page.DocumentType, page.DocumentIds, ct))
-        return Task.FromResult(new IndexPageResult(indexed, failed));
+        try
+        {
+            var failed = page.DocumentIds.Where(id => id.StartsWith("bad-", StringComparison.OrdinalIgnoreCase)).ToArray();
+            var indexed = page.DocumentIds.Length - failed.Length;
+
+            Thread.Sleep(TimeSpan.FromSeconds(5)); // simulate work
+
+            // (real work would go here: indexer.IndexDocuments(page.DocumentType, page.DocumentIds, ct))
+            return Task.FromResult(new IndexPageResult(indexed, failed));
+        }
+        finally
+        {
+            var remaining = Interlocked.Decrement(ref _running);
+            logger.LogInformation("MAP END   job {JobId} — {Remaining} still running on this instance.",
+                context.JobId, remaining);
+        }
     }
 }

@@ -67,6 +67,11 @@ public sealed class RabbitMqConnectionProvider : IRabbitMqConnectionProvider
         var factory = new ConnectionFactory
         {
             ClientProvidedName = _options.ClientProvidedName,
+
+            // Parallel consumer dispatch. Without this (default 1) the client invokes the consumer handler
+            // sequentially even when PrefetchCount delivers several unacked messages, so jobs run one-at-a-time.
+            // Default it to PrefetchCount so prefetch controls parallelism; allow an explicit override.
+            ConsumerDispatchConcurrency = Math.Max((ushort)1, _options.ConsumerDispatchConcurrency ?? _options.PrefetchCount),
         };
 
         if (!string.IsNullOrWhiteSpace(_options.Uri))

@@ -67,12 +67,14 @@ public class SampleJobsController(IBackgroundJob backgroundJob, IMapReduceJob ma
         // Partition into PAGES — keeps the map-task count and per-result size small.
         var pages = documentIds.Chunk(pageSize).Select(chunk => new IndexPage("Product", chunk));
 
+        // Note: no custom Queue here — the map/reduce tasks run on the default queue, which the engine always drains.
+        // Routing to a dedicated queue (e.g. "indexing") additionally requires a worker configured for that queue
+        // (VirtoCommerce:Hangfire:Queues or the RabbitMQ consumer queues), otherwise the tasks would sit unprocessed.
         var batchId = await mapReduce.Enqueue<IndexPage, IndexPageResult, IndexSummary>(
             items: pages,
             state: new IndexSummary("Product", DateTime.UtcNow.Ticks),
             options: new MapReduceOptions
             {
-                Queue = "indexing",
                 FailurePolicy = FailurePolicy.ContinueOnError,
                 ReportProgress = true,
             },

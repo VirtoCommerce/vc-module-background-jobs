@@ -29,6 +29,7 @@ namespace VirtoCommerce.BackgroundJobs.RabbitMQ;
 public sealed class RabbitMqJobConsumer : BackgroundService
 {
     private static readonly TimeSpan _reconnectDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _healthCheckInterval = TimeSpan.FromSeconds(5);
 
     private readonly IRabbitMqConnectionProvider _connectionProvider;
     private readonly IJobDispatcher _dispatcher;
@@ -36,6 +37,10 @@ public sealed class RabbitMqJobConsumer : BackgroundService
     private readonly RabbitMqOptions _rabbitMqOptions;
     private readonly BackgroundJobsOptions _jobsOptions;
     private readonly ILogger<RabbitMqJobConsumer> _logger;
+
+    // IChannel is not thread-safe; serialize channel writes (ack/publish/declare) so deliveries dispatched
+    // concurrently (PrefetchCount > 1) don't use the channel at the same time.
+    private readonly SemaphoreSlim _channelLock = new(1, 1);
 
     private IChannel? _channel;
 
@@ -57,14 +62,26 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Connect with retry so a temporarily-unavailable broker doesn't crash platform startup.
+        // Connect with retry so a temporarily-unavailable broker doesn't crash platform startup, and stay alive —
+        // reconnecting if the channel/connection drops — until the host shuts down.
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 await StartConsumingAsync(stoppingToken);
                 _logger.LogInformation("RabbitMQ job consumer started for queues: {Queues}", string.Join(", ", GetQueues()));
-                break;
+
+                // Hold the hosted service open while the channel is healthy; loop to reconnect when it closes.
+                while (!stoppingToken.IsCancellationRequested && _channel is { IsOpen: true })
+                {
+                    await Task.Delay(_healthCheckInterval, stoppingToken);
+                }
+
+                if (!stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning("RabbitMQ channel closed; reconnecting in {Delay}s.", _reconnectDelay.TotalSeconds);
+                    await Task.Delay(_reconnectDelay, stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -72,7 +89,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to start RabbitMQ job consumer; retrying in {Delay}s", _reconnectDelay.TotalSeconds);
+                _logger.LogError(ex, "RabbitMQ job consumer error; retrying in {Delay}s", _reconnectDelay.TotalSeconds);
                 await Task.Delay(_reconnectDelay, stoppingToken);
             }
         }
@@ -164,7 +181,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             await _dispatcher.Dispatch(envelope, context, CancellationToken.None);
             dispatched = true;
 
-            await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false);
+            await RunChannelOpAsync(async () => await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false));
             _logger.LogInformation("Completed and acked job {JobId} ({JobType})", jobId, envelope.JobType);
         }
         catch (Exception ex) when (!dispatched)
@@ -174,7 +191,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             try
             {
                 await HandleFailureAsync(channel, envelope, jobId, ex);
-                await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false);
+                await RunChannelOpAsync(async () => await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false));
             }
             catch (Exception failureEx)
             {
@@ -189,11 +206,25 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         }
     }
 
+    // Serializes a write on the (non-thread-safe) channel against concurrent deliveries.
+    private async Task RunChannelOpAsync(Func<Task> operation)
+    {
+        await _channelLock.WaitAsync();
+        try
+        {
+            await operation();
+        }
+        finally
+        {
+            _channelLock.Release();
+        }
+    }
+
     private async Task TryAckAsync(IChannel channel, ulong deliveryTag)
     {
         try
         {
-            await channel.BasicAckAsync(deliveryTag, multiple: false);
+            await RunChannelOpAsync(async () => await channel.BasicAckAsync(deliveryTag, multiple: false));
         }
         catch (Exception ex)
         {
@@ -210,9 +241,11 @@ public sealed class RabbitMqJobConsumer : BackgroundService
     {
         var maxAttempts = Math.Max(1, _jobsOptions.MaxRetryAttempts);
 
-        if (envelope.Attempt < maxAttempts)
+        // MaxRetryAttempts counts retries: the first run is Attempt 1, so requeue while Attempt <= MaxRetryAttempts
+        // (e.g. default 3 → up to 3 re-publications), then dead-letter.
+        if (envelope.Attempt <= maxAttempts)
         {
-            _logger.LogWarning(ex, "Job {JobId} ({JobType}) failed on attempt {Attempt}/{MaxAttempts}; requeuing",
+            _logger.LogWarning(ex, "Job {JobId} ({JobType}) failed on attempt {Attempt}; requeuing (max {MaxAttempts} retries)",
                 jobId, envelope.JobType, envelope.Attempt, maxAttempts);
 
             var retry = envelope with { Attempt = envelope.Attempt + 1 };
@@ -225,8 +258,8 @@ public sealed class RabbitMqJobConsumer : BackgroundService
                 ContentType = "application/json",
             };
 
-            await channel.BasicPublishAsync(exchange: string.Empty, routingKey: queue, mandatory: false,
-                basicProperties: properties, body: body);
+            await RunChannelOpAsync(async () => await channel.BasicPublishAsync(exchange: string.Empty, routingKey: queue,
+                mandatory: false, basicProperties: properties, body: body));
         }
         else if (_rabbitMqOptions.UseDeadLetterQueue)
         {
@@ -250,13 +283,6 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         // Application-level dead-lettering: declare a durable DLQ and publish the envelope to it via the default
         // exchange. (Done explicitly rather than via x-dead-letter-exchange args so we don't have to redeclare the
         // work queue with different arguments, which RabbitMQ rejects for an existing queue.)
-        await channel.QueueDeclareAsync(
-            queue: deadLetterQueue,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: null);
-
         var properties = new BasicProperties
         {
             MessageId = jobId,
@@ -272,8 +298,18 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
         var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(envelope));
 
-        await channel.BasicPublishAsync(exchange: string.Empty, routingKey: deadLetterQueue, mandatory: false,
-            basicProperties: properties, body: body);
+        await RunChannelOpAsync(async () =>
+        {
+            await channel.QueueDeclareAsync(
+                queue: deadLetterQueue,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: null);
+
+            await channel.BasicPublishAsync(exchange: string.Empty, routingKey: deadLetterQueue, mandatory: false,
+                basicProperties: properties, body: body);
+        });
 
         _logger.LogWarning("Job {JobId} routed to dead-letter queue '{DeadLetterQueue}'", jobId, deadLetterQueue);
     }
@@ -300,5 +336,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             await _channel.DisposeAsync();
             _channel = null;
         }
+
+        _channelLock.Dispose();
     }
 }

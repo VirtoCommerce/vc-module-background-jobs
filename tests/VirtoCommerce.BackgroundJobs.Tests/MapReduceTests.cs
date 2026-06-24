@@ -73,7 +73,7 @@ public class MapReduceTests
     private static IJobExecutionContext Context() =>
         new JobExecutionContext("test", NoOpJobProgress.Instance, new Dictionary<string, string>());
 
-    private static (MapReduceJob facade, MapCoordinator map, ReduceCoordinator reduce, CapturingBackgroundJob bus, InMemoryMapReduceBatchStore store, SumReducer reducer)
+    private static (MapReduceJob facade, FanOutCoordinator fanOut, MapCoordinator map, ReduceCoordinator reduce, CapturingBackgroundJob bus, InMemoryMapReduceBatchStore store, SumReducer reducer)
         BuildHarness(IMapJobHandler<SquareItem, SquareResult> mapHandler)
     {
         var reducer = new SumReducer();
@@ -90,14 +90,21 @@ public class MapReduceTests
         userResolver.Setup(x => x.GetCurrentUserName()).Returns("tester");
 
         var facade = new MapReduceJob(bus, store, serializer, userResolver.Object, Mock.Of<IPushNotificationManager>());
+        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
         var map = new MapCoordinator(sp, serializer, store, bus, NullLogger<MapCoordinator>.Instance);
-        var reduce = new ReduceCoordinator(sp, serializer, store, NullLogger<ReduceCoordinator>.Instance);
+        var reduce = new ReduceCoordinator(sp, serializer, store, Mock.Of<IPushNotificationManager>(), NullLogger<ReduceCoordinator>.Instance);
 
-        return (facade, map, reduce, bus, store, reducer);
+        return (facade, fanOut, map, reduce, bus, store, reducer);
     }
 
-    private static async Task PumpMaps(MapCoordinator map, CapturingBackgroundJob bus, CancellationToken ct)
+    // Drives the engine inline: run the fan-out (produces the map tasks), then every map task.
+    private static async Task PumpMaps(FanOutCoordinator fanOut, MapCoordinator map, CapturingBackgroundJob bus, CancellationToken ct)
     {
+        foreach (var fan in bus.Enqueued.OfType<MapFanOutEnvelope>().ToList())
+        {
+            await fanOut.Execute(fan, Context(), ct);
+        }
+
         foreach (var env in bus.Enqueued.OfType<MapTaskEnvelope>().ToList())
         {
             await map.Execute(env, Context(), ct);
@@ -108,14 +115,18 @@ public class MapReduceTests
     public async Task FullSuccess_RunsReduceOnce_WithAggregatedResults()
     {
         var ct = TestContext.Current.CancellationToken;
-        var (facade, map, reduce, bus, _, reducer) = BuildHarness(new SquareHandler());
+        var (facade, fanOut, map, reduce, bus, _, reducer) = BuildHarness(new SquareHandler());
 
         await facade.Enqueue<SquareItem, SquareResult, SumState>(
             [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"), cancellationToken: ct);
 
-        Assert.Equal(3, bus.Enqueued.OfType<MapTaskEnvelope>().Count());
+        // Enqueue is fast: it stores items and queues a single fan-out task (not N map tasks).
+        Assert.Single(bus.Enqueued.OfType<MapFanOutEnvelope>());
 
-        await PumpMaps(map, bus, ct);
+        await PumpMaps(fanOut, map, bus, ct);
+
+        // The fan-out produced one map task per item.
+        Assert.Equal(3, bus.Enqueued.OfType<MapTaskEnvelope>().Count());
 
         // Exactly one reduce task triggered after the last map completed.
         var reduceEnvelopes = bus.Enqueued.OfType<ReduceTaskEnvelope>().ToList();
@@ -131,13 +142,13 @@ public class MapReduceTests
     public async Task FailFast_WithFailure_SkipsReduce()
     {
         var ct = TestContext.Current.CancellationToken;
-        var (facade, map, reduce, bus, _, reducer) = BuildHarness(new FlakySquareHandler());
+        var (facade, fanOut, map, reduce, bus, _, reducer) = BuildHarness(new FlakySquareHandler());
 
         await facade.Enqueue<SquareItem, SquareResult, SumState>(
             [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"),
             new MapReduceOptions { FailurePolicy = FailurePolicy.FailFast }, ct);
 
-        await PumpMaps(map, bus, ct);
+        await PumpMaps(fanOut, map, bus, ct);
         await reduce.Execute(bus.Enqueued.OfType<ReduceTaskEnvelope>().Single(), Context(), ct);
 
         Assert.False(reducer.Ran);
@@ -147,13 +158,13 @@ public class MapReduceTests
     public async Task ContinueOnError_RunsReduce_WithFailuresIncluded()
     {
         var ct = TestContext.Current.CancellationToken;
-        var (facade, map, reduce, bus, _, reducer) = BuildHarness(new FlakySquareHandler());
+        var (facade, fanOut, map, reduce, bus, _, reducer) = BuildHarness(new FlakySquareHandler());
 
         await facade.Enqueue<SquareItem, SquareResult, SumState>(
             [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"),
             new MapReduceOptions { FailurePolicy = FailurePolicy.ContinueOnError }, ct);
 
-        await PumpMaps(map, bus, ct);
+        await PumpMaps(fanOut, map, bus, ct);
         await reduce.Execute(bus.Enqueued.OfType<ReduceTaskEnvelope>().Single(), Context(), ct);
 
         Assert.True(reducer.Ran);
@@ -169,7 +180,7 @@ public class MapReduceTests
     public async Task EmptyBatch_RunsReduceImmediately()
     {
         var ct = TestContext.Current.CancellationToken;
-        var (facade, _, reduce, bus, _, reducer) = BuildHarness(new SquareHandler());
+        var (facade, _, _, reduce, bus, _, reducer) = BuildHarness(new SquareHandler());
 
         await facade.Enqueue<SquareItem, SquareResult, SumState>(
             [], new SumState("empty"), cancellationToken: ct);

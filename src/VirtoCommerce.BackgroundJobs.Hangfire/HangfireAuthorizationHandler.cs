@@ -8,7 +8,7 @@ namespace VirtoCommerce.Platform.Hangfire
         public bool Authorize(DashboardContext context)
         {
             var httpcontext = context.GetHttpContext();
-            var result = httpcontext != null && httpcontext.User.Identity.IsAuthenticated;
+            var result = httpcontext?.User.Identity?.IsAuthenticated == true;
             if (result)
             {
                 result = httpcontext.User.IsInRole(PlatformConstants.Security.SystemRoles.Administrator) || httpcontext.User.HasClaim(PlatformConstants.Security.Claims.PermissionClaimType, PlatformConstants.Security.Permissions.BackgroundJobsManage);

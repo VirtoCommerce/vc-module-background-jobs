@@ -25,6 +25,16 @@ public sealed record JobEnvelope
     /// <summary>Push-notification id to report progress against, or null for fire-and-forget without progress.</summary>
     public string? ProgressNotificationId { get; init; }
 
+    /// <summary>Friendly title for the progress notification, re-applied on every progress update (so it isn't lost).</summary>
+    public string? Title { get; init; }
+
+    /// <summary>
+    /// True when this job owns its progress notification end-to-end (the facade created it for this enqueue), so the
+    /// dispatcher marks it finished on completion. False when reporting into a shared notification (e.g. a map/reduce
+    /// batch), where a single job must not close the aggregate bar.
+    /// </summary>
+    public bool CompletesProgressNotification { get; init; }
+
     /// <summary>User name that enqueued the job (for the worker's user context).</summary>
     public string? UserName { get; init; }
 

@@ -49,11 +49,15 @@ sections (`VirtoCommerce:Hangfire`, `VirtoCommerce:RabbitMQ`), so the existing H
     "DefaultQueue": "default",
     "MaxRetryAttempts": 3
   },
-  "Hangfire": { /* existing Hangfire options — storage, dashboard, queues, worker count */ },
+  "Hangfire": {
+    "WorkerCount": 20,         // concurrent jobs this instance processes (default ~ProcessorCount * 5)
+    /* plus existing Hangfire options — storage, dashboard, queues */
+  },
   "RabbitMQ": {
     "HostName": "localhost", "Port": 5672, "UserName": "guest", "Password": "guest", "VirtualHost": "/",
     // "Uri": "amqp://guest:guest@localhost:5672/",  // alternative to the host/port/credential fields above
-    "PrefetchCount": 1,        // unacknowledged messages a consumer prefetches (QoS)
+    "PrefetchCount": 1,        // unacknowledged messages a consumer prefetches (QoS) — also the default parallelism
+    // "ConsumerDispatchConcurrency": 10,  // handlers run in parallel per instance; defaults to PrefetchCount when unset
     "Queues": [],              // extra queues the consumer drains besides BackgroundJobs.DefaultQueue
     "UseDeadLetterQueue": true,    // route retry-exhausted jobs to "{queue}.dlq" instead of dropping them
     "DeadLetterQueueSuffix": ".dlq"
@@ -315,7 +319,8 @@ await _mapReduce.Enqueue<IndexPage, IndexPageResult, IndexSummary>(
 
 - **`items`** — the work split into independent units. The engine creates **one map task per item** and runs them in
   parallel across all workers. Partition *coarsely* — a page of ids, not a single document — so the task count and
-  each `TResult` stay small (`items` is your fan-out width).
+  each `TResult` stay small (`items` is your fan-out width). `Enqueue` returns quickly even for very large batches: it
+  stores the items and queues a single fan-out task that creates the map tasks on a worker (not inline in your call).
 - **`state`** — shared, read-only context handed to the **reduce** step once (it is *not* passed to the map handler).
   Put batch-level information the reducer needs here: what's being processed, a started-at timestamp, an index alias
   to swap, a correlation id, etc. Each map item, by contrast, gets only its own `TItem`.
@@ -341,6 +346,65 @@ await _mapReduce.Enqueue<IndexPage, IndexPageResult, IndexSummary>(
 `ContinueOnError` records failures and runs reduce with the full result set (each `MapResult<T>` carries
 `Succeeded`/`Error`). Map items are recorded as failed rather than engine-retried, so the join is deterministic on
 every engine; results are idempotent under at-least-once delivery (keyed by item index).
+
+#### How many map tasks run in parallel?
+
+A map task is an **ordinary background job** — it shares the worker pool with every other job, so the per-instance
+concurrency is the active engine's worker concurrency, not a map/reduce-specific setting. Scale **out** (more
+`Worker`/`Both` instances) to multiply it; the fleet-safe store below keeps the join correct across instances.
+
+| Provider | Concurrent map tasks **per instance** | Knob | Default |
+|---|---|---|---|
+| **Hangfire** | `WorkerCount` (server worker threads) | `VirtoCommerce:Hangfire:WorkerCount` | ~`ProcessorCount * 5` |
+| **RabbitMQ** | `ConsumerDispatchConcurrency` (parallel handler dispatch), bounded by `PrefetchCount` | `VirtoCommerce:RabbitMQ:ConsumerDispatchConcurrency` (defaults to `PrefetchCount`) | `1` |
+
+> **RabbitMQ gotcha:** `PrefetchCount` alone does *not* parallelize work — it only controls how many unacked
+> messages the broker delivers. The client still invokes the consumer handler **one at a time** unless
+> `ConsumerDispatchConcurrency` is &gt; 1. This module defaults `ConsumerDispatchConcurrency` to `PrefetchCount`, so
+> setting `"PrefetchCount": 10` gives you 10 concurrent handlers; set `ConsumerDispatchConcurrency` explicitly to
+> decouple the two (high prefetch for throughput, bounded handler parallelism).
+>
+> So a 20 000-page batch where each page takes 5 s finishes in ≈ `20000 / WorkerCount * 5 s` per Hangfire instance,
+> and ≈ `20000 / ConsumerDispatchConcurrency * 5 s` per RabbitMQ instance. The sample's `IndexPageHandler` logs
+> `MAP START … N running in parallel on this instance` on every item so you can watch the live concurrency.
+
+#### Where are the map results stored?
+
+In the **`IMapReduceBatchStore`** — never in the message itself. Two implementations ship in
+`VirtoCommerce.BackgroundJobs.Data` and are selected automatically:
+
+- **Redis** (`RedisMapReduceBatchStore`) when a Redis connection is configured — **fleet-safe across instances**.
+  Per batch it keeps four keys under `vc:mapreduce:{batchId}:*` — `:meta` (batch metadata), `:items` (the input
+  items the fan-out worker reads), `:results` (a **hash, one field per item index** → that item's serialized
+  `TResult`), and `:reduce` (the atomic reduce-claim flag). All carry a **7-day TTL** so abandoned batches
+  self-clean, and the whole set is deleted once reduce succeeds.
+- **In-memory** (`InMemoryMapReduceBatchStore`) for a single instance — same shape in a `ConcurrentDictionary`.
+  Not shared across instances; use Redis for a multi-instance fleet.
+
+Each map result is stored **keyed by its item index** (Redis hash field / dictionary key). That is what makes the
+completed count exact (`= number of distinct indices = HLEN`) and redelivery idempotent — a re-run overwrites the
+same slot instead of double-counting. The reducer reads the whole set back at the end, so **keep each `TResult`
+small** (a count + a handful of failed ids, not the indexed documents themselves).
+
+#### What happens if an instance fails mid-batch?
+
+Distinguish a **handler failure** (your `Map`/`Reduce` throws) from an **infrastructure failure** (the instance
+crashes, OOMs, or loses the broker connection):
+
+- **A map handler throws** → the failure is *recorded* at that item's index (`Succeeded = false`, with the message)
+  and counts as completed; the item is **not** retried. `FailurePolicy` then decides at reduce time whether the
+  batch faults (`FailFast`) or reduce still runs with failures included (`ContinueOnError`). (Cancellation is the
+  exception — it's re-thrown so the engine retries, not recorded as a business failure.)
+- **An instance dies while a map task is in flight** → the task never reached the store, so the engine redelivers
+  it: Hangfire re-queues the job after its invisibility timeout (and `MaxRetryAttempts` applies); RabbitMQ requeues
+  the unacked message to another consumer. It re-runs on a surviving instance and lands its result at the **same
+  index** — idempotent, no double-count. Because the reduce trigger is an atomic `SET NX`, only **one** reduce is
+  ever enqueued no matter how many map tasks redeliver. Already-finished items are untouched — you lose only the
+  in-flight item's work, not the whole batch.
+- **An instance dies during reduce** → the reduce task is also an ordinary job and is redelivered the same way; it
+  re-reads every stored map result and runs the reducer again. The store is cleaned up **only after reduce
+  succeeds**, so nothing is lost — but the reducer can run **more than once**, so **make `Reduce` idempotent**
+  (e.g. swap an index alias / upsert, don't blindly append). 
 
 A runnable, self-contained map/reduce example (framed as product indexing) is in the
 [sample module](samples/VirtoCommerce.BackgroundJobs.SampleModule/README.md).

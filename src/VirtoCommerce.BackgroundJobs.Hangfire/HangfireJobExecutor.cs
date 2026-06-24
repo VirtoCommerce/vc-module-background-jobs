@@ -25,11 +25,8 @@ public sealed class HangfireJobExecutor(IJobDispatcher dispatcher, IPushNotifica
 
         var jobId = performContext?.BackgroundJob?.Id ?? string.Empty;
 
-        IJobProgress progress = string.IsNullOrEmpty(envelope.ProgressNotificationId)
-            ? NoOpJobProgress.Instance
-            : new PushNotificationJobProgress(pushNotificationManager, envelope.ProgressNotificationId!, envelope.UserName);
-
-        var context = new JobExecutionContext(jobId, progress, envelope.Headers);
+        // Shared factory builds the progress context, so the notification title is threaded consistently across engines.
+        var context = JobExecutionContextFactory.Create(pushNotificationManager, envelope, jobId);
 
         await dispatcher.Dispatch(envelope, context, cancellationToken);
     }

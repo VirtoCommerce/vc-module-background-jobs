@@ -49,7 +49,10 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
         var record = await RunMapAsync(envelope, batch, context, cancellationToken);
         var completed = await _store.SaveResultAndCountAsync(envelope.BatchId, record, cancellationToken);
 
-        if (!string.IsNullOrEmpty(batch.ProgressNotificationId))
+        // Throttle progress to ~100 updates plus the last one, so a large batch doesn't flood the admin UI / SignalR
+        // with one notification per item.
+        var step = Math.Max(1, batch.Total / 100);
+        if (!string.IsNullOrEmpty(batch.ProgressNotificationId) && (completed >= batch.Total || completed % step == 0))
         {
             await context.Progress.Report(
                 new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },

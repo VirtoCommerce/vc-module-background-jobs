@@ -50,12 +50,18 @@ public sealed class MapReduceJob : IMapReduceJob
         ArgumentNullException.ThrowIfNull(items);
         ArgumentNullException.ThrowIfNull(state);
 
+        // Honor cancellation up front, but once we commit to a batch the fan-out below must complete as a unit —
+        // a request abort mid-loop would leave Total set with only some map tasks enqueued, so the batch could never
+        // reach completion (reduce would never fire). The fan-out therefore does not observe the caller's token.
+        cancellationToken.ThrowIfCancellationRequested();
+
         var itemList = items as IReadOnlyList<TItem> ?? items.ToList();
         var batchId = Guid.NewGuid().ToString("N");
         var userName = _userNameResolver.GetCurrentUserName();
+        var title = $"Map/reduce: {typeof(TItem).Name}";
         var (_, stateJson) = _serializer.Serialize(state);
 
-        var progressNotificationId = await TryCreateProgressNotificationAsync(options, itemList.Count, userName);
+        var progressNotificationId = await TryCreateProgressNotificationAsync(options, itemList.Count, userName, title);
 
         var batch = new MapReduceBatch
         {
@@ -68,41 +74,38 @@ public sealed class MapReduceJob : IMapReduceJob
             Queue = options?.Queue,
             FailurePolicy = options?.FailurePolicy ?? FailurePolicy.FailFast,
             ProgressNotificationId = progressNotificationId,
+            Title = title,
             UserName = userName,
         };
 
-        await _store.CreateAsync(batch, cancellationToken);
+        await _store.CreateAsync(batch, CancellationToken.None);
 
         // Empty batch: nothing to map, run reduce immediately so the finalize step still happens.
         if (itemList.Count == 0)
         {
             await _backgroundJob.Enqueue(new ReduceTaskEnvelope { BatchId = batchId },
-                new EnqueueOptions { Queue = options?.Queue }, cancellationToken);
+                new EnqueueOptions { Queue = options?.Queue }, CancellationToken.None);
             return batchId;
         }
 
-        var index = 0;
+        // Store the items and hand the actual fan-out (one map task per item) to a worker, so this call stays fast
+        // even for very large batches instead of publishing N messages inline on the request thread.
+        var mapItems = new List<MapItem>(itemList.Count);
         foreach (var item in itemList)
         {
             var (itemType, itemJson) = _serializer.Serialize(item);
-            var envelope = new MapTaskEnvelope
-            {
-                BatchId = batchId,
-                Index = index++,
-                ItemType = itemType,
-                ItemJson = itemJson,
-            };
-
-            // Threading the shared progress-notification id makes every map task report to one aggregate bar.
-            await _backgroundJob.Enqueue(envelope,
-                new EnqueueOptions { Queue = options?.Queue, ProgressNotificationId = progressNotificationId },
-                cancellationToken);
+            mapItems.Add(new MapItem { ItemType = itemType, ItemJson = itemJson });
         }
+
+        await _store.SaveItemsAsync(batchId, mapItems, CancellationToken.None);
+
+        await _backgroundJob.Enqueue(new MapFanOutEnvelope { BatchId = batchId },
+            new EnqueueOptions { Queue = options?.Queue }, CancellationToken.None);
 
         return batchId;
     }
 
-    private async Task<string?> TryCreateProgressNotificationAsync(MapReduceOptions? options, int total, string? userName)
+    private async Task<string?> TryCreateProgressNotificationAsync(MapReduceOptions? options, int total, string? userName, string title)
     {
         if (options?.ReportProgress != true)
         {
@@ -111,7 +114,7 @@ public sealed class MapReduceJob : IMapReduceJob
 
         var notification = new JobProgressPushNotification(userName ?? "system")
         {
-            Title = "Map/reduce job",
+            Title = title,
             Description = "Queued",
             Started = DateTime.UtcNow,
             TotalCount = total,

@@ -42,6 +42,16 @@ public class RabbitMqOptions
     public ushort PrefetchCount { get; set; } = 1;
 
     /// <summary>
+    /// Number of consumer callbacks the client dispatches IN PARALLEL (RabbitMQ.Client's
+    /// <c>ConsumerDispatchConcurrency</c>). This — not <see cref="PrefetchCount"/> alone — is what makes jobs run
+    /// concurrently on one instance: prefetch only caps how many unacked messages the broker delivers, but the
+    /// client still invokes the handler one-at-a-time unless this is &gt; 1. When unset (null) it defaults to
+    /// <see cref="PrefetchCount"/>, so raising prefetch alone increases parallelism as expected. Set it explicitly
+    /// to decouple the two (e.g. a high prefetch for throughput but a bounded number of concurrent handlers).
+    /// </summary>
+    public ushort? ConsumerDispatchConcurrency { get; set; }
+
+    /// <summary>
     /// Additional queues the in-process consumer drains. The engine-agnostic default queue
     /// (<c>VirtoCommerce:BackgroundJobs:DefaultQueue</c>) is always consumed; list extra queues here when jobs are
     /// enqueued onto non-default queues via <c>EnqueueOptions.Queue</c>.

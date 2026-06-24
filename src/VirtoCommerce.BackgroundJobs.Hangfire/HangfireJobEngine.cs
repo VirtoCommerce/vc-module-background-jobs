@@ -30,7 +30,8 @@ public sealed class HangfireJobEngine(IBackgroundJobClient client) : IJobEngine,
     public Task<string> Enqueue(JobEnvelope envelope, EnqueueOptions options, CancellationToken cancellationToken = default)
     {
         var envelopeJson = JsonConvert.SerializeObject(envelope);
-        var queue = string.IsNullOrEmpty(envelope.Queue) ? "default" : envelope.Queue!;
+        // Hangfire registers worker queues lowercased, so enqueue lowercased too or no worker would drain it.
+        var queue = (string.IsNullOrEmpty(envelope.Queue) ? "default" : envelope.Queue!).ToLowerInvariant();
 
         var job = HangfireJob.FromExpression<HangfireJobExecutor>(x => x.Execute(envelopeJson, null!, CancellationToken.None));
         var jobId = client.Create(job, new EnqueuedState(queue));
@@ -46,12 +47,18 @@ public sealed class HangfireJobEngine(IBackgroundJobClient client) : IJobEngine,
     {
         var state = JobStorage.Current.GetConnection().GetStateData(jobId);
 
+        // Unknown/expired id: report as not found (null) per the IJobEngine contract, rather than "completed".
+        if (state is null)
+        {
+            return Task.FromResult<Job?>(null);
+        }
+
         var result = new Job
         {
             Id = jobId,
-            State = state?.Name,
+            State = state.Name,
+            Completed = _finalStates.Contains(state.Name),
         };
-        result.Completed = state == null || _finalStates.Contains(result.State);
 
         return Task.FromResult<Job?>(result);
     }

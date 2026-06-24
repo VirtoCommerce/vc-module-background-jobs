@@ -16,6 +16,12 @@ public interface IMapReduceBatchStore
 
     Task<MapReduceBatch?> GetAsync(string batchId, CancellationToken cancellationToken = default);
 
+    /// <summary>Stores the batch's serialized items (in order) so the fan-out task can enqueue them from a worker.</summary>
+    Task SaveItemsAsync(string batchId, IReadOnlyList<MapItem> items, CancellationToken cancellationToken = default);
+
+    /// <summary>Reads the stored items (in order; index = position) for the fan-out task.</summary>
+    Task<IReadOnlyList<MapItem>> GetItemsAsync(string batchId, CancellationToken cancellationToken = default);
+
     /// <summary>Idempotently store one item's result and return the distinct number of items completed so far.</summary>
     Task<int> SaveResultAndCountAsync(string batchId, MapResultRecord result, CancellationToken cancellationToken = default);
 

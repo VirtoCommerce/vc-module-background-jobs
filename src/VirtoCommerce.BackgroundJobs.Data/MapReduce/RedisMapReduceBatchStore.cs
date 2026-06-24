@@ -38,6 +38,37 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
         return value.IsNullOrEmpty ? null : JsonConvert.DeserializeObject<MapReduceBatch>(value!);
     }
 
+    public async Task SaveItemsAsync(string batchId, IReadOnlyList<MapItem> items, CancellationToken cancellationToken = default)
+    {
+        var db = _connection.GetDatabase();
+        var key = ItemsKey(batchId);
+
+        // Push in chunks so a huge batch doesn't become one oversized RPUSH command.
+        const int chunkSize = 500;
+        for (var offset = 0; offset < items.Count; offset += chunkSize)
+        {
+            var values = items
+                .Skip(offset)
+                .Take(chunkSize)
+                .Select(x => (RedisValue)JsonConvert.SerializeObject(x))
+                .ToArray();
+
+            await db.ListRightPushAsync(key, values);
+        }
+
+        await db.KeyExpireAsync(key, _ttl);
+    }
+
+    public async Task<IReadOnlyList<MapItem>> GetItemsAsync(string batchId, CancellationToken cancellationToken = default)
+    {
+        var values = await _connection.GetDatabase().ListRangeAsync(ItemsKey(batchId));
+        return values
+            .Select(x => JsonConvert.DeserializeObject<MapItem>(x!))
+            .Where(x => x is not null)
+            .Select(x => x!)
+            .ToList();
+    }
+
     public async Task<int> SaveResultAndCountAsync(string batchId, MapResultRecord result, CancellationToken cancellationToken = default)
     {
         var db = _connection.GetDatabase();
@@ -65,10 +96,11 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
     public async Task CompleteAsync(string batchId, CancellationToken cancellationToken = default)
     {
         var db = _connection.GetDatabase();
-        await db.KeyDeleteAsync([MetaKey(batchId), ResultsKey(batchId), ReduceKey(batchId)]);
+        await db.KeyDeleteAsync([MetaKey(batchId), ResultsKey(batchId), ReduceKey(batchId), ItemsKey(batchId)]);
     }
 
     private static string MetaKey(string batchId) => $"vc:mapreduce:{batchId}:meta";
     private static string ResultsKey(string batchId) => $"vc:mapreduce:{batchId}:results";
     private static string ReduceKey(string batchId) => $"vc:mapreduce:{batchId}:reduce";
+    private static string ItemsKey(string batchId) => $"vc:mapreduce:{batchId}:items";
 }

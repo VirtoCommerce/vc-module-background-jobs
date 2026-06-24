@@ -19,6 +19,7 @@ public sealed class InMemoryMapReduceBatchStore : IMapReduceBatchStore
     {
         public required MapReduceBatch Batch { get; init; }
         public ConcurrentDictionary<int, MapResultRecord> Results { get; } = new();
+        public IReadOnlyList<MapItem> Items { get; set; } = [];
         public int ReduceClaimed;
     }
 
@@ -32,6 +33,18 @@ public sealed class InMemoryMapReduceBatchStore : IMapReduceBatchStore
 
     public Task<MapReduceBatch?> GetAsync(string batchId, CancellationToken cancellationToken = default)
         => Task.FromResult(_batches.TryGetValue(batchId, out var entry) ? entry.Batch : null);
+
+    public Task SaveItemsAsync(string batchId, IReadOnlyList<MapItem> items, CancellationToken cancellationToken = default)
+    {
+        if (_batches.TryGetValue(batchId, out var entry))
+        {
+            entry.Items = items;
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<MapItem>> GetItemsAsync(string batchId, CancellationToken cancellationToken = default)
+        => Task.FromResult(_batches.TryGetValue(batchId, out var entry) ? entry.Items : []);
 
     public Task<int> SaveResultAndCountAsync(string batchId, MapResultRecord result, CancellationToken cancellationToken = default)
     {

@@ -23,6 +23,9 @@ public sealed class MapReduceBatch
 
     public string? Queue { get; set; }
 
+    /// <summary>Progress-notification title, re-applied when the reduce step marks the batch finished.</summary>
+    public string? Title { get; set; }
+
     public FailurePolicy FailurePolicy { get; set; }
 
     /// <summary>Shared progress-notification id when the batch reports progress; null otherwise.</summary>

@@ -4,6 +4,7 @@ using Hangfire.MySql;
 using Hangfire.PostgreSql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using VirtoCommerce.BackgroundJobs.Core;
 
 namespace VirtoCommerce.Platform.Hangfire.Extensions
 {
@@ -51,7 +52,12 @@ namespace VirtoCommerce.Platform.Hangfire.Extensions
             hangfireOptions.PostgreSqlStorageOptions.PrepareSchemaIfNecessary = false;
             hangfireOptions.MySqlStorageOptions.PrepareSchemaIfNecessary = false;
 
-            GlobalJobFilters.Filters.Add(new AutomaticRetryAttribute { Attempts = hangfireOptions.AutomaticRetryCount });
+            // Apply the engine-agnostic retry count (VirtoCommerce:BackgroundJobs:MaxRetryAttempts, default 3) so
+            // Hangfire matches the documented setting and RabbitMQ behavior, rather than the legacy Hangfire-only
+            // AutomaticRetryCount.
+            var backgroundJobsOptions = new BackgroundJobsOptions();
+            configuration.GetSection("VirtoCommerce:BackgroundJobs").Bind(backgroundJobsOptions);
+            GlobalJobFilters.Filters.Add(new AutomaticRetryAttribute { Attempts = backgroundJobsOptions.MaxRetryAttempts });
 
             if (hangfireOptions.JobStorageType == HangfireJobStorageType.SqlServer ||
                 hangfireOptions.JobStorageType == HangfireJobStorageType.Database)

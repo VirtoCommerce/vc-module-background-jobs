@@ -63,7 +63,14 @@ namespace VirtoCommerce.BackgroundJobs.Hangfire
             string queue = null)
         {
             var options = new RecurringJobOptions { TimeZone = timeZone ?? TimeZoneInfo.Utc };
-            RecurringJob.AddOrUpdate(recurringJobId, methodCall, cronExpression, options);
+            if (!string.IsNullOrEmpty(queue))
+            {
+                RecurringJob.AddOrUpdate(recurringJobId, queue.ToLowerInvariant(), methodCall, cronExpression, options);
+            }
+            else
+            {
+                RecurringJob.AddOrUpdate(recurringJobId, methodCall, cronExpression, options);
+            }
         }
 
         public void RemoveIfExists(string recurringJobId)

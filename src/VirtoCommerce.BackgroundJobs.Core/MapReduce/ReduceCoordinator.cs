@@ -7,8 +7,10 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.BackgroundJobs.Core.Services;
 using VirtoCommerce.Platform.Core.Jobs;
+using VirtoCommerce.Platform.Core.PushNotifications;
 
 namespace VirtoCommerce.BackgroundJobs.Core.MapReduce;
 
@@ -23,17 +25,20 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
     private readonly IServiceProvider _serviceProvider;
     private readonly IJobPayloadSerializer _serializer;
     private readonly IMapReduceBatchStore _store;
+    private readonly IPushNotificationManager _pushNotificationManager;
     private readonly ILogger<ReduceCoordinator> _logger;
 
     public ReduceCoordinator(
         IServiceProvider serviceProvider,
         IJobPayloadSerializer serializer,
         IMapReduceBatchStore store,
+        IPushNotificationManager pushNotificationManager,
         ILogger<ReduceCoordinator> logger)
     {
         _serviceProvider = serviceProvider;
         _serializer = serializer;
         _store = store;
+        _pushNotificationManager = pushNotificationManager;
         _logger = logger;
     }
 
@@ -53,6 +58,7 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
         {
             _logger.LogError("Map/reduce batch {BatchId} faulted: {Failures}/{Total} map items failed (FailFast); reduce skipped.",
                 envelope.BatchId, failures, batch.Total);
+            await MarkFinishedAsync(batch, $"Faulted: {failures}/{batch.Total} map items failed.");
             await _store.CompleteAsync(envelope.BatchId, cancellationToken);
             return;
         }
@@ -81,9 +87,30 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             ExceptionDispatchInfo.Throw(ex.InnerException);
         }
 
+        await MarkFinishedAsync(batch, $"Completed ({batch.Total} items, {failures} failed).");
         await _store.CompleteAsync(envelope.BatchId, cancellationToken);
         _logger.LogInformation("Map/reduce batch {BatchId} reduced ({Total} items, {Failures} failed).",
             envelope.BatchId, batch.Total, failures);
+    }
+
+    // Closes the shared progress notification (sets Finished) once the batch settles, since individual map tasks
+    // intentionally don't close the aggregate bar. Preserves the title so the notification isn't reset.
+    private async Task MarkFinishedAsync(MapReduceBatch batch, string description)
+    {
+        if (string.IsNullOrEmpty(batch.ProgressNotificationId))
+        {
+            return;
+        }
+
+        await _pushNotificationManager.SendAsync(new JobProgressPushNotification(batch.UserName ?? "system")
+        {
+            Id = batch.ProgressNotificationId,
+            Title = batch.Title,
+            Description = description,
+            ProcessedCount = batch.Total,
+            TotalCount = batch.Total,
+            Finished = DateTime.UtcNow,
+        });
     }
 
     // Re-hydrate the type-erased records into a List<MapResult<TResult>> the reduce handler can accept as

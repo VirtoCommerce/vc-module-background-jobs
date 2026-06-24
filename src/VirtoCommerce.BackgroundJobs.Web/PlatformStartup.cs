@@ -64,12 +64,15 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
             services.AddHangfireServer(serverOptions =>
             {
-                var queues = config.GetSection("VirtoCommerce:Hangfire:Queues").Get<List<string>>();
-                if (!queues.IsNullOrEmpty())
-                {
-                    queues.Add(options.DefaultQueue);
-                    serverOptions.Queues = queues.Select(x => x.ToLower()).Distinct().ToArray();
-                }
+                // Always include the agnostic default queue so a non-"default" DefaultQueue still has a worker
+                // (Hangfire's built-in list is just ["default"]). Lowercased to match how jobs are enqueued.
+                var queues = config.GetSection("VirtoCommerce:Hangfire:Queues").Get<List<string>>() ?? [];
+                queues.Add(options.DefaultQueue);
+                serverOptions.Queues = queues
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x.ToLowerInvariant())
+                    .Distinct()
+                    .ToArray();
 
                 var workerCount = config.GetValue<int?>("VirtoCommerce:Hangfire:WorkerCount", null);
                 if (workerCount != null)

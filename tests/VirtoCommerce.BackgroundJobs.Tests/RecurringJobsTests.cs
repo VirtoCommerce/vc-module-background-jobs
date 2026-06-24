@@ -3,7 +3,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using VirtoCommerce.BackgroundJobs.Core.Recurring;
 using VirtoCommerce.BackgroundJobs.Data.Recurring;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Settings;
@@ -155,6 +157,60 @@ public class RecurringJobsTests
         await registration.Trigger(backgroundJob.Object, TestContext.Current.CancellationToken);
 
         Assert.NotNull(capturedPayload); // AbstractTypeFactory-created default instance
+    }
+
+    [Fact]
+    public void AddRecurringJob_WithEnabledFalse_MarksRegistrationDisabled()
+    {
+        var services = new ServiceCollection();
+
+        services.AddRecurringJob<SamplePayload, SampleHandler>(s => s
+            .WithId("lockout")
+            .WithCron("0 2 * * *")
+            .WithEnabled(false));
+
+        using var provider = services.BuildServiceProvider();
+
+        var registration = provider.GetServices<RecurringJobRegistration>().Single();
+        Assert.False(registration.Enabled);
+    }
+
+    [Fact]
+    public async Task Applier_RemovesDisabledFixedCronJob_AndSchedulesEnabledOne()
+    {
+        var enabled = new RecurringJobRegistration
+        {
+            Id = "on",
+            CronExpression = "0 2 * * *",
+            Enabled = true,
+            Trigger = (_, _) => Task.CompletedTask,
+        };
+        var disabled = new RecurringJobRegistration
+        {
+            Id = "off",
+            CronExpression = "0 2 * * *",
+            Enabled = false,
+            Trigger = (_, _) => Task.CompletedTask,
+        };
+
+        var services = new ServiceCollection();
+        services.AddSingleton(Mock.Of<ISettingsManager>());
+        using var provider = services.BuildServiceProvider();
+
+        var scheduler = new Mock<IRecurringJobScheduler>();
+        scheduler.Setup(x => x.AddOrUpdate(It.IsAny<RecurringJobRegistration>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        scheduler.Setup(x => x.Remove(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        var applier = new RecurringJobsApplier(
+            [enabled, disabled], provider, NullLogger<RecurringJobsApplier>.Instance, scheduler.Object);
+
+        await applier.StartAsync(TestContext.Current.CancellationToken);
+        await applier.StopAsync(TestContext.Current.CancellationToken);
+
+        // Enabled fixed-cron job is scheduled; disabled one is removed (clears any leftover from a previous run).
+        scheduler.Verify(x => x.AddOrUpdate(It.Is<RecurringJobRegistration>(r => r.Id == "on"), "0 2 * * *", It.IsAny<CancellationToken>()), Times.Once);
+        scheduler.Verify(x => x.Remove("off", It.IsAny<CancellationToken>()), Times.Once);
+        scheduler.Verify(x => x.AddOrUpdate(It.Is<RecurringJobRegistration>(r => r.Id == "off"), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
