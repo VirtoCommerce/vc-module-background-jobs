@@ -204,8 +204,10 @@ public class RecurringJobsTests
         var applier = new RecurringJobsApplier(
             [enabled, disabled], provider, NullLogger<RecurringJobsApplier>.Instance, scheduler.Object);
 
+        // StartAsync runs ExecuteAsync to completion synchronously here (the scheduler mock returns completed tasks,
+        // so nothing yields); StopAsync(None) then deterministically awaits the execute task on shutdown.
         await applier.StartAsync(TestContext.Current.CancellationToken);
-        await applier.StopAsync(TestContext.Current.CancellationToken);
+        await applier.StopAsync(CancellationToken.None);
 
         // Enabled fixed-cron job is scheduled; disabled one is removed (clears any leftover from a previous run).
         scheduler.Verify(x => x.AddOrUpdate(It.Is<RecurringJobRegistration>(r => r.Id == "on"), "0 2 * * *", It.IsAny<CancellationToken>()), Times.Once);
