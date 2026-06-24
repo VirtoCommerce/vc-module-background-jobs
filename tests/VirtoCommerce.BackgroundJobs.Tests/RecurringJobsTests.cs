@@ -197,22 +197,39 @@ public class RecurringJobsTests
         services.AddSingleton(Mock.Of<ISettingsManager>());
         using var provider = services.BuildServiceProvider();
 
+        // The applier is a BackgroundService: the runtime may schedule ExecuteAsync on the thread pool rather than
+        // run it inline in StartAsync (this differs by OS/runtime). So record the scheduler calls and signal once
+        // both registrations have been applied, then WAIT for that signal — don't assume StartAsync finished the work.
+        var calls = new ConcurrentQueue<string>();
+        var applied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Record(string entry)
+        {
+            calls.Enqueue(entry);
+            if (calls.Count >= 2)
+            {
+                applied.TrySetResult();
+            }
+        }
+
         var scheduler = new Mock<IRecurringJobScheduler>();
-        scheduler.Setup(x => x.AddOrUpdate(It.IsAny<RecurringJobRegistration>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-        scheduler.Setup(x => x.Remove(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        scheduler
+            .Setup(x => x.AddOrUpdate(It.IsAny<RecurringJobRegistration>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((RecurringJobRegistration r, string cron, CancellationToken _) => { Record($"add:{r.Id}:{cron}"); return Task.CompletedTask; });
+        scheduler
+            .Setup(x => x.Remove(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string id, CancellationToken _) => { Record($"remove:{id}"); return Task.CompletedTask; });
 
         var applier = new RecurringJobsApplier(
             [enabled, disabled], provider, NullLogger<RecurringJobsApplier>.Instance, scheduler.Object);
 
-        // StartAsync runs ExecuteAsync to completion synchronously here (the scheduler mock returns completed tasks,
-        // so nothing yields); StopAsync(None) then deterministically awaits the execute task on shutdown.
-        await applier.StartAsync(TestContext.Current.CancellationToken);
+        await applier.StartAsync(CancellationToken.None);
+        await applied.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         await applier.StopAsync(CancellationToken.None);
 
         // Enabled fixed-cron job is scheduled; disabled one is removed (clears any leftover from a previous run).
-        scheduler.Verify(x => x.AddOrUpdate(It.Is<RecurringJobRegistration>(r => r.Id == "on"), "0 2 * * *", It.IsAny<CancellationToken>()), Times.Once);
-        scheduler.Verify(x => x.Remove("off", It.IsAny<CancellationToken>()), Times.Once);
-        scheduler.Verify(x => x.AddOrUpdate(It.Is<RecurringJobRegistration>(r => r.Id == "off"), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains("add:on:0 2 * * *", calls);
+        Assert.Contains("remove:off", calls);
+        Assert.DoesNotContain(calls, c => c.StartsWith("add:off", StringComparison.Ordinal));
     }
 
     [Fact]
