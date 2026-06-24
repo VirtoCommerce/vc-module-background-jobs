@@ -4,8 +4,9 @@ A minimal, runnable **consumer module** that demonstrates how to use the Virto C
 abstraction: define a payload, implement a handler, register it, enqueue fire-and-forget jobs **with or without
 progress**, and declare a **recurring (cron) job** — on whichever engine is active (Hangfire or RabbitMQ).
 
-It is a single project and references **only `VirtoCommerce.Platform.Core`** — there is no compile-time dependency
-on the Background Jobs module or any engine. The runtime dependency on the engine is declared in `module.manifest`.
+Fire-and-forget and recurring jobs reference **only `VirtoCommerce.Platform.Core`** — no compile-time dependency on
+the engine. The map/reduce demo additionally references **`VirtoCommerce.BackgroundJobs.Core`** (where the map/reduce
+contracts live). The runtime dependency on the engine is declared in `module.manifest`.
 
 ## What it shows
 
@@ -14,8 +15,9 @@ on the Background Jobs module or any engine. The runtime dependency on the engin
 | [`Jobs/SampleJobPayload.cs`](Jobs/SampleJobPayload.cs) | A serializable payload (`ValueObject`), created via `AbstractTypeFactory` so partners can extend it. |
 | [`Jobs/SampleJob.cs`](Jobs/SampleJob.cs) | An `IBackgroundJobHandler<SampleJobPayload>` handler that reports progress step-by-step via `context.Progress.Report(...)`. |
 | [`Jobs/SampleRecurringJob.cs`](Jobs/SampleRecurringJob.cs) | A recurring job — the same `IBackgroundJobHandler<TPayload>` contract, no recurring-specific code. |
-| [`Module.cs`](Module.cs) | Registering the handler (`AddBackgroundJob`) and a recurring schedule (`AddRecurringJob`). |
-| [`Controllers/Api/SampleJobsController.cs`](Controllers/Api/SampleJobsController.cs) | Enqueuing via the `IBackgroundJob` facade, with and without progress. |
+| [`Jobs/Indexing/`](Jobs/Indexing/) | **Map/reduce**: a parallel "product indexing" batch — `IndexPageHandler` (map, one page of ids) + `IndexSummaryReducer` (reduce, aggregate counts/failures). |
+| [`Module.cs`](Module.cs) | Registering the handler (`AddBackgroundJob`), a recurring schedule (`AddRecurringJob`), and a map/reduce batch (`AddMapReduceJob`). |
+| [`Controllers/Api/SampleJobsController.cs`](Controllers/Api/SampleJobsController.cs) | Enqueuing via the `IBackgroundJob` facade (with/without progress) **and** a map/reduce batch via `IMapReduceJob`. |
 
 ## Run it
 
@@ -33,6 +35,16 @@ POST /api/background-jobs-sample/enqueue?withProgress=true&steps=5&message=hello
   the `/hangfire` dashboard.
 * **`withProgress=false`** → the job runs silently.
 * The call returns the **job id**; poll its status via `GET /api/platform/jobs/{id}`.
+
+To run the **map/reduce** "product indexing" batch (fans out one map task per page, then one reduce):
+
+```http
+POST /api/background-jobs-sample/index?productCount=1000&pageSize=50
+```
+
+* Splits the ids into pages (`1000 / 50 = 20` parallel map tasks), runs them across workers, then a single reduce
+  logs the aggregate counts. Every 137th id is seeded as `bad-*` so some pages report failures (`ContinueOnError`).
+* Returns the **batch id**; the aggregate progress streams to the admin notification UI.
 
 ## How it works
 
@@ -85,13 +97,41 @@ public class SampleRecurringJob(ILogger<SampleRecurringJob> logger) : IBackgroun
     }
 }
 
-// Register handler + schedule (Module.Initialize).
-services.AddRecurringJob<SampleRecurringJobPayload, SampleRecurringJob>(s => s
-    .WithId("BackgroundJobs.Sample.Heartbeat")
-    .WithCron("*/5 * * * *"));   // every 5 minutes
+// Register handler + schedule (Module.Initialize). The factory overload passes a configured payload —
+// it runs once per occurrence, so you can set parameters (or compute per-run values).
+services.AddRecurringJob<SampleRecurringJobPayload, SampleRecurringJob>(
+    () => new SampleRecurringJobPayload { Label = "heartbeat" },
+    s => s
+        .WithId("BackgroundJobs.Sample.Heartbeat")
+        .WithCron("*/5 * * * *"));   // every 5 minutes
 ```
 With Hangfire it appears in the `/hangfire` Recurring Jobs dashboard; with RabbitMQ the in-process scheduler fires
 it (exactly once across the fleet) and enqueues it for a worker.
+
+### Map/reduce — parallel product indexing
+
+For work that splits into many independent pieces (here: indexing a catalog), map/reduce fans out one **map** task
+per page of ids — they run in parallel across all workers — then runs a single **reduce** task once every page
+finishes. This beats one long-running indexing job: it scales out, isolates per-page failures, and gives a real
+finalize step. The handlers (`Jobs/Indexing/`) use a self-contained stand-in indexer (ids prefixed `bad-` simulate
+failures) so the sample needs no Search module.
+
+```csharp
+// Register the map + reduce handlers (Module.Initialize) — types inferred from the handlers.
+services.AddMapReduceJob<IndexPageHandler, IndexSummaryReducer>();
+
+// Enqueue a batch — partition into PAGES of ids (not individual documents) to keep the task count sane.
+var pages = allProductIds.Chunk(50).Select(ids => new IndexPage("Product", ids));
+await mapReduce.Enqueue<IndexPage, IndexPageResult, IndexSummary>(
+    items: pages,
+    state: new IndexSummary("Product", DateTime.UtcNow.Ticks),
+    options: new MapReduceOptions { Queue = "indexing", FailurePolicy = FailurePolicy.ContinueOnError, ReportProgress = true });
+```
+
+Inject `IMapReduceJob` (from `VirtoCommerce.BackgroundJobs.Core`) to enqueue. With `ContinueOnError`, the reduce
+handler receives every page's outcome (successes and failures) so it can log totals and re-index just the failed ids.
+This is wired end-to-end in [`SampleJobsController.IndexProducts`](Controllers/Api/SampleJobsController.cs) — call
+`POST /api/background-jobs-sample/index` to run it.
 
 ## License
 

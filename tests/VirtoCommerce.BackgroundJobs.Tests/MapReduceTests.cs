@@ -1,0 +1,221 @@
+#nullable enable
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Linq.Expressions;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using VirtoCommerce.BackgroundJobs.Core.MapReduce;
+using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs.Data.MapReduce;
+using VirtoCommerce.Platform.Core.Jobs;
+using VirtoCommerce.Platform.Core.PushNotifications;
+using VirtoCommerce.Platform.Core.Security;
+using Xunit;
+
+namespace VirtoCommerce.BackgroundJobs.Tests;
+
+public class MapReduceTests
+{
+    public sealed record SquareItem(int Value);
+    public sealed record SquareResult(int Square);
+    public sealed record SumState(string Label);
+
+    private sealed class SquareHandler : IMapJobHandler<SquareItem, SquareResult>
+    {
+        public Task<SquareResult> Map(SquareItem item, IJobExecutionContext ctx, CancellationToken ct = default)
+            => Task.FromResult(new SquareResult(item.Value * item.Value));
+    }
+
+    // Throws for Value == 3 to exercise failure handling.
+    private sealed class FlakySquareHandler : IMapJobHandler<SquareItem, SquareResult>
+    {
+        public Task<SquareResult> Map(SquareItem item, IJobExecutionContext ctx, CancellationToken ct = default)
+            => item.Value == 3
+                ? throw new InvalidOperationException("boom")
+                : Task.FromResult(new SquareResult(item.Value * item.Value));
+    }
+
+    private sealed class SumReducer : IReduceJobHandler<SumState, SquareResult>
+    {
+        public bool Ran { get; private set; }
+        public int Total { get; private set; }
+        public IReadOnlyCollection<MapResult<SquareResult>>? Captured { get; private set; }
+
+        public Task Reduce(SumState state, IReadOnlyCollection<MapResult<SquareResult>> results, IJobExecutionContext ctx, CancellationToken ct = default)
+        {
+            Ran = true;
+            Captured = results;
+            Total = results.Where(r => r.Succeeded).Sum(r => r.Value!.Square);
+            return Task.CompletedTask;
+        }
+    }
+
+    // Captures enqueued payloads instead of going to a real engine.
+    private sealed class CapturingBackgroundJob : IBackgroundJob
+    {
+        public List<object> Enqueued { get; } = [];
+
+        public Task<string> Enqueue<TPayload>(TPayload payload, EnqueueOptions? options = null, CancellationToken ct = default)
+            where TPayload : class
+        {
+            Enqueued.Add(payload);
+            return Task.FromResult(Guid.NewGuid().ToString("N"));
+        }
+
+        public string Enqueue(Expression<Action> methodCall) => throw new NotSupportedException();
+        public string Enqueue(Expression<Func<Task>> methodCall) => throw new NotSupportedException();
+    }
+
+    private static IJobExecutionContext Context() =>
+        new JobExecutionContext("test", NoOpJobProgress.Instance, new Dictionary<string, string>());
+
+    private static (MapReduceJob facade, MapCoordinator map, ReduceCoordinator reduce, CapturingBackgroundJob bus, InMemoryMapReduceBatchStore store, SumReducer reducer)
+        BuildHarness(IMapJobHandler<SquareItem, SquareResult> mapHandler)
+    {
+        var reducer = new SumReducer();
+        var services = new ServiceCollection();
+        services.AddSingleton(mapHandler);
+        services.AddSingleton<IReduceJobHandler<SumState, SquareResult>>(reducer);
+        var sp = services.BuildServiceProvider();
+
+        var serializer = new JsonJobPayloadSerializer();
+        var store = new InMemoryMapReduceBatchStore();
+        var bus = new CapturingBackgroundJob();
+
+        var userResolver = new Mock<IUserNameResolver>();
+        userResolver.Setup(x => x.GetCurrentUserName()).Returns("tester");
+
+        var facade = new MapReduceJob(bus, store, serializer, userResolver.Object, Mock.Of<IPushNotificationManager>());
+        var map = new MapCoordinator(sp, serializer, store, bus, NullLogger<MapCoordinator>.Instance);
+        var reduce = new ReduceCoordinator(sp, serializer, store, NullLogger<ReduceCoordinator>.Instance);
+
+        return (facade, map, reduce, bus, store, reducer);
+    }
+
+    private static async Task PumpMaps(MapCoordinator map, CapturingBackgroundJob bus, CancellationToken ct)
+    {
+        foreach (var env in bus.Enqueued.OfType<MapTaskEnvelope>().ToList())
+        {
+            await map.Execute(env, Context(), ct);
+        }
+    }
+
+    [Fact]
+    public async Task FullSuccess_RunsReduceOnce_WithAggregatedResults()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (facade, map, reduce, bus, _, reducer) = BuildHarness(new SquareHandler());
+
+        await facade.Enqueue<SquareItem, SquareResult, SumState>(
+            [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"), cancellationToken: ct);
+
+        Assert.Equal(3, bus.Enqueued.OfType<MapTaskEnvelope>().Count());
+
+        await PumpMaps(map, bus, ct);
+
+        // Exactly one reduce task triggered after the last map completed.
+        var reduceEnvelopes = bus.Enqueued.OfType<ReduceTaskEnvelope>().ToList();
+        Assert.Single(reduceEnvelopes);
+
+        await reduce.Execute(reduceEnvelopes[0], Context(), ct);
+
+        Assert.True(reducer.Ran);
+        Assert.Equal(1 + 4 + 9, reducer.Total);
+    }
+
+    [Fact]
+    public async Task FailFast_WithFailure_SkipsReduce()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (facade, map, reduce, bus, _, reducer) = BuildHarness(new FlakySquareHandler());
+
+        await facade.Enqueue<SquareItem, SquareResult, SumState>(
+            [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"),
+            new MapReduceOptions { FailurePolicy = FailurePolicy.FailFast }, ct);
+
+        await PumpMaps(map, bus, ct);
+        await reduce.Execute(bus.Enqueued.OfType<ReduceTaskEnvelope>().Single(), Context(), ct);
+
+        Assert.False(reducer.Ran);
+    }
+
+    [Fact]
+    public async Task ContinueOnError_RunsReduce_WithFailuresIncluded()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (facade, map, reduce, bus, _, reducer) = BuildHarness(new FlakySquareHandler());
+
+        await facade.Enqueue<SquareItem, SquareResult, SumState>(
+            [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"),
+            new MapReduceOptions { FailurePolicy = FailurePolicy.ContinueOnError }, ct);
+
+        await PumpMaps(map, bus, ct);
+        await reduce.Execute(bus.Enqueued.OfType<ReduceTaskEnvelope>().Single(), Context(), ct);
+
+        Assert.True(reducer.Ran);
+        Assert.Equal(3, reducer.Captured!.Count);
+        Assert.Equal(1 + 4, reducer.Total); // failed item (3) excluded
+
+        // The handler throws synchronously; the real message must be recorded, not the reflection wrapper.
+        var failed = Assert.Single(reducer.Captured!, r => !r.Succeeded);
+        Assert.Equal("boom", failed.Error);
+    }
+
+    [Fact]
+    public async Task EmptyBatch_RunsReduceImmediately()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (facade, _, reduce, bus, _, reducer) = BuildHarness(new SquareHandler());
+
+        await facade.Enqueue<SquareItem, SquareResult, SumState>(
+            [], new SumState("empty"), cancellationToken: ct);
+
+        Assert.Empty(bus.Enqueued.OfType<MapTaskEnvelope>());
+        await reduce.Execute(bus.Enqueued.OfType<ReduceTaskEnvelope>().Single(), Context(), ct);
+
+        Assert.True(reducer.Ran);
+        Assert.Equal(0, reducer.Total);
+    }
+
+    [Fact]
+    public void AddMapReduceJob_Infers_Types_From_Handlers()
+    {
+        var services = new ServiceCollection();
+
+        services.AddMapReduceJob<SquareHandler, SumReducer>();
+
+        using var provider = services.BuildServiceProvider();
+        Assert.IsType<SquareHandler>(provider.GetService<IMapJobHandler<SquareItem, SquareResult>>());
+        Assert.IsType<SumReducer>(provider.GetService<IReduceJobHandler<SumState, SquareResult>>());
+    }
+
+    [Fact]
+    public async Task Store_SaveResult_IsIdempotentByIndex()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = new InMemoryMapReduceBatchStore();
+        await store.CreateAsync(new MapReduceBatch { BatchId = "b", Total = 1 }, ct);
+
+        var first = await store.SaveResultAndCountAsync("b", new MapResultRecord { Index = 0, Succeeded = true }, ct);
+        var second = await store.SaveResultAndCountAsync("b", new MapResultRecord { Index = 0, Succeeded = true }, ct);
+
+        Assert.Equal(1, first);
+        Assert.Equal(1, second); // same index does not double-count
+    }
+
+    [Fact]
+    public async Task Store_TryBeginReduce_WinsExactlyOnce()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = new InMemoryMapReduceBatchStore();
+        await store.CreateAsync(new MapReduceBatch { BatchId = "b", Total = 1 }, ct);
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => store.TryBeginReduceAsync("b", ct)));
+
+        Assert.Equal(1, results.Count(won => won));
+    }
+}

@@ -12,6 +12,7 @@ using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Web.Infrastructure.HealthChecks;
 using VirtoCommerce.BackgroundJobs.Core.Recurring;
 using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs.Data.MapReduce;
 using VirtoCommerce.BackgroundJobs.Data.Recurring;
 using VirtoCommerce.BackgroundJobs.Hangfire;
 using VirtoCommerce.BackgroundJobs.RabbitMQ.Extensions;
@@ -105,6 +106,9 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
         // the active engine (built-in or custom) registers, and warns when none is present.
         services.AddSingleton<RecurringJobsApplier>();
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<RecurringJobsApplier>());
+
+        // Map/reduce orchestration (facade + coordinators + batch store) — engine-agnostic, rides the active engine.
+        services.AddMapReduce();
 
         // Select the active engine. Built-in engines register here; an unknown provider is left for a custom engine
         // module to satisfy (it self-activates in its own IPlatformStartup and registers IJobEngine).

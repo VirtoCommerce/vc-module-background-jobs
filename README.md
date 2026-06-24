@@ -167,8 +167,9 @@ public class SendOrderEmailJob(IEmailSender sender) : IBackgroundJobHandler<Send
     }
 }
 
-// 3) Register in the module's Initialize(IServiceCollection).
-services.AddBackgroundJob<SendOrderEmailPayload, SendOrderEmailJob>();
+// 3) Register in the module's Initialize(IServiceCollection). The payload type is inferred from the handler;
+//    use AddBackgroundJob<TPayload, THandler>() if you prefer to state it explicitly.
+services.AddBackgroundJob<SendOrderEmailJob>();
 
 // 4) Enqueue (engine-agnostic).
 var payload = AbstractTypeFactory<SendOrderEmailPayload>.TryCreateInstance();
@@ -179,17 +180,79 @@ await jobs.Enqueue(payload);                                            // fire-
 await jobs.Enqueue(payload, new EnqueueOptions { ReportProgress = true }); // with progress
 ```
 
+### Enqueue options — what to set and why
+
+`Enqueue(payload)` with no options is the common case: the job runs as soon as a worker is free, on the default
+queue. Pass `EnqueueOptions` only when you need one of these behaviors:
+
+| Option | Why you'd set it | Notes / engine support |
+|---|---|---|
+| `Queue` | **Isolate workloads.** Route heavy or slow jobs (catalog indexing, bulk export) to a dedicated queue/worker pool so they don't starve short interactive jobs — e.g. `Queue = "indexing"`. | Honored by **Hangfire** and **RabbitMQ** (the worker drains the configured queues). Google Cloud Tasks is single-queue and ignores it. Falls back to `VirtoCommerce:BackgroundJobs:DefaultQueue` when unset. |
+| `ReportProgress` | **The user is watching.** For long jobs, stream `context.Progress.Report(...)` to the admin UI over SignalR (progress bar + log). Skip it for fire-and-forget work to avoid needless notifications. | The engine creates a progress push-notification and returns its id via the notification stream. Works on every engine. |
+| `ProgressNotificationId` | **Report into an existing notification** instead of a new one — e.g. a parent operation, or one shared bar across several jobs (this is how map/reduce shows an aggregate bar). | When set you don't also need `ReportProgress`; updates flow to that id. |
+| `UniqueKey` | **De-duplicate re-enqueues.** Collapse repeated triggers of the "same" work (a debounce/idempotency key) into a single job. | Honored where the engine supports dedup — **Google Cloud Tasks** (task-name dedup). Hangfire and RabbitMQ currently ignore it. |
+
+**Retries** are configured globally, not per enqueue: `VirtoCommerce:BackgroundJobs:MaxRetryAttempts` governs how many
+times a failed job is retried before being dead-lettered/dropped (RabbitMQ); Hangfire uses its own retry filter.
+(`EnqueueOptions.MaxRetryAttempts` is reserved for a future per-job override and is not yet honored.)
+
+### Extending & overriding jobs (partner modules)
+
+Background jobs follow the standard Virto Commerce extension model — a partner module can **extend the payload**
+(`AbstractTypeFactory`), **override the handler** (DI, last registration wins), or **both**, and `jobs.Enqueue(payload)`
+keeps working. The message carries the *concrete* payload type, so the extended type survives serialization across the
+engine and arrives at the handler intact.
+
+```csharp
+// Partner module — Initialize(IServiceCollection):
+
+// 1) Extend the payload: derive and override the type so the factory builds the extended one.
+public class CustomSendOrderEmailPayload : SendOrderEmailPayload
+{
+    public string Locale { get; set; }
+}
+AbstractTypeFactory<SendOrderEmailPayload>.OverrideType<SendOrderEmailPayload, CustomSendOrderEmailPayload>();
+
+// 2) Override the handler: register yours AFTER the base module — last registration wins.
+public class CustomSendOrderEmailJob(IEmailSender sender) : IBackgroundJobHandler<SendOrderEmailPayload>
+{
+    public async Task Execute(SendOrderEmailPayload payload, IJobExecutionContext context, CancellationToken ct = default)
+    {
+        var custom = (CustomSendOrderEmailPayload)payload;   // the extended instance is delivered here
+        await sender.Send(custom.CustomerEmail, custom.OrderId, custom.Locale, ct);
+    }
+}
+services.AddBackgroundJob<SendOrderEmailPayload, CustomSendOrderEmailJob>();
+
+// Enqueue is unchanged — create via the factory (returns the extended type) and enqueue as the base type.
+SendOrderEmailPayload payload = AbstractTypeFactory<SendOrderEmailPayload>.TryCreateInstance();
+payload.OrderId = order.Id;
+((CustomSendOrderEmailPayload)payload).Locale = "fr-FR";
+await jobs.Enqueue(payload);   // base handler resolved by contract; overriding handler + extended payload both apply
+```
+
+How it works: the enqueue facade records `PayloadType = payload.GetType()` (the concrete extended type) while the
+handler is keyed on the base contract — so the dispatcher reconstructs the derived instance and resolves the
+overriding `IBackgroundJobHandler<SendOrderEmailPayload>`. Either extension works on its own, or together. See
+[`ExtensibilityTests`](tests/VirtoCommerce.BackgroundJobs.Tests/ExtensibilityTests.cs) for the end-to-end proof.
+
 ### Recurring jobs
 
 A recurring job is the same handler declared with a schedule — no recurring-specific contract. Works identically on
 Hangfire and RabbitMQ.
 
 ```csharp
-// Explicit cron
-services.AddRecurringJob<SendDigestPayload, SendDigestJob>(s => s
+// Explicit cron (payload type inferred from the handler; use AddRecurringJob<TPayload, THandler>(...) to state it)
+services.AddRecurringJob<SendDigestJob>(s => s
     .WithId("SendDigest")
     .WithCron("0 7 * * *")        // 5- or 6-field cron
     .WithQueue("maintenance"));   // optional
+
+// With a parameterized payload — the factory runs once per occurrence, so you can pass arguments
+// (or compute per-run values). Build via AbstractTypeFactory inside the factory to keep it overridable.
+services.AddRecurringJob<SendDigestPayload, SendDigestJob>(
+    () => new SendDigestPayload { Top = 10, Period = "daily" },
+    s => s.WithId("SendDigest").WithCron("0 7 * * *"));
 
 // Setting-driven (enabler on/off + cron setting; re-applied live when either setting changes)
 services.AddRecurringJob<PrunePayload, PruneHandler>(s => s
@@ -200,6 +263,87 @@ On each occurrence the active engine runs the handler on a worker. The platform 
 active `IRecurringJobScheduler`; with no engine installed it logs a warning instead of failing.
 
 A complete, runnable example lives in [`samples/VirtoCommerce.BackgroundJobs.SampleModule`](samples/VirtoCommerce.BackgroundJobs.SampleModule/README.md).
+
+### Map/reduce (fan-out → aggregate)
+
+For work that splits into many independent pieces — reindexing a catalog, bulk export/import, image processing — use
+map/reduce instead of one long-running job. It fans out **N map tasks that run in parallel across all workers**, then
+runs a single **reduce** task once every item finishes. It's engine-agnostic (works on Hangfire/RabbitMQ/any engine)
+because the map, reduce, and coordination are ordinary message jobs; the join is fleet-safe via the same atomic
+marker pattern as the recurring scheduler (Redis when configured, in-memory for a single instance).
+
+The map/reduce contracts live in `VirtoCommerce.BackgroundJobs.Core` (a packable NuGet), so a consuming module
+references that package (in addition to the manifest dependency on the engine module).
+
+```csharp
+// 1) Map handler — runs once per item, in parallel, on any worker. Keep the result small.
+public class IndexPageHandler(IIndexingManager indexer) : IMapJobHandler<IndexPage, IndexPageResult>
+{
+    public async Task<IndexPageResult> Map(IndexPage page, IJobExecutionContext ctx, CancellationToken ct)
+    {
+        var failed = await indexer.IndexDocuments(page.DocumentType, page.DocumentIds, ct);
+        return new IndexPageResult(page.DocumentIds.Length - failed.Length, failed);
+    }
+}
+
+// 2) Reduce handler — runs once, after every page reaches a terminal state.
+public class IndexSummaryReducer : IReduceJobHandler<IndexSummary, IndexPageResult>
+{
+    public Task Reduce(IndexSummary s, IReadOnlyCollection<MapResult<IndexPageResult>> results,
+                       IJobExecutionContext ctx, CancellationToken ct)
+    {
+        var indexed = results.Where(r => r.Succeeded).Sum(r => r.Value!.Indexed);
+        // swap index alias / warm caches / enqueue a targeted re-index of the failed ids …
+        return Task.CompletedTask;
+    }
+}
+
+// 3) Register the handlers (module Initialize). The item/result/state types are inferred from the handlers
+//    (or use the explicit AddMapReduceJob<TItem, TResult, TState, TMap, TReduce>() overload).
+services.AddMapReduceJob<IndexPageHandler, IndexSummaryReducer>();
+
+// 4) Enqueue a batch — partition into PAGES (not individual documents) to keep the task count sane.
+//    TItem/TState are inferred from the arguments; TResult is stated explicitly (it appears in no argument).
+var pages = allProductIds.Chunk(50).Select(ids => new IndexPage("Product", ids));
+await _mapReduce.Enqueue<IndexPage, IndexPageResult, IndexSummary>(
+    items: pages,
+    state: new IndexSummary("Product", DateTime.UtcNow.Ticks),
+    options: new MapReduceOptions { Queue = "indexing", FailurePolicy = FailurePolicy.ContinueOnError, ReportProgress = true });
+```
+
+**What the parameters mean:**
+
+- **`items`** — the work split into independent units. The engine creates **one map task per item** and runs them in
+  parallel across all workers. Partition *coarsely* — a page of ids, not a single document — so the task count and
+  each `TResult` stay small (`items` is your fan-out width).
+- **`state`** — shared, read-only context handed to the **reduce** step once (it is *not* passed to the map handler).
+  Put batch-level information the reducer needs here: what's being processed, a started-at timestamp, an index alias
+  to swap, a correlation id, etc. Each map item, by contrast, gets only its own `TItem`.
+- **`options`** (`MapReduceOptions`) — optional knobs:
+
+| Option | What it means | When to set it |
+|---|---|---|
+| `Queue` | The queue **both** the map tasks and the reduce task run on. | Route a large batch to a dedicated worker pool so it doesn't starve short interactive jobs. Falls back to `VirtoCommerce:BackgroundJobs:DefaultQueue`. |
+| `FailurePolicy` | `FailFast` (default): if any item fails, the batch is marked faulted and **reduce is skipped**. `ContinueOnError`: failures are recorded and **reduce runs with the full result set** (each `MapResult<T>` carries `Succeeded`/`Error`). | Use `ContinueOnError` when partial results are useful (indexing, import) and you want the failed items surfaced to the reducer for a targeted re-run. |
+| `ReportProgress` | Streams aggregate progress (completed/total items) to the admin UI on one shared notification. | Long batches the operator is watching. Leave off for fire-and-forget. |
+
+**Why not one long-running job?**
+
+| | One long-running job | Map/reduce |
+|---|---|---|
+| Throughput | 1 worker, sequential | All workers, in parallel |
+| Scale-out | Adding workers does nothing | Linear speedup |
+| A failure at item 180k | Whole job fails / restarts from 0 | That page is recorded; the rest still complete |
+| Partial success | Hand-rolled checkpointing | `ContinueOnError` → reduce gets every page's outcome; failed ids surfaced |
+| Finalize step | Manual | First-class reduce (alias swap, notify, re-index failures) |
+
+**Failure policy:** `FailFast` (default) marks the batch faulted and skips reduce if any item fails;
+`ContinueOnError` records failures and runs reduce with the full result set (each `MapResult<T>` carries
+`Succeeded`/`Error`). Map items are recorded as failed rather than engine-retried, so the join is deterministic on
+every engine; results are idempotent under at-least-once delivery (keyed by item index).
+
+A runnable, self-contained map/reduce example (framed as product indexing) is in the
+[sample module](samples/VirtoCommerce.BackgroundJobs.SampleModule/README.md).
 
 ## Writing a custom engine
 

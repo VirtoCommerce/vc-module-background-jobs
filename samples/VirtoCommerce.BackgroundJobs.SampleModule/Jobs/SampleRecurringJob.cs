@@ -15,7 +15,7 @@ public class SampleRecurringJob(ILogger<SampleRecurringJob> logger) : IBackgroun
 {
     public Task Execute(SampleRecurringJobPayload payload, IJobExecutionContext context, CancellationToken cancellationToken = default)
     {
-        logger.LogInformation("SampleRecurringJob fired at {Utc:o} (job id {JobId}).", DateTime.UtcNow, context.JobId);
+        logger.LogInformation("SampleRecurringJob '{Label}' fired at {Utc:o} (job id {JobId}).", payload.Label, DateTime.UtcNow, context.JobId);
         return Task.CompletedTask;
     }
 }

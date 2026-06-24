@@ -33,6 +33,29 @@ public class BackgroundJobsTests
         }
     }
 
+    private sealed class NotAHandler
+    {
+    }
+
+    [Fact]
+    public void AddBackgroundJob_Infers_Payload_From_Handler()
+    {
+        var services = new ServiceCollection();
+
+        services.AddBackgroundJob<RecordingHandler>();
+
+        using var provider = services.BuildServiceProvider();
+        Assert.IsType<RecordingHandler>(provider.GetService<IBackgroundJobHandler<TestPayload>>());
+    }
+
+    [Fact]
+    public void AddBackgroundJob_Throws_When_Handler_Does_Not_Implement_Interface()
+    {
+        var services = new ServiceCollection();
+
+        Assert.Throws<ArgumentException>(() => services.AddBackgroundJob<NotAHandler>());
+    }
+
     [Fact]
     public void Serializer_RoundTrips_Payload()
     {

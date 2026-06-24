@@ -1,18 +1,22 @@
+using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using VirtoCommerce.BackgroundJobs.Core.MapReduce;
 using VirtoCommerce.BackgroundJobs.SampleModule.Jobs;
+using VirtoCommerce.BackgroundJobs.SampleModule.Jobs.Indexing;
 using VirtoCommerce.Platform.Core.Common;
 using VirtoCommerce.Platform.Core.Jobs;
 
 namespace VirtoCommerce.BackgroundJobs.SampleModule.Controllers.Api;
 
-/// <summary>Endpoints to enqueue the sample background job for manual testing.</summary>
+/// <summary>Endpoints to enqueue the sample background jobs for manual testing.</summary>
 [Authorize]
 [Route("api/background-jobs-sample")]
-public class SampleJobsController(IBackgroundJob backgroundJob) : Controller
+public class SampleJobsController(IBackgroundJob backgroundJob, IMapReduceJob mapReduce) : Controller
 {
     /// <summary>
     /// Enqueue a sample fire-and-forget job. Returns the engine job id (poll it via
@@ -39,5 +43,41 @@ public class SampleJobsController(IBackgroundJob backgroundJob) : Controller
             cancellationToken);
 
         return Ok(jobId);
+    }
+
+    /// <summary>
+    /// Enqueue a map/reduce "product indexing" batch: fan out one map task per page of ids (run in parallel across
+    /// workers), then a single reduce aggregates the per-page counts. Returns the batch id. A few ids are seeded as
+    /// "bad-*" so the stand-in indexer reports per-page failures, demonstrating <c>ContinueOnError</c>.
+    /// </summary>
+    /// <param name="productCount">How many fake product ids to index.</param>
+    /// <param name="pageSize">Ids per map task (fan out over pages, not individual documents).</param>
+    [HttpPost("index")]
+    [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
+    public async Task<ActionResult<string>> IndexProducts(
+        [FromQuery] int productCount = 1000,
+        [FromQuery] int pageSize = 50,
+        CancellationToken cancellationToken = default)
+    {
+        // Simulate a catalog; every 137th id is "bad-*" so the stand-in indexer fails that one (see IndexPageHandler).
+        var documentIds = Enumerable.Range(1, productCount)
+            .Select(i => i % 137 == 0 ? $"bad-{i}" : $"product-{i:D5}")
+            .ToArray();
+
+        // Partition into PAGES — keeps the map-task count and per-result size small.
+        var pages = documentIds.Chunk(pageSize).Select(chunk => new IndexPage("Product", chunk));
+
+        var batchId = await mapReduce.Enqueue<IndexPage, IndexPageResult, IndexSummary>(
+            items: pages,
+            state: new IndexSummary("Product", DateTime.UtcNow.Ticks),
+            options: new MapReduceOptions
+            {
+                Queue = "indexing",
+                FailurePolicy = FailurePolicy.ContinueOnError,
+                ReportProgress = true,
+            },
+            cancellationToken: cancellationToken);
+
+        return Ok(batchId);
     }
 }
