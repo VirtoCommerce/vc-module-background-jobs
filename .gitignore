@@ -341,3 +341,6 @@ ASALocalRun/
 dist/
 **/Properties/launchSettings.json
 /.serena
+
+# Exclude Visual Studio test run settings
+*.runsettings
