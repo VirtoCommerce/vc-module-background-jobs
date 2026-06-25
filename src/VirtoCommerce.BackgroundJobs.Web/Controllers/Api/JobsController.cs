@@ -33,7 +33,12 @@ namespace VirtoCommerce.BackgroundJobs.Web.Controllers.Api
         [Route("{id}")]
         public async Task<ActionResult<Job>> GetStatus(string id, CancellationToken cancellationToken)
         {
-            var result = await _jobEngine.GetStatus(id, cancellationToken);
+            // IJobEngine.GetStatus returns null for an unknown/expired job (the port contract). The monitoring API,
+            // however, never returns null: clients (the admin UI poller, integration tests) expect a Job, treating an
+            // unknown id as completed so they stop polling — preserving the platform's original endpoint behavior.
+            var result = await _jobEngine.GetStatus(id, cancellationToken)
+                ?? new Job { Id = id, Completed = true };
+
             return Ok(result);
         }
     }

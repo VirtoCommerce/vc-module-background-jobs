@@ -21,7 +21,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\VirtoCommerce.BackgroundJobs.Core\VirtoCommerce.BackgroundJobs.Core.csproj" />
     <ProjectReference Include="..\..\src\VirtoCommerce.BackgroundJobs.Data\VirtoCommerce.BackgroundJobs.Data.csproj" />
+    <ProjectReference Include="..\..\src\VirtoCommerce.BackgroundJobs.Hangfire\VirtoCommerce.BackgroundJobs.Hangfire.csproj" />
     <ProjectReference Include="..\..\src\VirtoCommerce.BackgroundJobs.RabbitMQ\VirtoCommerce.BackgroundJobs.RabbitMQ.csproj" />
+    <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Conformance\VirtoCommerce.BackgroundJobs.Conformance.csproj" />
     <ProjectReference Include="..\..\src\VirtoCommerce.BackgroundJobs.Web\VirtoCommerce.BackgroundJobs.Web.csproj" />
     <ProjectReference Include="..\..\samples\VirtoCommerce.BackgroundJobs.GoogleCloudTasks\VirtoCommerce.BackgroundJobs.GoogleCloudTasks.csproj" />
   </ItemGroup>

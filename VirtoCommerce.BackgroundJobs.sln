@@ -39,6 +39,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VirtoCommerce.BackgroundJob
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VirtoCommerce.BackgroundJobs.GoogleCloudTasks", "samples\VirtoCommerce.BackgroundJobs.GoogleCloudTasks\VirtoCommerce.BackgroundJobs.GoogleCloudTasks.csproj", "{781B19C6-C376-4A2D-A9EC-45EF2F620047}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VirtoCommerce.BackgroundJobs.Conformance", "tests\VirtoCommerce.BackgroundJobs.Conformance\VirtoCommerce.BackgroundJobs.Conformance.csproj", "{824E092F-AA29-48DF-BC36-D6A39BA8FB95}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -157,6 +159,18 @@ Global
 		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Release|x64.Build.0 = Release|Any CPU
 		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Release|x86.ActiveCfg = Release|Any CPU
 		{781B19C6-C376-4A2D-A9EC-45EF2F620047}.Release|x86.Build.0 = Release|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Debug|x64.Build.0 = Debug|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Debug|x86.Build.0 = Debug|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Release|Any CPU.Build.0 = Release|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Release|x64.ActiveCfg = Release|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Release|x64.Build.0 = Release|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Release|x86.ActiveCfg = Release|Any CPU
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -171,6 +185,7 @@ Global
 		{9337DCEE-CE12-4502-A55B-66C7DD8C7EAF} = {DB253607-58BB-46C5-A569-FCF678F1216B}
 		{91ACF631-4964-473A-94FD-7B5CB2BE374B} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 		{781B19C6-C376-4A2D-A9EC-45EF2F620047} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
+		{824E092F-AA29-48DF-BC36-D6A39BA8FB95} = {BDFB6872-92F4-4F40-B22A-68E06BD9D9A4}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {64EF57B5-4469-42C2-8DA4-4F02B47BF3FD}

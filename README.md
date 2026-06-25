@@ -466,6 +466,37 @@ consumer — lives in [`samples/VirtoCommerce.BackgroundJobs.GoogleCloudTasks`](
 It confirms the contracts don't assume a pull/consumer model: a push engine adds an inbound callback controller and
 reuses `IJobDispatcher` — no new platform contract needed.
 
+### Certify your engine (conformance kit)
+
+Don't guess whether your engine follows the standard — run the **conformance suite**. The packable
+[`VirtoCommerce.BackgroundJobs.Conformance`](tests/VirtoCommerce.BackgroundJobs.Conformance/CONFORMANCE.md) project
+ships an abstract xUnit base with **one clear scenario per feature** (enqueue→dispatch, payload fidelity, user
+context, status, delete, expression, unique-key, queue routing, retry, progress, map/reduce, recurring). Reference
+it from your engine's test project, write one small fixture wiring your **real** engine against **real**
+infrastructure (a connection string), derive one test class, and `dotnet test` — green means conformant:
+
+```csharp
+public sealed class MyEngineConformanceFixture : JobEngineConformanceFixture
+{
+    public override EngineCapabilities Capabilities => new() { SupportsStatusQuery = true, SupportsRetry = true, /* … */ };
+
+    protected override bool TryConfigureEngine(IServiceCollection services, out string? unavailableReason)
+    {
+        unavailableReason = null;
+        services.AddSingleton<IJobEngine, MyJobEngine>();
+        services.AddHostedService<MyJobConsumer>();
+        return true;
+    }
+}
+
+public class MyEngineConformanceTests(MyEngineConformanceFixture fixture)
+    : JobEngineConformanceTests<MyEngineConformanceFixture>(fixture);
+```
+
+The kit certifies Hangfire (in-process) and RabbitMQ (against a broker via `VC_CONFORMANCE_RABBITMQ`) in this repo,
+and includes an infrastructure-free `ReferenceJobEngine` as the copy-paste template. Capability-gated scenarios
+assert the documented fallback (or skip) for features your engine doesn't provide, so it's never penalized for them.
+
 ## Documentation
 
 * [Background processing developer guide](https://docs.virtocommerce.org/)

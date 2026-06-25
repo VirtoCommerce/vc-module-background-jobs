@@ -24,7 +24,7 @@ public sealed class IndexPageHandler(ILogger<IndexPageHandler> logger) : IMapJob
     {
         var running = Interlocked.Increment(ref _running);
         logger.LogInformation(
-            "MAP START job {JobId} ({Count} ids) — {Running} map handler(s) running in parallel on this instance.",
+            "HANDLE START job {JobId} ({Count} ids) — {Running} map handler(s) running in parallel on this instance.",
             context.JobId, page.DocumentIds.Length, running);
 
         try
@@ -40,7 +40,7 @@ public sealed class IndexPageHandler(ILogger<IndexPageHandler> logger) : IMapJob
         finally
         {
             var remaining = Interlocked.Decrement(ref _running);
-            logger.LogInformation("MAP END   job {JobId} — {Remaining} still running on this instance.",
+            logger.LogInformation("HANDLE END   job {JobId} — {Remaining} still running on this instance.",
                 context.JobId, remaining);
         }
     }
