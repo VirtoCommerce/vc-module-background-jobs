@@ -62,7 +62,7 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
         // The worker that observes the final completion (and wins the atomic claim) triggers reduce exactly once.
         if (completed >= batch.Total && await _store.TryBeginReduceAsync(envelope.BatchId, cancellationToken))
         {
-            await _backgroundJob.Enqueue(new ReduceTaskEnvelope { BatchId = envelope.BatchId },
+            await _backgroundJob.Enqueue<ReduceCoordinator>(new ReduceTaskEnvelope { BatchId = envelope.BatchId },
                 new EnqueueOptions { Queue = batch.Queue }, cancellationToken);
         }
     }

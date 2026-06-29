@@ -16,9 +16,9 @@ namespace VirtoCommerce.BackgroundJobs.Tests;
 
 /// <summary>
 /// Proves the message-based background-job flow honors the Virto Commerce extension model end-to-end: a 3rd-party
-/// module can (a) extend the payload via <see cref="AbstractTypeFactory{T}"/>, (b) override the handler via DI
-/// (last registration wins), or (c) both — and a plain <c>jobs.Enqueue(payload)</c> still works, with the concrete
-/// extended type surviving serialization across the engine boundary.
+/// module can extend the payload via <see cref="AbstractTypeFactory{T}"/>, and handler-explicit enqueue
+/// (<c>jobs.Enqueue&lt;THandler&gt;(payload)</c>) routes the (possibly extended) payload to the chosen handler —
+/// with the concrete extended type surviving serialization across the engine boundary.
 /// </summary>
 public class ExtensibilityTests
 {
@@ -102,22 +102,6 @@ public class ExtensibilityTests
     }
 
     [Fact]
-    public async Task ThirdParty_Can_Override_Handler_Via_Di()
-    {
-        // Vendor registers its handler; the 3rd-party registers its own AFTER it (last registration wins).
-        var (jobs, recorder) = Build(services =>
-        {
-            services.AddBackgroundJob<OrderEmailPayload, OrderEmailJob>();
-            services.AddBackgroundJob<OrderEmailPayload, CustomOrderEmailJob>();
-        });
-
-        await jobs.Enqueue(new OrderEmailPayload { OrderId = "ORD-1" }, cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(nameof(CustomOrderEmailJob), recorder.HandlerName); // overriding handler ran
-        Assert.Equal("ORD-1", recorder.Payload.OrderId);
-    }
-
-    [Fact]
     public async Task ThirdParty_Can_Extend_Payload_Via_AbstractTypeFactory()
     {
         AbstractTypeFactory<OrderEmailPayload>.RegisterType<OrderEmailPayload>();
@@ -131,7 +115,7 @@ public class ExtensibilityTests
         payload.OrderId = "ORD-2";
         ((ExtendedOrderEmailPayload)payload).Locale = "fr-FR";
 
-        await jobs.Enqueue(payload, cancellationToken: TestContext.Current.CancellationToken);
+        await jobs.Enqueue<OrderEmailJob>(payload, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(nameof(OrderEmailJob), recorder.HandlerName);
         // The concrete extended type survived serialization across the engine boundary.
@@ -141,7 +125,7 @@ public class ExtensibilityTests
     }
 
     [Fact]
-    public async Task ThirdParty_Can_Extend_Payload_And_Override_Handler()
+    public async Task ThirdParty_Can_Extend_Payload_And_Route_To_Chosen_Handler()
     {
         AbstractTypeFactory<OrderEmailPayload>.RegisterType<OrderEmailPayload>();
         AbstractTypeFactory<OrderEmailPayload>.OverrideType<OrderEmailPayload, ExtendedOrderEmailPayload>();
@@ -156,9 +140,9 @@ public class ExtensibilityTests
         payload.OrderId = "ORD-3";
         ((ExtendedOrderEmailPayload)payload).Locale = "de-DE";
 
-        await jobs.Enqueue(payload, cancellationToken: TestContext.Current.CancellationToken);
+        // Enqueue explicitly to the chosen handler; the extended payload reaches it intact.
+        await jobs.Enqueue<CustomOrderEmailJob>(payload, cancellationToken: TestContext.Current.CancellationToken);
 
-        // Both extensions take effect at once: overriding handler runs AND receives the extended payload.
         Assert.Equal(nameof(CustomOrderEmailJob), recorder.HandlerName);
         var received = Assert.IsType<ExtendedOrderEmailPayload>(recorder.Payload);
         Assert.Equal("ORD-3", received.OrderId);

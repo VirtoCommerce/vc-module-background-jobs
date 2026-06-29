@@ -23,7 +23,6 @@ engine schedules work.
 | 5 | A failing handler does not stop the worker (a later job still runs) | every engine |
 | 6 | `GetStatus` contract (tracked status, or documented `Unknown`/not-completed) | `SupportsStatusQuery` |
 | 7 | `Delete` of an unknown id returns `false` | every engine |
-| 8 | Expression enqueue works, else throws `NotSupportedException` | `SupportsExpressionEnqueue` |
 | 9 | `UniqueKey` collapses duplicate enqueues to one execution | `SupportsUniqueKeyDedup` |
 | 10 | A job on a non-default queue is still drained | `SupportsQueueRouting` |
 | 11 | A transient failure is retried until it succeeds | `SupportsRetry` |
@@ -52,7 +51,7 @@ public sealed class MyEngineConformanceFixture : JobEngineConformanceFixture
         SupportsQueueRouting = true,
         SupportsRetry = true,
         SupportsRecurringScheduler = true,
-        // SupportsExpressionEnqueue / SupportsUniqueKeyDedup: only if your engine truly does these.
+        // SupportsUniqueKeyDedup: only if your engine truly does it.
     };
 
     protected override bool TryConfigureEngine(IServiceCollection services, out string? unavailableReason)

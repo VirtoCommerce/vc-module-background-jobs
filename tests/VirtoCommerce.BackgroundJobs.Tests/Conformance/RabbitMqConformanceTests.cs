@@ -24,7 +24,6 @@ public sealed class RabbitMqConformanceFixture : JobEngineConformanceFixture
     {
         SupportsStatusQuery = false,
         SupportsDelete = false,
-        SupportsExpressionEnqueue = false,
         SupportsUniqueKeyDedup = false,
         SupportsQueueRouting = true,
         SupportsRetry = true,

@@ -21,7 +21,7 @@ public sealed class DefaultJobDispatcher(IServiceProvider serviceProvider, IJobP
         var payloadType = Type.GetType(envelope.JobType)
             ?? throw new InvalidOperationException($"Cannot resolve job type '{envelope.JobType}'.");
 
-        var handlerType = typeof(IBackgroundJobHandler<>).MakeGenericType(payloadType);
+        var handlerInterfaceType = typeof(IBackgroundJobHandler<>).MakeGenericType(payloadType);
 
         // Run the handler in its own DI scope so scoped dependencies (repositories, DbContext, …) resolve correctly.
         using var scope = serviceProvider.CreateScope();
@@ -33,11 +33,27 @@ public sealed class DefaultJobDispatcher(IServiceProvider serviceProvider, IJobP
             scope.ServiceProvider.GetService<IUserNameResolver>()?.SetCurrentUserName(envelope.UserName);
         }
 
-        var handler = scope.ServiceProvider.GetService(handlerType)
-            ?? throw new InvalidOperationException(
-                $"No background-job handler 'IBackgroundJobHandler<{payloadType.Name}>' is registered.");
+        // Handler-explicit enqueue (Enqueue<THandler>) names the concrete handler, so resolve it by type — this is
+        // how one payload type drives several handlers. Otherwise resolve by payload type (IBackgroundJobHandler<T>).
+        object handler;
+        if (!string.IsNullOrEmpty(envelope.HandlerType))
+        {
+            var concreteHandlerType = Type.GetType(envelope.HandlerType)
+                ?? throw new InvalidOperationException($"Cannot resolve handler type '{envelope.HandlerType}'.");
 
-        var execute = handlerType.GetMethod(nameof(IBackgroundJobHandler<object>.Execute))
+            handler = scope.ServiceProvider.GetService(concreteHandlerType)
+                ?? throw new InvalidOperationException(
+                    $"No background-job handler '{concreteHandlerType.Name}' is registered.");
+        }
+        else
+        {
+            handler = scope.ServiceProvider.GetService(handlerInterfaceType)
+                ?? throw new InvalidOperationException(
+                    $"No background-job handler 'IBackgroundJobHandler<{payloadType.Name}>' is registered.");
+        }
+
+        // Invoke through the IBackgroundJobHandler<payload> interface either way — the concrete handler implements it.
+        var execute = handlerInterfaceType.GetMethod(nameof(IBackgroundJobHandler<object>.Execute))
             ?? throw new InvalidOperationException("IBackgroundJob<T>.Execute was not found.");
 
         try

@@ -19,7 +19,6 @@ public sealed class ReferenceEngineConformanceFixture : JobEngineConformanceFixt
     {
         SupportsStatusQuery = true,
         SupportsDelete = true,
-        SupportsExpressionEnqueue = false,
         SupportsUniqueKeyDedup = false,
         SupportsQueueRouting = true,
         SupportsRetry = true,

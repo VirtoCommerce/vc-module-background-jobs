@@ -16,10 +16,6 @@ public sealed record EngineCapabilities
     /// false for an unknown id regardless of this flag.</summary>
     public bool SupportsDelete { get; init; }
 
-    /// <summary>The engine implements <c>IExpressionJobEngine</c> (Hangfire). When false, expression enqueue must
-    /// throw <see cref="System.NotSupportedException"/> via the facade.</summary>
-    public bool SupportsExpressionEnqueue { get; init; }
-
     /// <summary>Re-enqueuing with the same <c>EnqueueOptions.UniqueKey</c> collapses to a single execution (Google
     /// Cloud Tasks). Skipped when unsupported.</summary>
     public bool SupportsUniqueKeyDedup { get; init; }

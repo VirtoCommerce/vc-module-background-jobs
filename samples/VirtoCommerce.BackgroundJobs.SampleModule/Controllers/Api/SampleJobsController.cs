@@ -37,7 +37,8 @@ public class SampleJobsController(IBackgroundJob backgroundJob, IMapReduceJob ma
         payload.Message = message;
         payload.StepCount = steps;
 
-        var jobId = await backgroundJob.Enqueue(
+        // Handler-explicit enqueue: the call site names the action (SampleJob) that will run the payload.
+        var jobId = await backgroundJob.Enqueue<SampleJob>(
             payload,
             new EnqueueOptions { ReportProgress = withProgress },
             cancellationToken);

@@ -37,6 +37,52 @@ public class BackgroundJobsTests
     {
     }
 
+    private sealed class OtherPayload
+    {
+    }
+
+    // Two distinct handlers for the SAME payload type — used to prove handler-explicit enqueue/dispatch.
+    private sealed class HandlerRecorder
+    {
+        public List<string> Ran { get; } = [];
+    }
+
+    private sealed class FirstHandler(HandlerRecorder recorder) : IBackgroundJobHandler<TestPayload>
+    {
+        public Task Execute(TestPayload payload, IJobExecutionContext context, CancellationToken cancellationToken = default)
+        {
+            recorder.Ran.Add($"first:{payload.Value}");
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class SecondHandler(HandlerRecorder recorder) : IBackgroundJobHandler<TestPayload>
+    {
+        public Task Execute(TestPayload payload, IJobExecutionContext context, CancellationToken cancellationToken = default)
+        {
+            recorder.Ran.Add($"second:{payload.Value}");
+            return Task.CompletedTask;
+        }
+    }
+
+    // Stand-in engine: dispatches synchronously on enqueue (like a worker) so a test exercises the full
+    // facade -> envelope -> dispatcher -> handler chain end to end.
+    private sealed class InlineEngine(IServiceProvider serviceProvider) : IJobEngine
+    {
+        public string ProviderName => "Inline";
+
+        public async Task<string> Enqueue(JobEnvelope envelope, EnqueueOptions options, CancellationToken cancellationToken = default)
+        {
+            var dispatcher = serviceProvider.GetRequiredService<IJobDispatcher>();
+            var context = new JobExecutionContext("job", NoOpJobProgress.Instance, envelope.Headers);
+            await dispatcher.Dispatch(envelope, context, cancellationToken);
+            return "job-1";
+        }
+
+        public Task<Job> GetStatus(string jobId, CancellationToken cancellationToken = default) => Task.FromResult<Job>(null);
+        public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+    }
+
     [Fact]
     public void AddBackgroundJob_Infers_Payload_From_Handler()
     {
@@ -114,7 +160,7 @@ public class BackgroundJobsTests
             userResolver.Object,
             engine.Object);
 
-        var jobId = await sut.Enqueue(new TestPayload { Value = "hi" }, cancellationToken: TestContext.Current.CancellationToken);
+        var jobId = await sut.Enqueue<RecordingHandler>(new TestPayload { Value = "hi" }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("job-42", jobId);
         Assert.NotNull(captured);
@@ -123,22 +169,6 @@ public class BackgroundJobsTests
         Assert.Equal("default", captured.Queue);
         Assert.Equal("tester", captured.UserName);
         Assert.Contains("hi", captured.PayloadJson);
-    }
-
-    [Fact]
-    public void Expression_Enqueue_Throws_When_Engine_Is_Not_ExpressionCapable()
-    {
-        var engine = new Mock<IJobEngine>();
-        engine.SetupGet(x => x.ProviderName).Returns("RabbitMQ");
-
-        var sut = new JobEngineBackgroundJob(
-            new JsonJobPayloadSerializer(),
-            Options.Create(new BackgroundJobsOptions()),
-            Mock.Of<IPushNotificationManager>(),
-            Mock.Of<IUserNameResolver>(),
-            engine.Object);
-
-        Assert.Throws<NotSupportedException>(() => sut.Enqueue(() => Noop()));
     }
 
     [Fact]
@@ -154,12 +184,108 @@ public class BackgroundJobsTests
             engine: null);
 
         await Assert.ThrowsAsync<BackgroundJobEngineNotInstalledException>(
-            () => sut.Enqueue(new TestPayload { Value = "x" }, cancellationToken: TestContext.Current.CancellationToken));
-
-        Assert.Throws<BackgroundJobEngineNotInstalledException>(() => sut.Enqueue(() => Noop()));
+            () => sut.Enqueue<RecordingHandler>(new TestPayload { Value = "x" }, cancellationToken: TestContext.Current.CancellationToken));
     }
 
-    private static void Noop()
+    [Fact]
+    public async Task EnqueueWithHandler_Sets_HandlerType_And_Payload_Contract_On_Envelope()
     {
+        JobEnvelope captured = null;
+        var engine = new Mock<IJobEngine>();
+        engine.SetupGet(x => x.ProviderName).Returns("Test");
+        engine.Setup(x => x.Enqueue(It.IsAny<JobEnvelope>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<JobEnvelope, EnqueueOptions, CancellationToken>((env, _, _) => captured = env)
+            .ReturnsAsync("job-7");
+
+        var sut = new JobEngineBackgroundJob(
+            new JsonJobPayloadSerializer(),
+            Options.Create(new BackgroundJobsOptions { DefaultQueue = "default" }),
+            Mock.Of<IPushNotificationManager>(),
+            Mock.Of<IUserNameResolver>(),
+            engine.Object);
+
+        var jobId = await sut.Enqueue<RecordingHandler>(new TestPayload { Value = "hi" }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal("job-7", jobId);
+        Assert.NotNull(captured);
+        Assert.Equal(typeof(RecordingHandler).AssemblyQualifiedName, captured.HandlerType);
+        Assert.Equal(typeof(TestPayload).AssemblyQualifiedName, captured.JobType); // the handler's payload contract
+    }
+
+    [Fact]
+    public async Task EnqueueWithHandler_Throws_When_Handler_Does_Not_Handle_Payload()
+    {
+        var engine = new Mock<IJobEngine>();
+        engine.SetupGet(x => x.ProviderName).Returns("Test");
+
+        var sut = new JobEngineBackgroundJob(
+            new JsonJobPayloadSerializer(),
+            Options.Create(new BackgroundJobsOptions()),
+            Mock.Of<IPushNotificationManager>(),
+            Mock.Of<IUserNameResolver>(),
+            engine.Object);
+
+        // RecordingHandler handles TestPayload, not OtherPayload — enqueue must fail fast with an actionable error.
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => sut.Enqueue<RecordingHandler>(new OtherPayload(), cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Dispatcher_Resolves_Explicit_Handler_When_Multiple_Share_A_Payload()
+    {
+        // Requirement: one payload type can drive several handlers; the explicit handler on the envelope selects which.
+        var recorder = new HandlerRecorder();
+        var services = new ServiceCollection();
+        services.AddSingleton(recorder);
+        services.AddBackgroundJob<TestPayload, FirstHandler>();
+        services.AddBackgroundJob<TestPayload, SecondHandler>();
+        using var provider = services.BuildServiceProvider();
+
+        var serializer = new JsonJobPayloadSerializer();
+        var (payloadType, payloadJson) = serializer.Serialize(new TestPayload { Value = "shared" });
+        var dispatcher = new DefaultJobDispatcher(provider, serializer);
+
+        JobEnvelope EnvelopeFor(Type handler) => new()
+        {
+            JobType = typeof(TestPayload).AssemblyQualifiedName!,
+            HandlerType = handler.AssemblyQualifiedName!,
+            PayloadType = payloadType,
+            PayloadJson = payloadJson,
+        };
+        var context = new JobExecutionContext("job-1", NoOpJobProgress.Instance, new Dictionary<string, string>());
+
+        await dispatcher.Dispatch(EnvelopeFor(typeof(SecondHandler)), context, TestContext.Current.CancellationToken);
+        await dispatcher.Dispatch(EnvelopeFor(typeof(FirstHandler)), context, TestContext.Current.CancellationToken);
+
+        // Each explicit dispatch ran exactly its named handler, against the same payload type.
+        Assert.Equal(["second:shared", "first:shared"], recorder.Ran);
+    }
+
+    [Fact]
+    public async Task Same_Payload_Runs_On_Two_Handlers_When_Enqueued_To_Each()
+    {
+        // End-to-end through the public facade: one payload TYPE, two handlers, enqueued to each by name.
+        var recorder = new HandlerRecorder();
+        var services = new ServiceCollection();
+        services.AddSingleton(recorder);
+        services.AddSingleton<IJobPayloadSerializer, JsonJobPayloadSerializer>();
+        services.AddSingleton<IJobDispatcher, DefaultJobDispatcher>();
+        services.AddSingleton<IJobEngine, InlineEngine>();
+        services.AddScoped<IBackgroundJob, JobEngineBackgroundJob>();
+        services.Configure<BackgroundJobsOptions>(_ => { });
+        services.AddSingleton(Mock.Of<IUserNameResolver>());
+        services.AddSingleton(Mock.Of<IPushNotificationManager>());
+        services.AddBackgroundJob<TestPayload, FirstHandler>();
+        services.AddBackgroundJob<TestPayload, SecondHandler>();
+
+        using var provider = services.BuildServiceProvider();
+        var jobs = provider.GetRequiredService<IBackgroundJob>();
+
+        var payload = new TestPayload { Value = "shared" };
+        await jobs.Enqueue<FirstHandler>(payload, cancellationToken: TestContext.Current.CancellationToken);
+        await jobs.Enqueue<SecondHandler>(payload, cancellationToken: TestContext.Current.CancellationToken);
+
+        // The same payload ran on BOTH handlers, each selected by the handler named at enqueue time.
+        Assert.Equal(["first:shared", "second:shared"], recorder.Ran);
     }
 }

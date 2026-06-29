@@ -1,5 +1,5 @@
 using System;
-using System.Linq.Expressions;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
@@ -12,9 +12,8 @@ using VirtoCommerce.Platform.Core.Security;
 namespace VirtoCommerce.BackgroundJobs.Core.Services;
 
 /// <summary>
-/// Engine-agnostic implementation of the developer-facing <see cref="IBackgroundJob"/> facade. Builds a
-/// <see cref="JobEnvelope"/> from a payload and delegates to the active <see cref="IJobEngine"/>; expression
-/// enqueue is forwarded to <see cref="IExpressionJobEngine"/> when the active engine supports it.
+/// Engine-agnostic implementation of the developer-facing <see cref="IBackgroundJob"/> facade. Validates the
+/// handler/payload pairing, builds a <see cref="JobEnvelope"/>, and delegates to the active <see cref="IJobEngine"/>.
 /// </summary>
 public sealed class JobEngineBackgroundJob(
     IJobPayloadSerializer serializer,
@@ -27,13 +26,9 @@ public sealed class JobEngineBackgroundJob(
 {
     private readonly BackgroundJobsOptions _options = options.Value;
 
-    public string Enqueue(Expression<Action> methodCall) => EnqueueExpression(e => e.Enqueue(methodCall));
-
-    public string Enqueue(Expression<Func<Task>> methodCall) => EnqueueExpression(e => e.Enqueue(methodCall));
-
-    public async Task<string> Enqueue<TPayload>(TPayload payload, EnqueueOptions? options = null,
+    public async Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null,
         CancellationToken cancellationToken = default)
-        where TPayload : class
+        where THandler : class
     {
         ArgumentNullException.ThrowIfNull(payload);
 
@@ -42,9 +37,13 @@ public sealed class JobEngineBackgroundJob(
             throw new BackgroundJobEngineNotInstalledException();
         }
 
+        // Validate the handler actually handles this payload, and record both the payload contract type (JobType, so
+        // the worker knows which Execute to call) and the concrete handler type to resolve.
+        var payloadContractType = ResolveHandlerPayloadType(typeof(THandler), payload.GetType());
+
         var (payloadType, payloadJson) = serializer.Serialize(payload);
         var userName = userNameResolver.GetCurrentUserName();
-        var title = string.IsNullOrEmpty(options?.Title) ? $"Background job: {typeof(TPayload).Name}" : options.Title;
+        var title = string.IsNullOrEmpty(options?.Title) ? $"Background job: {payload.GetType().Name}" : options.Title;
 
         var progressNotificationId = options?.ProgressNotificationId;
         var ownsNotification = false;
@@ -63,7 +62,8 @@ public sealed class JobEngineBackgroundJob(
 
         var envelope = new JobEnvelope
         {
-            JobType = typeof(TPayload).AssemblyQualifiedName!,
+            JobType = payloadContractType.AssemblyQualifiedName!,
+            HandlerType = typeof(THandler).AssemblyQualifiedName!,
             PayloadType = payloadType,
             PayloadJson = payloadJson,
             Queue = options?.Queue ?? _options.DefaultQueue,
@@ -77,20 +77,20 @@ public sealed class JobEngineBackgroundJob(
         return await engine.Enqueue(envelope, options ?? new EnqueueOptions(), cancellationToken);
     }
 
-    private string EnqueueExpression(Func<IExpressionJobEngine, string> enqueue)
+    // Picks the IBackgroundJobHandler<T> the handler implements for this payload (exact T first, then an assignable
+    // base — which covers AbstractTypeFactory-derived payloads). Throws if the handler doesn't handle the payload.
+    private static Type ResolveHandlerPayloadType(Type handlerType, Type payloadConcreteType)
     {
-        if (engine is null)
-        {
-            throw new BackgroundJobEngineNotInstalledException();
-        }
+        var candidates = handlerType.GetInterfaces()
+            .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IBackgroundJobHandler<>))
+            .Select(i => i.GetGenericArguments()[0])
+            .ToArray();
 
-        if (engine is IExpressionJobEngine expressionEngine)
-        {
-            return enqueue(expressionEngine);
-        }
+        var match = Array.Find(candidates, t => t == payloadConcreteType)
+            ?? Array.Find(candidates, t => t.IsAssignableFrom(payloadConcreteType));
 
-        throw new NotSupportedException(
-            $"Expression-based enqueue requires the Hangfire provider; the active provider is '{engine.ProviderName}'. " +
-            "Use Enqueue(payload) with an IBackgroundJobHandler<TPayload> handler instead.");
+        return match ?? throw new ArgumentException(
+            $"Handler '{handlerType.Name}' does not handle a payload of type '{payloadConcreteType.Name}'. " +
+            $"It must implement IBackgroundJobHandler<{payloadConcreteType.Name}> (or a base type of it).");
     }
 }

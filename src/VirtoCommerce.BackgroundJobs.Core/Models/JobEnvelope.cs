@@ -11,6 +11,13 @@ public sealed record JobEnvelope
     /// <summary>Assembly-qualified name of the handler payload (base) type — used to resolve <c>IBackgroundJob&lt;T&gt;</c>.</summary>
     public required string JobType { get; init; }
 
+    /// <summary>
+    /// Assembly-qualified name of the specific handler to run (handler-explicit enqueue). When set, the dispatcher
+    /// resolves this concrete handler — so one payload type can drive several handlers. Null for payload-typed
+    /// enqueue, where the handler is resolved by <see cref="JobType"/> (<c>IBackgroundJobHandler&lt;payload&gt;</c>).
+    /// </summary>
+    public string? HandlerType { get; init; }
+
     /// <summary>Assembly-qualified name of the concrete payload type (may be an AbstractTypeFactory-derived type).</summary>
     public required string PayloadType { get; init; }
 

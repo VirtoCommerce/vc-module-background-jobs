@@ -26,7 +26,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         {
             Id = "conformance-recurring-" + NewId(),
             CronExpression = "* * * * *",
-            Trigger = (jobs, ct) => jobs.Enqueue(new ConformancePayload { CorrelationId = NewId(), Value = "recur" }, null, ct),
+            Trigger = (jobs, ct) => jobs.Enqueue<RecordingConformanceHandler>(new ConformancePayload { CorrelationId = NewId(), Value = "recur" }, null, ct),
         };
 
         await scheduler!.AddOrUpdate(registration, "* * * * *", TestContext.Current.CancellationToken);
@@ -44,7 +44,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         {
             Id = "conformance-recurring-" + NewId(),
             CronExpression = "* * * * *",
-            Trigger = (jobs, ct) => jobs.Enqueue(new ConformancePayload { CorrelationId = id, Value = "recur" }, null, ct),
+            Trigger = (jobs, ct) => jobs.Enqueue<RecordingConformanceHandler>(new ConformancePayload { CorrelationId = id, Value = "recur" }, null, ct),
         };
 
         using var scope = Fixture.Services.CreateScope();

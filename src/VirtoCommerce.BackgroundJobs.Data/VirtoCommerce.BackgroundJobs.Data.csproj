@@ -12,7 +12,7 @@
     <NoWarn>1591;NU5048;NU1608</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1041.0-alpha.13328-vcst-5245" />
+    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1042.0-alpha.13337-vcst-5245" />
     <PackageReference Include="StackExchange.Redis" Version="3.0.0" />
   </ItemGroup>
   <ItemGroup>

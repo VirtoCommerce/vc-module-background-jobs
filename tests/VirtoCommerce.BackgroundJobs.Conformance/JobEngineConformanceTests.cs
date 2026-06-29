@@ -8,15 +8,6 @@ using Xunit;
 
 namespace VirtoCommerce.BackgroundJobs.Conformance;
 
-/// <summary>A static, serializable no-op target for the expression-enqueue scenario.</summary>
-public static class ConformanceNoOp
-{
-    public static void Touch()
-    {
-        // Intentionally empty — the expression scenario only checks enqueue succeeds/throws, not the body.
-    }
-}
-
 /// <summary>
 /// The engine-port conformance scenarios — one clear scenario per feature of the background-job standard. A new
 /// engine certifies itself by deriving a concrete class bound to its <typeparamref name="TFixture"/>:
@@ -38,7 +29,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
     {
         using var scope = fixture.Services.CreateScope();
         var jobs = scope.ServiceProvider.GetRequiredService<IBackgroundJob>();
-        return await jobs.Enqueue(payload, options, TestContext.Current.CancellationToken);
+        return await jobs.Enqueue<RecordingConformanceHandler>(payload, options, TestContext.Current.CancellationToken);
     }
 
     private async Task<string> EnqueueAndWaitAsync(ConformancePayload payload, EnqueueOptions? options = null)
@@ -148,26 +139,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.False(deleted);
     }
 
-    // 8 — expression enqueue: works on expression-capable engines, throws NotSupportedException otherwise.
-    [Fact]
-    public void Expression_Enqueue_Follows_Capability()
-    {
-        RequireEngine();
-        using var scope = fixture.Services.CreateScope();
-        var jobs = scope.ServiceProvider.GetRequiredService<IBackgroundJob>();
-
-        if (fixture.Capabilities.SupportsExpressionEnqueue)
-        {
-            var jobId = jobs.Enqueue(() => ConformanceNoOp.Touch());
-            Assert.False(string.IsNullOrEmpty(jobId));
-        }
-        else
-        {
-            Assert.Throws<NotSupportedException>(() => jobs.Enqueue(() => ConformanceNoOp.Touch()));
-        }
-    }
-
-    // 9 — unique-key de-duplication: two enqueues with the same key collapse to one execution (when supported).
+    // 8 — unique-key de-duplication: two enqueues with the same key collapse to one execution (when supported).
     [Fact]
     public async Task UniqueKey_Dedupes_When_Supported()
     {

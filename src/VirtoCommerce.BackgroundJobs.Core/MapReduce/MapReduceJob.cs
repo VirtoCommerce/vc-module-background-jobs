@@ -83,7 +83,7 @@ public sealed class MapReduceJob : IMapReduceJob
         // Empty batch: nothing to map, run reduce immediately so the finalize step still happens.
         if (itemList.Count == 0)
         {
-            await _backgroundJob.Enqueue(new ReduceTaskEnvelope { BatchId = batchId },
+            await _backgroundJob.Enqueue<ReduceCoordinator>(new ReduceTaskEnvelope { BatchId = batchId },
                 new EnqueueOptions { Queue = options?.Queue }, CancellationToken.None);
             return batchId;
         }
@@ -99,7 +99,7 @@ public sealed class MapReduceJob : IMapReduceJob
 
         await _store.SaveItemsAsync(batchId, mapItems, CancellationToken.None);
 
-        await _backgroundJob.Enqueue(new MapFanOutEnvelope { BatchId = batchId },
+        await _backgroundJob.Enqueue<FanOutCoordinator>(new MapFanOutEnvelope { BatchId = batchId },
             new EnqueueOptions { Queue = options?.Queue }, CancellationToken.None);
 
         return batchId;

@@ -48,7 +48,7 @@ public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
                 ItemJson = item.ItemJson,
             };
 
-            await _backgroundJob.Enqueue(mapEnvelope,
+            await _backgroundJob.Enqueue<MapCoordinator>(mapEnvelope,
                 new EnqueueOptions { Queue = batch.Queue, ProgressNotificationId = batch.ProgressNotificationId, Title = batch.Title },
                 cancellationToken);
         }

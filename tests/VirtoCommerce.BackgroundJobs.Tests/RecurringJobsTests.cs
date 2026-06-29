@@ -101,10 +101,11 @@ public class RecurringJobsTests
         EnqueueOptions capturedOptions = null;
         var backgroundJob = new Mock<IBackgroundJob>();
         backgroundJob
-            .Setup(x => x.Enqueue(It.IsAny<SamplePayload>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
-            .Callback<SamplePayload, EnqueueOptions, CancellationToken>((payload, options, _) =>
+            // The recurring trigger now enqueues handler-explicit (Enqueue<THandler>), so capture that overload.
+            .Setup(x => x.Enqueue<SampleHandler>(It.IsAny<object>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<object, EnqueueOptions, CancellationToken>((payload, options, _) =>
             {
-                capturedPayload = payload;
+                capturedPayload = (SamplePayload)payload;
                 capturedOptions = options;
             })
             .ReturnsAsync("job-1");
@@ -129,14 +130,40 @@ public class RecurringJobsTests
         SamplePayload capturedPayload = null;
         var backgroundJob = new Mock<IBackgroundJob>();
         backgroundJob
-            .Setup(x => x.Enqueue(It.IsAny<SamplePayload>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
-            .Callback<SamplePayload, EnqueueOptions, CancellationToken>((payload, _, _) => capturedPayload = payload)
+            // The recurring trigger now enqueues handler-explicit (Enqueue<THandler>), so capture that overload.
+            .Setup(x => x.Enqueue<SampleHandler>(It.IsAny<object>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<object, EnqueueOptions, CancellationToken>((payload, _, _) => capturedPayload = (SamplePayload)payload)
             .ReturnsAsync("job-1");
 
         await registration.Trigger(backgroundJob.Object, TestContext.Current.CancellationToken);
 
         Assert.NotNull(capturedPayload);
         Assert.Equal("configured", capturedPayload.Value); // parameters flow through to each occurrence
+    }
+
+    [Fact]
+    public async Task Registration_Trigger_Enqueues_Value_Payload_With_Parameters()
+    {
+        var services = new ServiceCollection();
+        // Value overload: pass the configured payload directly, no factory.
+        services.AddRecurringJob<SamplePayload, SampleHandler>(
+            new SamplePayload { Value = "configured" },
+            s => s.WithId("sample").WithCron("0 2 * * *"));
+
+        using var provider = services.BuildServiceProvider();
+        var registration = provider.GetServices<RecurringJobRegistration>().Single();
+
+        SamplePayload capturedPayload = null;
+        var backgroundJob = new Mock<IBackgroundJob>();
+        backgroundJob
+            .Setup(x => x.Enqueue<SampleHandler>(It.IsAny<object>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<object, EnqueueOptions, CancellationToken>((payload, _, _) => capturedPayload = (SamplePayload)payload)
+            .ReturnsAsync("job-1");
+
+        await registration.Trigger(backgroundJob.Object, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(capturedPayload);
+        Assert.Equal("configured", capturedPayload.Value);
     }
 
     [Fact]
@@ -151,8 +178,9 @@ public class RecurringJobsTests
         SamplePayload capturedPayload = null;
         var backgroundJob = new Mock<IBackgroundJob>();
         backgroundJob
-            .Setup(x => x.Enqueue(It.IsAny<SamplePayload>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
-            .Callback<SamplePayload, EnqueueOptions, CancellationToken>((payload, _, _) => capturedPayload = payload)
+            // The recurring trigger now enqueues handler-explicit (Enqueue<THandler>), so capture that overload.
+            .Setup(x => x.Enqueue<SampleHandler>(It.IsAny<object>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<object, EnqueueOptions, CancellationToken>((payload, _, _) => capturedPayload = (SamplePayload)payload)
             .ReturnsAsync("job-1");
 
         await registration.Trigger(backgroundJob.Object, TestContext.Current.CancellationToken);

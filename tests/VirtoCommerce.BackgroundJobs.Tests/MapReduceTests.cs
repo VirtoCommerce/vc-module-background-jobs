@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
@@ -59,15 +58,12 @@ public class MapReduceTests
     {
         public List<object> Enqueued { get; } = [];
 
-        public Task<string> Enqueue<TPayload>(TPayload payload, EnqueueOptions? options = null, CancellationToken ct = default)
-            where TPayload : class
+        public Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null, CancellationToken ct = default)
+            where THandler : class
         {
             Enqueued.Add(payload);
             return Task.FromResult(Guid.NewGuid().ToString("N"));
         }
-
-        public string Enqueue(Expression<Action> methodCall) => throw new NotSupportedException();
-        public string Enqueue(Expression<Func<Task>> methodCall) => throw new NotSupportedException();
     }
 
     private static IJobExecutionContext Context() =>

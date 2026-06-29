@@ -175,19 +175,34 @@ public class SendOrderEmailJob(IEmailSender sender) : IBackgroundJobHandler<Send
 //    use AddBackgroundJob<TPayload, THandler>() if you prefer to state it explicitly.
 services.AddBackgroundJob<SendOrderEmailJob>();
 
-// 4) Enqueue (engine-agnostic).
+// 4) Enqueue (engine-agnostic). Prefer the HANDLER-EXPLICIT form: the call site names the action that will run,
+//    so an enqueue is self-documenting in review.
 var payload = AbstractTypeFactory<SendOrderEmailPayload>.TryCreateInstance();
 payload.OrderId = order.Id;
 payload.CustomerEmail = order.Email;
 
-await jobs.Enqueue(payload);                                            // fire-and-forget
-await jobs.Enqueue(payload, new EnqueueOptions { ReportProgress = true }); // with progress
+await jobs.Enqueue<SendOrderEmailJob>(payload);                                            // fire-and-forget
+await jobs.Enqueue<SendOrderEmailJob>(payload, new EnqueueOptions { ReportProgress = true }); // with progress
 ```
+
+**One payload, several handlers.** Because the handler is chosen at enqueue time, the same payload type can drive
+different actions — register each handler and enqueue to the one you want:
+
+```csharp
+services.AddBackgroundJob<SendOrderEmailJob>();      // both handle SendOrderEmailPayload
+services.AddBackgroundJob<ArchiveOrderJob>();
+
+await jobs.Enqueue<SendOrderEmailJob>(payload);      // emails the customer
+await jobs.Enqueue<ArchiveOrderJob>(payload);        // archives the order — same payload, different action
+```
+
+The enqueue validates at enqueue time that the handler actually handles the payload (throwing otherwise), so a
+mismatched handler/payload fails fast at the call site rather than on a worker.
 
 ### Enqueue options — what to set and why
 
-`Enqueue(payload)` with no options is the common case: the job runs as soon as a worker is free, on the default
-queue. Pass `EnqueueOptions` only when you need one of these behaviors:
+`Enqueue<THandler>(payload)` with no options is the common case: the job runs as soon as a worker is free, on the
+default queue. Pass `EnqueueOptions` only when you need one of these behaviors:
 
 | Option | Why you'd set it | Notes / engine support |
 |---|---|---|
@@ -200,25 +215,23 @@ queue. Pass `EnqueueOptions` only when you need one of these behaviors:
 times a failed job is retried before being dead-lettered/dropped (RabbitMQ); Hangfire uses its own retry filter.
 (`EnqueueOptions.MaxRetryAttempts` is reserved for a future per-job override and is not yet honored.)
 
-### Extending & overriding jobs (partner modules)
+### Extending jobs (partner modules)
 
-Background jobs follow the standard Virto Commerce extension model — a partner module can **extend the payload**
-(`AbstractTypeFactory`), **override the handler** (DI, last registration wins), or **both**, and `jobs.Enqueue(payload)`
-keeps working. The message carries the *concrete* payload type, so the extended type survives serialization across the
-engine and arrives at the handler intact.
+A partner module can **extend the payload** via `AbstractTypeFactory`. The message carries the *concrete* payload
+type, so the extended instance survives serialization across the engine and arrives at the handler intact.
 
 ```csharp
 // Partner module — Initialize(IServiceCollection):
 
-// 1) Extend the payload: derive and override the type so the factory builds the extended one.
+// Extend the payload: derive and override the type so the factory builds the extended one.
 public class CustomSendOrderEmailPayload : SendOrderEmailPayload
 {
     public string Locale { get; set; }
 }
 AbstractTypeFactory<SendOrderEmailPayload>.OverrideType<SendOrderEmailPayload, CustomSendOrderEmailPayload>();
 
-// 2) Override the handler: register yours AFTER the base module — last registration wins.
-public class CustomSendOrderEmailJob(IEmailSender sender) : IBackgroundJobHandler<SendOrderEmailPayload>
+// The registered handler receives the extended instance.
+public class SendOrderEmailJob(IEmailSender sender) : IBackgroundJobHandler<SendOrderEmailPayload>
 {
     public async Task Execute(SendOrderEmailPayload payload, IJobExecutionContext context, CancellationToken ct = default)
     {
@@ -226,19 +239,22 @@ public class CustomSendOrderEmailJob(IEmailSender sender) : IBackgroundJobHandle
         await sender.Send(custom.CustomerEmail, custom.OrderId, custom.Locale, ct);
     }
 }
-services.AddBackgroundJob<SendOrderEmailPayload, CustomSendOrderEmailJob>();
 
-// Enqueue is unchanged — create via the factory (returns the extended type) and enqueue as the base type.
+// Create via the factory (returns the extended type) and enqueue to the handler.
 SendOrderEmailPayload payload = AbstractTypeFactory<SendOrderEmailPayload>.TryCreateInstance();
 payload.OrderId = order.Id;
 ((CustomSendOrderEmailPayload)payload).Locale = "fr-FR";
-await jobs.Enqueue(payload);   // base handler resolved by contract; overriding handler + extended payload both apply
+await jobs.Enqueue<SendOrderEmailJob>(payload);   // the extended payload reaches the handler intact
 ```
 
+> Because enqueue names the concrete handler (`Enqueue<THandler>`), a partner varies behavior by **registering its
+> own handler and enqueuing to it** — not by overriding the platform handler via DI. (DI last-registration-wins
+> override applied to the older payload-typed enqueue, which this facade no longer exposes.)
+
 How it works: the enqueue facade records `PayloadType = payload.GetType()` (the concrete extended type) while the
-handler is keyed on the base contract — so the dispatcher reconstructs the derived instance and resolves the
-overriding `IBackgroundJobHandler<SendOrderEmailPayload>`. Either extension works on its own, or together. See
-[`ExtensibilityTests`](tests/VirtoCommerce.BackgroundJobs.Tests/ExtensibilityTests.cs) for the end-to-end proof.
+handler is keyed on the base contract — so the dispatcher reconstructs the derived instance and hands it to the
+named handler. See [`ExtensibilityTests`](tests/VirtoCommerce.BackgroundJobs.Tests/ExtensibilityTests.cs) for the
+end-to-end proof.
 
 ### Recurring jobs
 
@@ -252,10 +268,15 @@ services.AddRecurringJob<SendDigestJob>(s => s
     .WithCron("0 7 * * *")        // 5- or 6-field cron
     .WithQueue("maintenance"));   // optional
 
-// With a parameterized payload — the factory runs once per occurrence, so you can pass arguments
-// (or compute per-run values). Build via AbstractTypeFactory inside the factory to keep it overridable.
+// With a parameterized payload — the simplest form: pass the configured payload directly (no factory).
 services.AddRecurringJob<SendDigestPayload, SendDigestJob>(
-    () => new SendDigestPayload { Top = 10, Period = "daily" },
+    new SendDigestPayload { Top = 10, Period = "daily" },
+    s => s.WithId("SendDigest").WithCron("0 7 * * *"));
+
+// Need a fresh/dynamic value each run (e.g. a timestamp)? Use the factory overload — it runs once per occurrence
+// (build via AbstractTypeFactory inside the factory to keep the payload partner-overridable).
+services.AddRecurringJob<SendDigestPayload, SendDigestJob>(
+    () => new SendDigestPayload { Top = 10, RunAtTicks = DateTime.UtcNow.Ticks },
     s => s.WithId("SendDigest").WithCron("0 7 * * *"));
 
 // Setting-driven (enabler on/off + cron setting; re-applied live when either setting changes)
@@ -422,7 +443,6 @@ packages.
 | Concern | What to do |
 |---|---|
 | Engine port (**required**) | Implement `IJobEngine` — `ProviderName`, `Enqueue(JobEnvelope, EnqueueOptions, ct)`, `GetStatus(jobId, ct)`, `Delete(jobId, ct)`. |
-| Expression enqueue (optional) | Implement `IExpressionJobEngine` only if your engine supports it. Most don't — the facade already throws `NotSupportedException` for expression enqueue when it's absent. |
 | Processing host | An `IHostedService` (like `RabbitMqJobConsumer`) that consumes/receives and calls `IJobDispatcher.Dispatch(envelope, context, ct)`. Register it only when active **and** `Mode != Producer`. A push engine instead exposes an inbound callback controller. |
 | Recurring | Either call `services.AddInProcessRecurringScheduler()` (reuses the Cronos + distributed-lock + occurrence-marker scheduler, enqueues via `IBackgroundJob`), **or** implement `IRecurringJobScheduler` natively. |
 | Reuse — do **not** reimplement | `IBackgroundJob`, `IJobDispatcher`, `IJobPayloadSerializer`, `JobEnvelope`, `JobExecutionContext`, progress, `RecurringJobsApplier`, `IRecurringJobStateStore` + its Redis/in-memory impls. The host module registers these once. |

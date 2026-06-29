@@ -24,8 +24,7 @@ namespace VirtoCommerce.BackgroundJobs.RabbitMQ;
 /// </para>
 /// <para>
 /// RabbitMQ has no native job store, so <see cref="GetStatus"/> and <see cref="Delete"/> are best-effort: status is
-/// reported as <c>Unknown</c> and delete is unsupported (progress is observed over SignalR instead). It does NOT
-/// implement <see cref="IExpressionJobEngine"/> — delegates cannot be serialized onto a queue.
+/// reported as <c>Unknown</c> and delete is unsupported (progress is observed over SignalR instead).
 /// </para>
 /// </summary>
 public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable

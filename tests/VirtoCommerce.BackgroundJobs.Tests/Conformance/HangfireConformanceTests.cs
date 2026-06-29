@@ -27,7 +27,6 @@ public sealed class HangfireConformanceFixture : JobEngineConformanceFixture
     {
         SupportsStatusQuery = true,
         SupportsDelete = true,
-        SupportsExpressionEnqueue = true,
         SupportsUniqueKeyDedup = false,
         SupportsQueueRouting = true,
         SupportsRetry = true,

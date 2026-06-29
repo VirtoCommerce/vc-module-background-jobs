@@ -25,16 +25,6 @@ public class RabbitMqJobEngineTests
     }
 
     [Fact]
-    public void Engine_Is_Not_Expression_Capable()
-    {
-        // Delegates can't be serialized onto a queue, so the RabbitMQ engine must not advertise expression enqueue;
-        // JobEngineBackgroundJob relies on this to throw NotSupportedException for expression-based enqueue.
-        var engine = CreateEngine();
-
-        Assert.IsNotAssignableFrom<IExpressionJobEngine>(engine);
-    }
-
-    [Fact]
     public async Task GetStatus_Returns_Unknown_NotCompleted()
     {
         var engine = CreateEngine();
