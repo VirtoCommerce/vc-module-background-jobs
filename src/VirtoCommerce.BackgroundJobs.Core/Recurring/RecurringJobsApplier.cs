@@ -23,7 +23,7 @@ namespace VirtoCommerce.BackgroundJobs.Core.Recurring;
 /// </summary>
 public sealed class RecurringJobsApplier : BackgroundService, IEventHandler<ObjectSettingChangedEvent>
 {
-    private readonly IReadOnlyList<RecurringJobRegistration> _registrations;
+    private readonly List<RecurringJobRegistration> _registrations;
     private readonly IRecurringJobScheduler? _scheduler;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<RecurringJobsApplier> _logger;

@@ -239,10 +239,11 @@ public sealed class RabbitMqJobConsumer : BackgroundService
     /// </summary>
     private async Task HandleFailureAsync(IChannel channel, JobEnvelope envelope, string jobId, Exception ex)
     {
-        var maxAttempts = Math.Max(1, _jobsOptions.MaxRetryAttempts);
-
         // MaxRetryAttempts counts retries: the first run is Attempt 1, so requeue while Attempt <= MaxRetryAttempts
-        // (e.g. default 3 → up to 3 re-publications), then dead-letter.
+        // (e.g. default 3 → up to 3 re-publications), then dead-letter. Floor at 0 (not 1) so MaxRetryAttempts = 0
+        // disables retries entirely — dead-letter on the first failure — matching Hangfire's AutomaticRetry { Attempts = 0 }.
+        var maxAttempts = Math.Max(0, _jobsOptions.MaxRetryAttempts);
+
         if (envelope.Attempt <= maxAttempts)
         {
             _logger.LogWarning(ex, "Job {JobId} ({JobType}) failed on attempt {Attempt}; requeuing (max {MaxAttempts} retries)",
@@ -314,7 +315,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         _logger.LogWarning("Job {JobId} routed to dead-letter queue '{DeadLetterQueue}'", jobId, deadLetterQueue);
     }
 
-    private IEnumerable<string> GetQueues()
+    private List<string> GetQueues()
     {
         var queues = new List<string> { _jobsOptions.DefaultQueue };
         queues.AddRange(_rabbitMqOptions.Queues);

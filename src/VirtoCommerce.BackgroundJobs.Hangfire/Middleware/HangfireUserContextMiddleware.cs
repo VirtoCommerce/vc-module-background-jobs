@@ -23,17 +23,17 @@ namespace VirtoCommerce.Platform.Hangfire.Middleware
 
         #region IClientFilter Members
 
-        public void OnCreating(CreatingContext filterContext)
+        public void OnCreating(CreatingContext context)
         {
             var currentUserName = _userNameResolver.GetCurrentUserName();
 
             if (!string.IsNullOrEmpty(currentUserName))
             {
-                filterContext.SetJobParameter(USER_NAME, currentUserName);
+                context.SetJobParameter(USER_NAME, currentUserName);
             }
         }
 
-        public void OnCreated(CreatedContext filterContext)
+        public void OnCreated(CreatedContext context)
         {
             // Pass
         }
@@ -42,23 +42,23 @@ namespace VirtoCommerce.Platform.Hangfire.Middleware
 
         #region IServerFilter Members
 
-        public void OnPerforming(PerformingContext filterContext)
+        public void OnPerforming(PerformingContext context)
         {
             string userName;
 
-            if (IsRecurringJob(filterContext, out var recurringJobId))
+            if (IsRecurringJob(context, out var recurringJobId))
             {
                 userName = $"system:{recurringJobId}".Truncate(UserNameLength);
             }
             else
             {
-                userName = filterContext.GetJobParameter<string>(USER_NAME);
+                userName = context.GetJobParameter<string>(USER_NAME);
             }
 
             _userNameResolver.SetCurrentUserName(userName);
         }
 
-        public void OnPerformed(PerformedContext filterContext)
+        public void OnPerformed(PerformedContext context)
         {
             // Pass
         }

@@ -66,8 +66,8 @@ public class MapReduceTests
         }
     }
 
-    private static IJobExecutionContext Context() =>
-        new JobExecutionContext("test", NoOpJobProgress.Instance, new Dictionary<string, string>());
+    private static JobExecutionContext Context() =>
+        new("test", NoOpJobProgress.Instance, new Dictionary<string, string>());
 
     private static (MapReduceJob facade, FanOutCoordinator fanOut, MapCoordinator map, ReduceCoordinator reduce, CapturingBackgroundJob bus, InMemoryMapReduceBatchStore store, SumReducer reducer)
         BuildHarness(IMapJobHandler<SquareItem, SquareResult> mapHandler)

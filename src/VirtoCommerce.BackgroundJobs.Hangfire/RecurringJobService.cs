@@ -50,7 +50,8 @@ public class RecurringJobService : IRecurringJobService, IEventHandler<ObjectSet
     /// </summary>
     public void WatchJobSetting(SettingCronJob settingCronJob)
     {
-        WatchJobSettingAsync(settingCronJob).GetAwaiter().GetResult();
+        Observe(settingCronJob);
+        RunOrRemoveJob(settingCronJob);
     }
 
     /// <summary>
@@ -58,10 +59,14 @@ public class RecurringJobService : IRecurringJobService, IEventHandler<ObjectSet
     /// </summary>
     public Task WatchJobSettingAsync(SettingCronJob settingCronJob)
     {
+        Observe(settingCronJob);
+        return RunOrRemoveJobAsync(settingCronJob);
+    }
+
+    private static void Observe(SettingCronJob settingCronJob)
+    {
         _observedSettingsDict.AddOrUpdate(settingCronJob.EnableSetting.Name, settingCronJob, (_, _) => settingCronJob);
         _observedSettingsDict.AddOrUpdate(settingCronJob.CronSetting.Name, settingCronJob, (_, _) => settingCronJob);
-
-        return RunOrRemoveJobAsync(settingCronJob);
     }
 
     public async Task Handle(ObjectSettingChangedEvent message)
@@ -77,33 +82,51 @@ public class RecurringJobService : IRecurringJobService, IEventHandler<ObjectSet
         }
     }
 
-    private async Task RunOrRemoveJobAsync(SettingCronJob settingCronJob)
+    // Synchronous path for the (synchronous) IRecurringJobService.WatchJobSetting API — uses the synchronous settings
+    // read so it doesn't block on async (no Task.GetAwaiter().GetResult()).
+    private void RunOrRemoveJob(SettingCronJob settingCronJob)
     {
-        var processJobEnableSettingValue = await _settingsManager.GetValueAsync<object>(settingCronJob.EnableSetting);
-        var processJobEnable = settingCronJob.EnabledEvaluator(processJobEnableSettingValue);
+        var enableValue = _settingsManager.GetValue<object>(settingCronJob.EnableSetting);
 
-        if (processJobEnable)
+        if (settingCronJob.EnabledEvaluator(enableValue))
         {
-            var cronExpression = await _settingsManager.GetValueAsync<string>(settingCronJob.CronSetting);
-
-            var options = new RecurringJobOptions
-            {
-                TimeZone = settingCronJob.TimeZone,
-#pragma warning disable CS0618 // Type or member is obsolete
-                // Remove when Hangfire.MySqlStorage will be updated to support JobStorageFeatures.JobQueueProperty
-                QueueName = settingCronJob.Queue,
-#pragma warning restore CS0618 // Type or member is obsolete
-            };
-
-            _recurringJobManager.AddOrUpdate(
-                settingCronJob.RecurringJobId,
-                settingCronJob.Job,
-                cronExpression,
-                options);
+            ScheduleJob(settingCronJob, _settingsManager.GetValue<string>(settingCronJob.CronSetting));
         }
         else
         {
             _recurringJobManager.RemoveIfExists(settingCronJob.RecurringJobId);
         }
+    }
+
+    private async Task RunOrRemoveJobAsync(SettingCronJob settingCronJob)
+    {
+        var enableValue = await _settingsManager.GetValueAsync<object>(settingCronJob.EnableSetting);
+
+        if (settingCronJob.EnabledEvaluator(enableValue))
+        {
+            ScheduleJob(settingCronJob, await _settingsManager.GetValueAsync<string>(settingCronJob.CronSetting));
+        }
+        else
+        {
+            _recurringJobManager.RemoveIfExists(settingCronJob.RecurringJobId);
+        }
+    }
+
+    private void ScheduleJob(SettingCronJob settingCronJob, string cronExpression)
+    {
+        var options = new RecurringJobOptions
+        {
+            TimeZone = settingCronJob.TimeZone,
+#pragma warning disable CS0618 // Type or member is obsolete
+            // Remove when Hangfire.MySqlStorage will be updated to support JobStorageFeatures.JobQueueProperty
+            QueueName = settingCronJob.Queue,
+#pragma warning restore CS0618 // Type or member is obsolete
+        };
+
+        _recurringJobManager.AddOrUpdate(
+            settingCronJob.RecurringJobId,
+            settingCronJob.Job,
+            cronExpression,
+            options);
     }
 }

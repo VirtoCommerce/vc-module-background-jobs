@@ -103,6 +103,8 @@ public abstract class JobEngineConformanceFixture : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
+        GC.SuppressFinalize(this);
+
         if (!Available)
         {
             return;
