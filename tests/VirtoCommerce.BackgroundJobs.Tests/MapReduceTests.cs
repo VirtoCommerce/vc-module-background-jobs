@@ -135,6 +135,24 @@ public class MapReduceTests
     }
 
     [Fact]
+    public async Task FanOut_RunTwice_EnqueuesMapTasks_Once()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (facade, fanOut, _, _, bus, _, _) = BuildHarness(new SquareHandler());
+
+        await facade.Enqueue<SquareItem, SquareResult, SumState>(
+            [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"), cancellationToken: ct);
+
+        var fan = bus.Enqueued.OfType<MapFanOutEnvelope>().Single();
+
+        // Simulate the fan-out job being redelivered/retried: it must NOT enqueue a second set of map tasks.
+        await fanOut.Execute(fan, Context(), ct);
+        await fanOut.Execute(fan, Context(), ct);
+
+        Assert.Equal(3, bus.Enqueued.OfType<MapTaskEnvelope>().Count());
+    }
+
+    [Fact]
     public async Task FailFast_WithFailure_SkipsReduce()
     {
         var ct = TestContext.Current.CancellationToken;

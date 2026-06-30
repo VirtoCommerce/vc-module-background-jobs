@@ -22,6 +22,16 @@ public interface IMapReduceBatchStore
     /// <summary>Reads the stored items (in order; index = position) for the fan-out task.</summary>
     Task<IReadOnlyList<MapItem>> GetItemsAsync(string batchId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Atomically claim the one-time fan-out for a batch — returns true for the first caller; a redelivered or
+    /// retried fan-out job gets false and must skip, so the map tasks are enqueued exactly once (no duplicate map
+    /// work). Pair with <see cref="ReleaseFanOutAsync"/> so a fan-out that fails mid-way can be retried.
+    /// </summary>
+    Task<bool> TryBeginFanOutAsync(string batchId, CancellationToken cancellationToken = default);
+
+    /// <summary>Releases the fan-out claim so a failed fan-out can be retried (the claim becomes re-acquirable).</summary>
+    Task ReleaseFanOutAsync(string batchId, CancellationToken cancellationToken = default);
+
     /// <summary>Idempotently store one item's result and return the distinct number of items completed so far.</summary>
     Task<int> SaveResultAndCountAsync(string batchId, MapResultRecord result, CancellationToken cancellationToken = default);
 

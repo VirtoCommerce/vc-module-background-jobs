@@ -80,6 +80,12 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
         return (int)await db.HashLengthAsync(resultsKey);
     }
 
+    public Task<bool> TryBeginFanOutAsync(string batchId, CancellationToken cancellationToken = default)
+        => _connection.GetDatabase().StringSetAsync(FanOutKey(batchId), "1", _ttl, When.NotExists);
+
+    public Task ReleaseFanOutAsync(string batchId, CancellationToken cancellationToken = default)
+        => _connection.GetDatabase().KeyDeleteAsync(FanOutKey(batchId));
+
     public Task<bool> TryBeginReduceAsync(string batchId, CancellationToken cancellationToken = default)
         => _connection.GetDatabase().StringSetAsync(ReduceKey(batchId), "1", _ttl, When.NotExists);
 
@@ -96,11 +102,12 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
     public async Task CompleteAsync(string batchId, CancellationToken cancellationToken = default)
     {
         var db = _connection.GetDatabase();
-        await db.KeyDeleteAsync([MetaKey(batchId), ResultsKey(batchId), ReduceKey(batchId), ItemsKey(batchId)]);
+        await db.KeyDeleteAsync([MetaKey(batchId), ResultsKey(batchId), ReduceKey(batchId), ItemsKey(batchId), FanOutKey(batchId)]);
     }
 
     private static string MetaKey(string batchId) => $"vc:mapreduce:{batchId}:meta";
     private static string ResultsKey(string batchId) => $"vc:mapreduce:{batchId}:results";
     private static string ReduceKey(string batchId) => $"vc:mapreduce:{batchId}:reduce";
     private static string ItemsKey(string batchId) => $"vc:mapreduce:{batchId}:items";
+    private static string FanOutKey(string batchId) => $"vc:mapreduce:{batchId}:fanout";
 }

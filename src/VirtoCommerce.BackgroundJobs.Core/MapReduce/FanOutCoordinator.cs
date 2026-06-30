@@ -33,24 +33,44 @@ public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
             return;
         }
 
-        var items = await _store.GetItemsAsync(envelope.BatchId, cancellationToken);
-
-        _logger.LogInformation("Fanning out {Count} map task(s) for batch {BatchId}.", items.Count, envelope.BatchId);
-
-        var index = 0;
-        foreach (var item in items)
+        // Claim the one-time fan-out. A redelivered or retried fan-out job (broker redelivery, engine retry, or
+        // ack-after-dispatch) gets false and skips, so the map tasks are enqueued exactly once — otherwise a second
+        // full set would run duplicate handler side effects and race reduce/cleanup (completion is keyed by item
+        // index, so reduce can fire once each index has any result while duplicates are still in flight).
+        if (!await _store.TryBeginFanOutAsync(envelope.BatchId, cancellationToken))
         {
-            var mapEnvelope = new MapTaskEnvelope
-            {
-                BatchId = envelope.BatchId,
-                Index = index++,
-                ItemType = item.ItemType,
-                ItemJson = item.ItemJson,
-            };
+            _logger.LogInformation("Fan-out for batch {BatchId} already dispatched; skipping duplicate.", envelope.BatchId);
+            return;
+        }
 
-            await _backgroundJob.Enqueue<MapCoordinator>(mapEnvelope,
-                new EnqueueOptions { Queue = batch.Queue, ProgressNotificationId = batch.ProgressNotificationId, Title = batch.Title },
-                cancellationToken);
+        try
+        {
+            var items = await _store.GetItemsAsync(envelope.BatchId, cancellationToken);
+
+            _logger.LogInformation("Fanning out {Count} map task(s) for batch {BatchId}.", items.Count, envelope.BatchId);
+
+            var index = 0;
+            foreach (var item in items)
+            {
+                var mapEnvelope = new MapTaskEnvelope
+                {
+                    BatchId = envelope.BatchId,
+                    Index = index++,
+                    ItemType = item.ItemType,
+                    ItemJson = item.ItemJson,
+                };
+
+                await _backgroundJob.Enqueue<MapCoordinator>(mapEnvelope,
+                    new EnqueueOptions { Queue = batch.Queue, ProgressNotificationId = batch.ProgressNotificationId, Title = batch.Title },
+                    cancellationToken);
+            }
+        }
+        catch
+        {
+            // Fan-out failed part-way: release the claim so a retry can re-run it (map results are keyed by index,
+            // so re-enqueuing already-dispatched indices is idempotent) instead of leaving the batch with no tasks.
+            await _store.ReleaseFanOutAsync(envelope.BatchId, CancellationToken.None);
+            throw;
         }
     }
 }

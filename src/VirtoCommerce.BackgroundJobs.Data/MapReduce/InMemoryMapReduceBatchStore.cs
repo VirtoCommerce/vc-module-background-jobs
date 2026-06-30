@@ -21,6 +21,7 @@ public sealed class InMemoryMapReduceBatchStore : IMapReduceBatchStore
         public ConcurrentDictionary<int, MapResultRecord> Results { get; } = new();
         public IReadOnlyList<MapItem> Items { get; set; } = [];
         public int ReduceClaimed;
+        public int FanOutClaimed;
     }
 
     private readonly ConcurrentDictionary<string, Entry> _batches = new();
@@ -45,6 +46,25 @@ public sealed class InMemoryMapReduceBatchStore : IMapReduceBatchStore
 
     public Task<IReadOnlyList<MapItem>> GetItemsAsync(string batchId, CancellationToken cancellationToken = default)
         => Task.FromResult(_batches.TryGetValue(batchId, out var entry) ? entry.Items : []);
+
+    public Task<bool> TryBeginFanOutAsync(string batchId, CancellationToken cancellationToken = default)
+    {
+        if (!_batches.TryGetValue(batchId, out var entry))
+        {
+            return Task.FromResult(false);
+        }
+
+        return Task.FromResult(Interlocked.CompareExchange(ref entry.FanOutClaimed, 1, 0) == 0);
+    }
+
+    public Task ReleaseFanOutAsync(string batchId, CancellationToken cancellationToken = default)
+    {
+        if (_batches.TryGetValue(batchId, out var entry))
+        {
+            Interlocked.Exchange(ref entry.FanOutClaimed, 0);
+        }
+        return Task.CompletedTask;
+    }
 
     public Task<int> SaveResultAndCountAsync(string batchId, MapResultRecord result, CancellationToken cancellationToken = default)
     {
