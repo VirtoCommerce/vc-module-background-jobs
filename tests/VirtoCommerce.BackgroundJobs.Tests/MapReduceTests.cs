@@ -38,6 +38,14 @@ public class MapReduceTests
                 : Task.FromResult(new SquareResult(item.Value * item.Value));
     }
 
+    // Same (item, result) contract as SquareHandler but different math — used to prove the NAMED map handler runs,
+    // not "the one handler registered for the (item, result) type".
+    private sealed class DoubleHandler : IMapJobHandler<SquareItem, SquareResult>
+    {
+        public Task<SquareResult> Map(SquareItem item, IJobExecutionContext ctx, CancellationToken ct = default)
+            => Task.FromResult(new SquareResult(item.Value * 2));
+    }
+
     private sealed class SumReducer : IReduceJobHandler<SumState, SquareResult>
     {
         public bool Ran { get; private set; }
@@ -75,7 +83,9 @@ public class MapReduceTests
         var reducer = new SumReducer();
         var services = new ServiceCollection();
         services.AddSingleton(mapHandler);
+        services.AddSingleton(mapHandler.GetType(), mapHandler);   // handler-explicit: resolve the map handler by concrete type
         services.AddSingleton<IReduceJobHandler<SumState, SquareResult>>(reducer);
+        services.AddSingleton(reducer);                            // handler-explicit: resolve the reducer by concrete type
         var sp = services.BuildServiceProvider();
 
         var serializer = new JsonJobPayloadSerializer();
@@ -113,7 +123,7 @@ public class MapReduceTests
         var ct = TestContext.Current.CancellationToken;
         var (facade, fanOut, map, reduce, bus, _, reducer) = BuildHarness(new SquareHandler());
 
-        await facade.Enqueue<SquareItem, SquareResult, SumState>(
+        await facade.Enqueue<SquareHandler, SumReducer>(
             [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"), cancellationToken: ct);
 
         // Enqueue is fast: it stores items and queues a single fan-out task (not N map tasks).
@@ -140,7 +150,7 @@ public class MapReduceTests
         var ct = TestContext.Current.CancellationToken;
         var (facade, fanOut, _, _, bus, _, _) = BuildHarness(new SquareHandler());
 
-        await facade.Enqueue<SquareItem, SquareResult, SumState>(
+        await facade.Enqueue<SquareHandler, SumReducer>(
             [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"), cancellationToken: ct);
 
         var fan = bus.Enqueued.OfType<MapFanOutEnvelope>().Single();
@@ -158,7 +168,7 @@ public class MapReduceTests
         var ct = TestContext.Current.CancellationToken;
         var (facade, fanOut, map, reduce, bus, _, reducer) = BuildHarness(new FlakySquareHandler());
 
-        await facade.Enqueue<SquareItem, SquareResult, SumState>(
+        await facade.Enqueue<FlakySquareHandler, SumReducer>(
             [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"),
             new MapReduceOptions { FailurePolicy = FailurePolicy.FailFast }, ct);
 
@@ -174,7 +184,7 @@ public class MapReduceTests
         var ct = TestContext.Current.CancellationToken;
         var (facade, fanOut, map, reduce, bus, _, reducer) = BuildHarness(new FlakySquareHandler());
 
-        await facade.Enqueue<SquareItem, SquareResult, SumState>(
+        await facade.Enqueue<FlakySquareHandler, SumReducer>(
             [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"),
             new MapReduceOptions { FailurePolicy = FailurePolicy.ContinueOnError }, ct);
 
@@ -196,7 +206,7 @@ public class MapReduceTests
         var ct = TestContext.Current.CancellationToken;
         var (facade, _, _, reduce, bus, _, reducer) = BuildHarness(new SquareHandler());
 
-        await facade.Enqueue<SquareItem, SquareResult, SumState>(
+        await facade.Enqueue<SquareHandler, SumReducer>(
             [], new SumState("empty"), cancellationToken: ct);
 
         Assert.Empty(bus.Enqueued.OfType<MapTaskEnvelope>());
@@ -242,5 +252,52 @@ public class MapReduceTests
         var results = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => store.TryBeginReduceAsync("b", ct)));
 
         Assert.Equal(1, results.Count(won => won));
+    }
+
+    // The same (item, result, state) set drives TWO different map handlers — naming the handler at enqueue picks which
+    // one runs, mirroring the "one payload, several handlers" behaviour of IBackgroundJob.
+    [Fact]
+    public async Task SameTypes_RunOnTheNamedMapHandler()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var reducer = new SumReducer();
+        var services = new ServiceCollection();
+        services.AddSingleton(new SquareHandler()); // registered by concrete type
+        services.AddSingleton(new DoubleHandler());
+        services.AddSingleton<IReduceJobHandler<SumState, SquareResult>>(reducer);
+        services.AddSingleton(reducer);
+        var sp = services.BuildServiceProvider();
+
+        var serializer = new JsonJobPayloadSerializer();
+        var store = new InMemoryMapReduceBatchStore();
+        var bus = new CapturingBackgroundJob();
+        var userResolver = new Mock<IUserNameResolver>();
+        userResolver.Setup(x => x.GetCurrentUserName()).Returns("tester");
+
+        var facade = new MapReduceJob(bus, store, serializer, userResolver.Object, Mock.Of<IPushNotificationManager>());
+        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
+        var map = new MapCoordinator(sp, serializer, store, bus, NullLogger<MapCoordinator>.Instance);
+        var reduce = new ReduceCoordinator(sp, serializer, store, Mock.Of<IPushNotificationManager>(), NullLogger<ReduceCoordinator>.Instance);
+
+        // Batch A — SquareHandler: 1,2,3 -> 1,4,9 = 14
+        await RunSquareBatch<SquareHandler>(facade, fanOut, map, reduce, bus, ct);
+        Assert.Equal(1 + 4 + 9, reducer.Total);
+
+        // Batch B — same item/result/state, DoubleHandler: 1,2,3 -> 2,4,6 = 12
+        bus.Enqueued.Clear();
+        await RunSquareBatch<DoubleHandler>(facade, fanOut, map, reduce, bus, ct);
+        Assert.Equal(2 + 4 + 6, reducer.Total);
+    }
+
+    private static async Task RunSquareBatch<TMap>(
+        MapReduceJob facade, FanOutCoordinator fanOut, MapCoordinator map, ReduceCoordinator reduce,
+        CapturingBackgroundJob bus, CancellationToken ct)
+        where TMap : class
+    {
+        await facade.Enqueue<TMap, SumReducer>(
+            [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"), cancellationToken: ct);
+        await PumpMaps(fanOut, map, bus, ct);
+        await reduce.Execute(bus.Enqueued.OfType<ReduceTaskEnvelope>().Single(), Context(), ct);
     }
 }

@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using VirtoCommerce.BackgroundJobs.Core.MapReduce;
 using VirtoCommerce.BackgroundJobs.SampleModule.Jobs;
 using VirtoCommerce.BackgroundJobs.SampleModule.Jobs.Indexing;
 using VirtoCommerce.Platform.Core.Common;
@@ -71,7 +70,9 @@ public class SampleJobsController(IBackgroundJob backgroundJob, IMapReduceJob ma
         // Note: no custom Queue here — the map/reduce tasks run on the default queue, which the engine always drains.
         // Routing to a dedicated queue (e.g. "indexing") additionally requires a worker configured for that queue
         // (VirtoCommerce:Hangfire:Queues or the RabbitMQ consumer queues), otherwise the tasks would sit unprocessed.
-        var batchId = await mapReduce.Enqueue<IndexPage, IndexPageResult, IndexSummary>(
+        // Handler-explicit enqueue: the call site names the map handler (IndexPageHandler) and reduce handler
+        // (IndexSummaryReducer); the item/result/state types are derived from their interfaces.
+        var batchId = await mapReduce.Enqueue<IndexPageHandler, IndexSummaryReducer>(
             items: pages,
             state: new IndexSummary("Product", DateTime.UtcNow.Ticks),
             options: new MapReduceOptions

@@ -1,6 +1,6 @@
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
-using VirtoCommerce.BackgroundJobs.Core.MapReduce;
+using VirtoCommerce.Platform.Core.Jobs;
 using Xunit;
 
 namespace VirtoCommerce.BackgroundJobs.Conformance;
@@ -18,7 +18,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         using var scope = Fixture.Services.CreateScope();
         var mapReduce = scope.ServiceProvider.GetRequiredService<IMapReduceJob>();
 
-        await mapReduce.Enqueue<ConformanceMapItem, ConformanceMapResult, ConformanceReduceState>(
+        await mapReduce.Enqueue<ConformanceMapHandler, ConformanceReduceHandler>(
             items,
             new ConformanceReduceState { CorrelationId = correlationId },
             options,

@@ -1,3 +1,5 @@
+using VirtoCommerce.Platform.Core.Jobs;
+
 namespace VirtoCommerce.BackgroundJobs.Core.MapReduce;
 
 /// <summary>

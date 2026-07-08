@@ -5,10 +5,7 @@
   <version-tag></version-tag>
 
   <platformVersion>3.1039.0-alpha.13313-vcst-5245</platformVersion>
-  <dependencies>
-    <dependency id="VirtoCommerce.BackgroundJobs" version="3.1000.0" />
-  </dependencies>
-
+  
   <title>Background Jobs Sample</title>
   <description>Sample consumer module demonstrating background-job usage: define a payload + handler and enqueue fire-and-forget jobs with or without progress, on whichever engine is active.</description>
 

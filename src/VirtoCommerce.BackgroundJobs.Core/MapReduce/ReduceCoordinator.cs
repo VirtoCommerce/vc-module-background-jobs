@@ -71,11 +71,24 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
         var state = _serializer.Deserialize(batch.StateType, batch.StateJson);
         var mapResults = BuildMapResults(results, resultType);
 
-        var handlerType = typeof(IReduceJobHandler<,>).MakeGenericType(stateType, resultType);
-        var handler = _serviceProvider.GetService(handlerType)
-            ?? throw new InvalidOperationException($"No IReduceJobHandler<{stateType.Name}, {resultType.Name}> is registered.");
+        var handlerInterfaceType = typeof(IReduceJobHandler<,>).MakeGenericType(stateType, resultType);
 
-        var reduceMethod = handlerType.GetMethod(nameof(IReduceJobHandler<object, object>.Reduce))!;
+        // Handler-explicit batch names the concrete reduce handler; resolve it by type. Otherwise resolve by interface.
+        object handler;
+        if (!string.IsNullOrEmpty(batch.ReduceHandlerType))
+        {
+            var concreteHandlerType = Type.GetType(batch.ReduceHandlerType)
+                ?? throw new InvalidOperationException($"Cannot resolve reduce handler type '{batch.ReduceHandlerType}'.");
+            handler = _serviceProvider.GetService(concreteHandlerType)
+                ?? throw new InvalidOperationException($"No reduce handler '{concreteHandlerType.Name}' is registered.");
+        }
+        else
+        {
+            handler = _serviceProvider.GetService(handlerInterfaceType)
+                ?? throw new InvalidOperationException($"No IReduceJobHandler<{stateType.Name}, {resultType.Name}> is registered.");
+        }
+
+        var reduceMethod = handlerInterfaceType.GetMethod(nameof(IReduceJobHandler<object, object>.Reduce))!;
         try
         {
             await (Task)reduceMethod.Invoke(handler, [state, mapResults, context, cancellationToken])!;

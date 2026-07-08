@@ -1,4 +1,4 @@
-# Virto Commerce Background Jobs Module
+# Background Jobs Module
 
 [![CI status](https://github.com/VirtoCommerce/vc-module-background-jobs/workflows/Module%20CI/badge.svg?branch=dev)](https://github.com/VirtoCommerce/vc-module-background-jobs/actions?query=workflow%3A%22Module+CI%22)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=VirtoCommerce_vc-module-background-jobs&metric=alert_status&branch=dev)](https://sonarcloud.io/dashboard?id=VirtoCommerce_vc-module-background-jobs)
@@ -27,6 +27,8 @@ platform Hangfire assembly keep working once this module is installed.
   single configuration key, like the search providers.
 * **Fire-and-forget with or without progress** — opt into live progress streamed to the admin notification UI over
   SignalR.
+* **Map/reduce (fan-out → aggregate)** — split big work into N map tasks that run in parallel across all workers, then
+  a single reduce; engine-agnostic and fleet-safe. Contracts ship in `VirtoCommerce.Platform.Core`.
 * **Instance modes** — the same container image runs as `Producer` (enqueue only), `Worker` (process only) or
   `Both`, controlled by configuration.
 * **No breaking changes** — a type-forwarding shim keeps existing `VirtoCommerce.Platform.Hangfire.*` consumers
@@ -136,8 +138,9 @@ JobEngineBackgroundJob  ── builds JobEnvelope (serializes payload) ──►
 
 | Service | Interface | Responsibility |
 |---|---|---|
-| Enqueue facade | `IBackgroundJob` | Engine-agnostic enqueue (message-based + Hangfire expression sugar). |
+| Enqueue facade | `IBackgroundJob` | Engine-agnostic, handler-explicit enqueue (`Enqueue<THandler>(payload)`). |
 | Job handler | `IBackgroundJobHandler<TPayload>` | Your job logic; resolved from DI, overridable. |
+| Map/reduce facade | `IMapReduceJob` | Fan-out → aggregate jobs (`Enqueue<TMap, TReduce>(items, state)`); contracts ship in `VirtoCommerce.Platform.Core`. |
 | Engine port | `IJobEngine` | The active engine (Hangfire/RabbitMQ). One per instance. |
 | Dispatcher | `IJobDispatcher` | Shared execution path: deserialize → resolve handler → run. |
 | Progress | `IJobProgress` | Reports progress to the admin UI (SignalR). |
@@ -297,8 +300,10 @@ runs a single **reduce** task once every item finishes. It's engine-agnostic (wo
 because the map, reduce, and coordination are ordinary message jobs; the join is fleet-safe via the same atomic
 marker pattern as the recurring scheduler (Redis when configured, in-memory for a single instance).
 
-The map/reduce contracts live in `VirtoCommerce.BackgroundJobs.Core` (a packable NuGet), so a consuming module
-references that package (in addition to the manifest dependency on the engine module).
+The map/reduce contracts (`IMapJobHandler` / `IReduceJobHandler` / `IMapReduceJob` / `MapResult` / `AddMapReduceJob`)
+live in **`VirtoCommerce.Platform.Core`** — the same package as `IBackgroundJob`. A consuming module defines and
+enqueues map/reduce jobs with **no compile-time dependency on the Background Jobs module**; the runtime dependency on
+the engine is declared in `module.manifest`.
 
 ```csharp
 // 1) Map handler — runs once per item, in parallel, on any worker. Keep the result small.
@@ -327,14 +332,18 @@ public class IndexSummaryReducer : IReduceJobHandler<IndexSummary, IndexPageResu
 //    (or use the explicit AddMapReduceJob<TItem, TResult, TState, TMap, TReduce>() overload).
 services.AddMapReduceJob<IndexPageHandler, IndexSummaryReducer>();
 
-// 4) Enqueue a batch — partition into PAGES (not individual documents) to keep the task count sane.
-//    TItem/TState are inferred from the arguments; TResult is stated explicitly (it appears in no argument).
+// 4) Enqueue a batch — NAME the map and reduce handlers (like Enqueue<THandler>): the item/result/state types are
+//    derived from their interfaces and validated against items/state at enqueue. Partition into PAGES, not documents.
 var pages = allProductIds.Chunk(50).Select(ids => new IndexPage("Product", ids));
-await _mapReduce.Enqueue<IndexPage, IndexPageResult, IndexSummary>(
+await _mapReduce.Enqueue<IndexPageHandler, IndexSummaryReducer>(
     items: pages,
     state: new IndexSummary("Product", DateTime.UtcNow.Ticks),
     options: new MapReduceOptions { Queue = "indexing", FailurePolicy = FailurePolicy.ContinueOnError, ReportProgress = true });
 ```
+
+> **Naming the handlers** makes the enqueue self-documenting and lets the *same* item/result/state set drive
+> **several** map/reduce handler pairs — the pair you name at enqueue is the one that runs. `items`/`state` are typed
+> as `object`/`IEnumerable<object>` and validated against the handlers' contracts at enqueue, so a mismatch fails fast.
 
 **What the parameters mean:**
 
@@ -491,7 +500,7 @@ reuses `IJobDispatcher` — no new platform contract needed.
 Don't guess whether your engine follows the standard — run the **conformance suite**. The packable
 [`VirtoCommerce.BackgroundJobs.Conformance`](tests/VirtoCommerce.BackgroundJobs.Conformance/CONFORMANCE.md) project
 ships an abstract xUnit base with **one clear scenario per feature** (enqueue→dispatch, payload fidelity, user
-context, status, delete, expression, unique-key, queue routing, retry, progress, map/reduce, recurring). Reference
+context, status, delete, unique-key, queue routing, retry, progress, map/reduce, recurring). Reference
 it from your engine's test project, write one small fixture wiring your **real** engine against **real**
 infrastructure (a connection string), derive one test class, and `dotnet test` — green means conformant:
 

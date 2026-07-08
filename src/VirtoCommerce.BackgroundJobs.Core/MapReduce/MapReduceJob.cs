@@ -38,27 +38,37 @@ public sealed class MapReduceJob : IMapReduceJob
         _pushNotificationManager = pushNotificationManager;
     }
 
-    public async Task<string> Enqueue<TItem, TResult, TState>(
-        IEnumerable<TItem> items,
-        TState state,
+    public async Task<string> Enqueue<TMap, TReduce>(
+        IEnumerable<object> items,
+        object state,
         MapReduceOptions? options = null,
         CancellationToken cancellationToken = default)
-        where TItem : class
-        where TResult : class
-        where TState : class
+        where TMap : class
+        where TReduce : class
     {
         ArgumentNullException.ThrowIfNull(items);
         ArgumentNullException.ThrowIfNull(state);
+
+        // Derive the item/result/state contract from the handler interfaces (validates the pair agrees on the result
+        // type), then validate the supplied state/items match — so a mismatched handler/payload fails fast here.
+        var (itemType, resultType, stateType) = MapReduceHandlerTypes.ResolveTypes(typeof(TMap), typeof(TReduce));
+
+        if (!stateType.IsInstanceOfType(state))
+        {
+            throw new ArgumentException(
+                $"Reduce handler '{typeof(TReduce).Name}' expects state of type '{stateType.Name}', but got '{state.GetType().Name}'.",
+                nameof(state));
+        }
 
         // Honor cancellation up front, but once we commit to a batch the fan-out below must complete as a unit —
         // a request abort mid-loop would leave Total set with only some map tasks enqueued, so the batch could never
         // reach completion (reduce would never fire). The fan-out therefore does not observe the caller's token.
         cancellationToken.ThrowIfCancellationRequested();
 
-        var itemList = items as IReadOnlyList<TItem> ?? items.ToList();
+        var itemList = items as IReadOnlyList<object> ?? items.ToList();
         var batchId = Guid.NewGuid().ToString("N");
         var userName = _userNameResolver.GetCurrentUserName();
-        var title = $"Map/reduce: {typeof(TItem).Name}";
+        var title = $"Map/reduce: {itemType.Name}";
         var (_, stateJson) = _serializer.Serialize(state);
 
         var progressNotificationId = await TryCreateProgressNotificationAsync(options, itemList.Count, userName, title);
@@ -67,10 +77,12 @@ public sealed class MapReduceJob : IMapReduceJob
         {
             BatchId = batchId,
             Total = itemList.Count,
-            ItemType = typeof(TItem).AssemblyQualifiedName!,
-            ResultType = typeof(TResult).AssemblyQualifiedName!,
-            StateType = typeof(TState).AssemblyQualifiedName!,
+            ItemType = itemType.AssemblyQualifiedName!,
+            ResultType = resultType.AssemblyQualifiedName!,
+            StateType = stateType.AssemblyQualifiedName!,
             StateJson = stateJson,
+            MapHandlerType = typeof(TMap).AssemblyQualifiedName!,
+            ReduceHandlerType = typeof(TReduce).AssemblyQualifiedName!,
             Queue = options?.Queue,
             FailurePolicy = options?.FailurePolicy ?? FailurePolicy.FailFast,
             ProgressNotificationId = progressNotificationId,
@@ -93,8 +105,16 @@ public sealed class MapReduceJob : IMapReduceJob
         var mapItems = new List<MapItem>(itemList.Count);
         foreach (var item in itemList)
         {
-            var (itemType, itemJson) = _serializer.Serialize(item);
-            mapItems.Add(new MapItem { ItemType = itemType, ItemJson = itemJson });
+            ArgumentNullException.ThrowIfNull(item);
+            if (!itemType.IsInstanceOfType(item))
+            {
+                throw new ArgumentException(
+                    $"Map handler '{typeof(TMap).Name}' expects items of type '{itemType.Name}', but got '{item.GetType().Name}'.",
+                    nameof(items));
+            }
+
+            var (serializedType, itemJson) = _serializer.Serialize(item);
+            mapItems.Add(new MapItem { ItemType = serializedType, ItemJson = itemJson });
         }
 
         await _store.SaveItemsAsync(batchId, mapItems, CancellationToken.None);

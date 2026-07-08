@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
-using VirtoCommerce.BackgroundJobs.Core.MapReduce;
 using VirtoCommerce.BackgroundJobs.SampleModule.Jobs;
 using VirtoCommerce.BackgroundJobs.SampleModule.Jobs.Indexing;
 using VirtoCommerce.Platform.Core.Common;

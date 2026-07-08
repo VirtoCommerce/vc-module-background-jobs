@@ -71,17 +71,33 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
     {
         try
         {
-            var itemType = Type.GetType(envelope.ItemType)
-                ?? throw new InvalidOperationException($"Cannot resolve map item type '{envelope.ItemType}'.");
+            // Use the batch's item CONTRACT type (the handler's TItem) for the interface, and the message's concrete
+            // item type only to deserialize — so a derived item still invokes the handler's IMapJobHandler<TItem,...>.
+            var itemContractType = Type.GetType(batch.ItemType)
+                ?? throw new InvalidOperationException($"Cannot resolve map item type '{batch.ItemType}'.");
             var resultType = Type.GetType(batch.ResultType)
                 ?? throw new InvalidOperationException($"Cannot resolve map result type '{batch.ResultType}'.");
 
-            var handlerType = typeof(IMapJobHandler<,>).MakeGenericType(itemType, resultType);
-            var handler = _serviceProvider.GetService(handlerType)
-                ?? throw new InvalidOperationException($"No IMapJobHandler<{itemType.Name}, {resultType.Name}> is registered.");
+            var handlerInterfaceType = typeof(IMapJobHandler<,>).MakeGenericType(itemContractType, resultType);
+
+            // Handler-explicit batch names the concrete map handler; resolve it by type (so several handlers can share
+            // one item/result type). Otherwise resolve by the IMapJobHandler<,> interface.
+            object handler;
+            if (!string.IsNullOrEmpty(batch.MapHandlerType))
+            {
+                var concreteHandlerType = Type.GetType(batch.MapHandlerType)
+                    ?? throw new InvalidOperationException($"Cannot resolve map handler type '{batch.MapHandlerType}'.");
+                handler = _serviceProvider.GetService(concreteHandlerType)
+                    ?? throw new InvalidOperationException($"No map handler '{concreteHandlerType.Name}' is registered.");
+            }
+            else
+            {
+                handler = _serviceProvider.GetService(handlerInterfaceType)
+                    ?? throw new InvalidOperationException($"No IMapJobHandler<{itemContractType.Name}, {resultType.Name}> is registered.");
+            }
 
             var item = _serializer.Deserialize(envelope.ItemType, envelope.ItemJson);
-            var mapMethod = handlerType.GetMethod(nameof(IMapJobHandler<object, object>.Map))!;
+            var mapMethod = handlerInterfaceType.GetMethod(nameof(IMapJobHandler<object, object>.Map))!;
 
             var task = (Task)mapMethod.Invoke(handler, [item, context, cancellationToken])!;
             await task;

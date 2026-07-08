@@ -7,7 +7,7 @@ namespace VirtoCommerce.BackgroundJobs.Core.MapReduce;
 
 /// <summary>
 /// Built-in handler that performs the fan-out on a worker: reads the batch's stored items and enqueues one map task
-/// per item. Running this off the enqueueing request keeps <see cref="IMapReduceJob.Enqueue{TItem, TResult, TState}"/>
+/// per item. Running this off the enqueueing request keeps <see cref="IMapReduceJob.Enqueue{TMap, TReduce}"/>
 /// fast even for very large batches. Idempotent under redelivery — map results are keyed by item index, so re-running
 /// re-enqueues the same indices without inflating the completion count.
 /// </summary>

@@ -1,3 +1,5 @@
+using VirtoCommerce.Platform.Core.Jobs;
+
 namespace VirtoCommerce.BackgroundJobs.Core.MapReduce;
 
 /// <summary>
@@ -17,6 +19,14 @@ public sealed class MapReduceBatch
     public string ResultType { get; set; } = string.Empty;
 
     public string StateType { get; set; } = string.Empty;
+
+    /// <summary>Assembly-qualified name of the concrete map handler to run (handler-explicit enqueue). When set, the
+    /// map coordinator resolves this type; otherwise it resolves <c>IMapJobHandler&lt;ItemType, ResultType&gt;</c>.</summary>
+    public string? MapHandlerType { get; set; }
+
+    /// <summary>Assembly-qualified name of the concrete reduce handler to run. When set, the reduce coordinator
+    /// resolves this type; otherwise it resolves <c>IReduceJobHandler&lt;StateType, ResultType&gt;</c>.</summary>
+    public string? ReduceHandlerType { get; set; }
 
     /// <summary>Serialized reduce state passed to the reduce handler.</summary>
     public string StateJson { get; set; } = string.Empty;

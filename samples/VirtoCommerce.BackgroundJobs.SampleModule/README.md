@@ -4,9 +4,10 @@ A minimal, runnable **consumer module** that demonstrates how to use the Virto C
 abstraction: define a payload, implement a handler, register it, enqueue fire-and-forget jobs **with or without
 progress**, and declare a **recurring (cron) job** — on whichever engine is active (Hangfire or RabbitMQ).
 
-Fire-and-forget and recurring jobs reference **only `VirtoCommerce.Platform.Core`** — no compile-time dependency on
-the engine. The map/reduce demo additionally references **`VirtoCommerce.BackgroundJobs.Core`** (where the map/reduce
-contracts live). The runtime dependency on the engine is declared in `module.manifest`.
+Everything here — fire-and-forget, recurring, AND map/reduce — references **only `VirtoCommerce.Platform.Core`**: all
+the contracts (including `IMapJobHandler` / `IReduceJobHandler` / `IMapReduceJob` / `AddMapReduceJob`) live there, so
+the module has **no compile-time dependency on the engine**. The runtime dependency on the engine is declared in
+`module.manifest`.
 
 ## What it shows
 
@@ -120,15 +121,16 @@ failures) so the sample needs no Search module.
 // Register the map + reduce handlers (Module.Initialize) — types inferred from the handlers.
 services.AddMapReduceJob<IndexPageHandler, IndexSummaryReducer>();
 
-// Enqueue a batch — partition into PAGES of ids (not individual documents) to keep the task count sane.
+// Enqueue a batch — NAME the map/reduce handlers (item/result/state derived from their interfaces).
+// Partition into PAGES of ids (not individual documents) to keep the task count sane.
 var pages = allProductIds.Chunk(50).Select(ids => new IndexPage("Product", ids));
-await mapReduce.Enqueue<IndexPage, IndexPageResult, IndexSummary>(
+await mapReduce.Enqueue<IndexPageHandler, IndexSummaryReducer>(
     items: pages,
     state: new IndexSummary("Product", DateTime.UtcNow.Ticks),
     options: new MapReduceOptions { Queue = "indexing", FailurePolicy = FailurePolicy.ContinueOnError, ReportProgress = true });
 ```
 
-Inject `IMapReduceJob` (from `VirtoCommerce.BackgroundJobs.Core`) to enqueue. With `ContinueOnError`, the reduce
+Inject `IMapReduceJob` (from `VirtoCommerce.Platform.Core`) to enqueue. With `ContinueOnError`, the reduce
 handler receives every page's outcome (successes and failures) so it can log totals and re-index just the failed ids.
 This is wired end-to-end in [`SampleJobsController.IndexProducts`](Controllers/Api/SampleJobsController.cs) — call
 `POST /api/background-jobs-sample/index` to run it.

@@ -10,19 +10,13 @@
   </PropertyGroup>
 
   <!--
-    A sample CONSUMER module. Basic enqueue + recurring jobs need ONLY VirtoCommerce.Platform.Core (no compile-time
-    dependency on the engine) — the runtime dependency on the engine module is declared in module.manifest.
-
-    The map/reduce demo additionally references VirtoCommerce.BackgroundJobs.Core, because the map/reduce contracts
-    (IMapJobHandler/IReduceJobHandler/IMapReduceJob/AddMapReduceJob) live in that packable host package. A real
-    out-of-repo module would reference it as a NuGet; here it is a project reference.
+    A sample CONSUMER module. Everything it uses — basic enqueue, recurring jobs, AND map/reduce — needs ONLY
+    VirtoCommerce.Platform.Core: the job and map/reduce CONTRACTS (IBackgroundJob/IBackgroundJobHandler,
+    IMapJobHandler/IReduceJobHandler/IMapReduceJob/MapResult/AddMapReduceJob) all live there. There is NO compile-time
+    dependency on the engine module; the runtime dependency on the engine is declared in module.manifest.
   -->
   <ItemGroup>
-    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1042.0-alpha.13337-vcst-5245" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\VirtoCommerce.BackgroundJobs.Core\VirtoCommerce.BackgroundJobs.Core.csproj" />
+    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1044.0-alpha.13345-vcst-5245" />
   </ItemGroup>
 
 </Project>

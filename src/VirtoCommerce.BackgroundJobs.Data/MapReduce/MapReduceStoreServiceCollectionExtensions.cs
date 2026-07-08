@@ -8,7 +8,7 @@ namespace VirtoCommerce.BackgroundJobs.Data.MapReduce;
 
 /// <summary>
 /// DI helper that wires up engine-agnostic map/reduce: the orchestration (facade + coordinators, via
-/// <see cref="MapReduceServiceCollectionExtensions.AddMapReduceCore"/>) plus the batch store — Redis when an
+/// <see cref="MapReduceCoreServiceCollectionExtensions.AddMapReduceCore"/>) plus the batch store — Redis when an
 /// <see cref="IConnectionMultiplexer"/> is configured (fleet-safe), otherwise in-memory (single instance). Called
 /// once by the host module.
 /// </summary>
