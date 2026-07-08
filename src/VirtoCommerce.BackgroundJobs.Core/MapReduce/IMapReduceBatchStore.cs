@@ -35,8 +35,15 @@ public interface IMapReduceBatchStore
     /// <summary>Idempotently store one item's result and return the distinct number of items completed so far.</summary>
     Task<int> SaveResultAndCountAsync(string batchId, MapResultRecord result, CancellationToken cancellationToken = default);
 
-    /// <summary>Atomically claim the reduce step — returns true for exactly one caller per batch.</summary>
+    /// <summary>
+    /// Atomically claim the reduce step — returns true for exactly one caller per batch. Pair with
+    /// <see cref="ReleaseReduceAsync"/> so a caller that wins the claim but then fails to enqueue the reduce task can
+    /// release it, letting a redelivered map task re-trigger reduce instead of stranding the batch until TTL.
+    /// </summary>
     Task<bool> TryBeginReduceAsync(string batchId, CancellationToken cancellationToken = default);
+
+    /// <summary>Releases the reduce claim so a failed reduce enqueue can be retried (the claim becomes re-acquirable).</summary>
+    Task ReleaseReduceAsync(string batchId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyCollection<MapResultRecord>> GetResultsAsync(string batchId, CancellationToken cancellationToken = default);
 

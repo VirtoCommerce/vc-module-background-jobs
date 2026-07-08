@@ -19,7 +19,10 @@ namespace VirtoCommerce.BackgroundJobs.Web.Controllers.Api
     {
         private readonly IJobEngine _jobEngine;
 
-        public JobsController(IJobEngine jobEngine)
+        // IJobEngine is optional (like the IBackgroundJob facade): with no engine module installed it is not
+        // registered. Requiring it here would make DI fail to construct the controller and 500 the monitoring
+        // endpoint; accepting null lets the API stay up and degrade gracefully (see GetStatus).
+        public JobsController(IJobEngine jobEngine = null)
         {
             _jobEngine = jobEngine;
         }
@@ -36,7 +39,8 @@ namespace VirtoCommerce.BackgroundJobs.Web.Controllers.Api
             // IJobEngine.GetStatus returns null for an unknown/expired job (the port contract). The monitoring API,
             // however, never returns null: clients (the admin UI poller, integration tests) expect a Job, treating an
             // unknown id as completed so they stop polling — preserving the platform's original endpoint behavior.
-            var result = await _jobEngine.GetStatus(id, cancellationToken)
+            // With no engine installed (_jobEngine == null) we return the same "completed" shape for the same reason.
+            var result = (_jobEngine is null ? null : await _jobEngine.GetStatus(id, cancellationToken))
                 ?? new Job { Id = id, Completed = true };
 
             return Ok(result);

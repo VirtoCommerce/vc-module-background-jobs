@@ -171,6 +171,12 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
                     }
 
                     var backgroundJob = scope.ServiceProvider.GetRequiredService<IBackgroundJob>();
+
+                    // Enqueue BEFORE persisting the occurrence marker: this gives at-LEAST-once semantics. If the
+                    // process dies between Trigger and SetLastOccurrence the marker still reads "unfired", so the next
+                    // tick re-enqueues — a recurring occurrence is re-run rather than silently skipped. This is the
+                    // deliberate trade-off (marking first would risk MISSING an occurrence on a crash); recurring job
+                    // handlers are expected to be idempotent, exactly as with a cron daemon that fires twice.
                     await registration.Trigger(backgroundJob, cancellationToken);
                     await store.SetLastOccurrence(registration.Id, occurrenceUtc, cancellationToken);
 

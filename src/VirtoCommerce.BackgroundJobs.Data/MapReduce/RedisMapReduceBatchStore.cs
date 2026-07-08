@@ -43,6 +43,10 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
         var db = _connection.GetDatabase();
         var key = ItemsKey(batchId);
 
+        // Called exactly ONCE per batch, inline in the producer (MapReduceJob.Enqueue), with a freshly generated
+        // batchId that is never reused — so appending is safe (no prior items to duplicate) and the fan-out job is
+        // enqueued only AFTER this returns, so a partially-written list is never observed. A failure here throws back
+        // to the caller (no fan-out enqueued); the orphaned :items key self-cleans via TTL.
         // Push in chunks so a huge batch doesn't become one oversized RPUSH command.
         const int chunkSize = 500;
         for (var offset = 0; offset < items.Count; offset += chunkSize)
@@ -88,6 +92,9 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
 
     public Task<bool> TryBeginReduceAsync(string batchId, CancellationToken cancellationToken = default)
         => _connection.GetDatabase().StringSetAsync(ReduceKey(batchId), "1", _ttl, When.NotExists);
+
+    public Task ReleaseReduceAsync(string batchId, CancellationToken cancellationToken = default)
+        => _connection.GetDatabase().KeyDeleteAsync(ReduceKey(batchId));
 
     public async Task<IReadOnlyCollection<MapResultRecord>> GetResultsAsync(string batchId, CancellationToken cancellationToken = default)
     {

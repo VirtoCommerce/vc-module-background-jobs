@@ -74,6 +74,21 @@ public class MapReduceTests
         }
     }
 
+    // Fails ONLY when the reduce task is enqueued (map fan-out etc. succeed) — used to prove the reduce claim is
+    // released when the enqueue throws after the claim is won.
+    private sealed class ThrowOnReduceBackgroundJob : IBackgroundJob
+    {
+        public Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null, CancellationToken ct = default)
+            where THandler : class
+        {
+            if (typeof(THandler) == typeof(ReduceCoordinator))
+            {
+                throw new InvalidOperationException("reduce enqueue failed");
+            }
+            return Task.FromResult(Guid.NewGuid().ToString("N"));
+        }
+    }
+
     private static JobExecutionContext Context() =>
         new("test", NoOpJobProgress.Instance, new Dictionary<string, string>());
 
@@ -252,6 +267,45 @@ public class MapReduceTests
         var results = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => store.TryBeginReduceAsync("b", ct)));
 
         Assert.Equal(1, results.Count(won => won));
+    }
+
+    // If the map task wins the reduce claim but the reduce enqueue throws, the claim must be RELEASED so a redelivered
+    // map task can re-trigger reduce — otherwise the batch is stranded (claim set, no reduce task) until TTL.
+    [Fact]
+    public async Task ReduceEnqueueFailure_ReleasesReduceClaim()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var reducer = new SumReducer();
+        var services = new ServiceCollection();
+        services.AddSingleton(new SquareHandler());
+        services.AddSingleton<IReduceJobHandler<SumState, SquareResult>>(reducer);
+        services.AddSingleton(reducer);
+        var sp = services.BuildServiceProvider();
+
+        var serializer = new JsonJobPayloadSerializer();
+        var store = new InMemoryMapReduceBatchStore();
+        var map = new MapCoordinator(sp, serializer, store, new ThrowOnReduceBackgroundJob(), NullLogger<MapCoordinator>.Instance);
+
+        await store.CreateAsync(new MapReduceBatch
+        {
+            BatchId = "b",
+            Total = 1,
+            ItemType = typeof(SquareItem).AssemblyQualifiedName!,
+            ResultType = typeof(SquareResult).AssemblyQualifiedName!,
+            StateType = typeof(SumState).AssemblyQualifiedName!,
+            MapHandlerType = typeof(SquareHandler).AssemblyQualifiedName!,
+            ReduceHandlerType = typeof(SumReducer).AssemblyQualifiedName!,
+        }, ct);
+
+        var (itemType, itemJson) = serializer.Serialize(new SquareItem(2));
+        var env = new MapTaskEnvelope { BatchId = "b", Index = 0, ItemType = itemType, ItemJson = itemJson };
+
+        // Map succeeds and completes the batch, but enqueuing reduce throws → Execute rethrows.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => map.Execute(env, Context(), ct));
+
+        // The claim was released, so it can be won again (a redelivered map task would re-enqueue reduce).
+        Assert.True(await store.TryBeginReduceAsync("b", ct));
     }
 
     // The same (item, result, state) set drives TWO different map handlers — naming the handler at enqueue picks which

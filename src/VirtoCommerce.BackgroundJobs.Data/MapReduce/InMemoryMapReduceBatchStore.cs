@@ -87,6 +87,15 @@ public sealed class InMemoryMapReduceBatchStore : IMapReduceBatchStore
         return Task.FromResult(Interlocked.CompareExchange(ref entry.ReduceClaimed, 1, 0) == 0);
     }
 
+    public Task ReleaseReduceAsync(string batchId, CancellationToken cancellationToken = default)
+    {
+        if (_batches.TryGetValue(batchId, out var entry))
+        {
+            Interlocked.Exchange(ref entry.ReduceClaimed, 0);
+        }
+        return Task.CompletedTask;
+    }
+
     public Task<IReadOnlyCollection<MapResultRecord>> GetResultsAsync(string batchId, CancellationToken cancellationToken = default)
     {
         IReadOnlyCollection<MapResultRecord> results = _batches.TryGetValue(batchId, out var entry)

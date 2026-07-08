@@ -37,6 +37,9 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
         _logger = logger;
     }
 
+    // NOTE on DI scope: this coordinator is itself an IBackgroundJobHandler, so DefaultJobDispatcher resolves it
+    // INSIDE its per-job scope. The IServiceProvider injected here is therefore that job scope (not the root), and the
+    // user IMapJobHandler resolved from it below shares the same scope as every other per-job dependency.
     public async Task Execute(MapTaskEnvelope envelope, IJobExecutionContext context, CancellationToken cancellationToken = default)
     {
         var batch = await _store.GetAsync(envelope.BatchId, cancellationToken);
@@ -62,8 +65,18 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
         // The worker that observes the final completion (and wins the atomic claim) triggers reduce exactly once.
         if (completed >= batch.Total && await _store.TryBeginReduceAsync(envelope.BatchId, cancellationToken))
         {
-            await _backgroundJob.Enqueue<ReduceCoordinator>(new ReduceTaskEnvelope { BatchId = envelope.BatchId },
-                new EnqueueOptions { Queue = batch.Queue }, cancellationToken);
+            try
+            {
+                await _backgroundJob.Enqueue<ReduceCoordinator>(new ReduceTaskEnvelope { BatchId = envelope.BatchId },
+                    new EnqueueOptions { Queue = batch.Queue }, cancellationToken);
+            }
+            catch
+            {
+                // We won the claim but the enqueue failed — release it so a redelivered map task can re-trigger reduce.
+                // Otherwise the claim stays set, no reduce task exists, and the batch never completes (stuck until TTL).
+                await _store.ReleaseReduceAsync(envelope.BatchId, CancellationToken.None);
+                throw;
+            }
         }
     }
 

@@ -1,4 +1,6 @@
 using System;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
@@ -63,10 +65,21 @@ public sealed class DefaultJobDispatcher(IServiceProvider serviceProvider, IJobP
                 await task;
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
-            await TryCompleteProgress(envelope, context, ex.Message);
-            throw;
+            // MethodInfo.Invoke wraps a SYNCHRONOUS throw from the handler (a guard before its first await, or a
+            // non-async handler) in TargetInvocationException — unwrap so cancellation is recognized and the real
+            // cause (not the "Exception has been thrown by the target of an invocation" wrapper) is surfaced.
+            var actual = (ex as TargetInvocationException)?.InnerException ?? ex;
+
+            // Cancellation (shutdown / token) is NOT a job failure: leave the progress notification open and let the
+            // engine honor it (RabbitMQ requeue, Hangfire re-run) rather than marking the job finished/failed.
+            if (actual is not OperationCanceledException)
+            {
+                await TryCompleteProgress(envelope, context, actual.Message);
+            }
+
+            ExceptionDispatchInfo.Throw(actual); // preserves the original stack; never returns
         }
 
         await TryCompleteProgress(envelope, context, error: null);

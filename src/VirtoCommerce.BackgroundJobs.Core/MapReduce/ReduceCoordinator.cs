@@ -42,6 +42,8 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
         _logger = logger;
     }
 
+    // NOTE on DI scope: like MapCoordinator, this handler is resolved by DefaultJobDispatcher inside its per-job
+    // scope, so the injected IServiceProvider IS that scope — the user IReduceJobHandler resolves in the same scope.
     public async Task Execute(ReduceTaskEnvelope envelope, IJobExecutionContext context, CancellationToken cancellationToken = default)
     {
         var batch = await _store.GetAsync(envelope.BatchId, cancellationToken);
