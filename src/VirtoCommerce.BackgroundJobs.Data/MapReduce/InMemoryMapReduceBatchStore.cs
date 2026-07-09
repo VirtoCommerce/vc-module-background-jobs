@@ -22,6 +22,7 @@ public sealed class InMemoryMapReduceBatchStore : IMapReduceBatchStore
         public IReadOnlyList<MapItem> Items { get; set; } = [];
         public int ReduceClaimed;
         public int FanOutClaimed;
+        public int FanOutProgress;
     }
 
     private readonly ConcurrentDictionary<string, Entry> _batches = new();
@@ -62,6 +63,18 @@ public sealed class InMemoryMapReduceBatchStore : IMapReduceBatchStore
         if (_batches.TryGetValue(batchId, out var entry))
         {
             Interlocked.Exchange(ref entry.FanOutClaimed, 0);
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task<int> GetFanOutProgressAsync(string batchId, CancellationToken cancellationToken = default)
+        => Task.FromResult(_batches.TryGetValue(batchId, out var entry) ? Volatile.Read(ref entry.FanOutProgress) : 0);
+
+    public Task SetFanOutProgressAsync(string batchId, int dispatched, CancellationToken cancellationToken = default)
+    {
+        if (_batches.TryGetValue(batchId, out var entry))
+        {
+            Volatile.Write(ref entry.FanOutProgress, dispatched);
         }
         return Task.CompletedTask;
     }

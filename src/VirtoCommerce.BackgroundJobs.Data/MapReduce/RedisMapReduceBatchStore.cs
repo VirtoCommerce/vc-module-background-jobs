@@ -93,6 +93,15 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
     public Task ReleaseFanOutAsync(string batchId, CancellationToken cancellationToken = default)
         => _connection.GetDatabase().KeyDeleteAsync(FanOutKey(batchId));
 
+    public async Task<int> GetFanOutProgressAsync(string batchId, CancellationToken cancellationToken = default)
+    {
+        var value = await _connection.GetDatabase().StringGetAsync(FanOutProgressKey(batchId));
+        return value.IsNullOrEmpty ? 0 : (int)value;
+    }
+
+    public Task SetFanOutProgressAsync(string batchId, int dispatched, CancellationToken cancellationToken = default)
+        => _connection.GetDatabase().StringSetAsync(FanOutProgressKey(batchId), dispatched, _ttl);
+
     public Task<bool> TryBeginReduceAsync(string batchId, CancellationToken cancellationToken = default)
         => _connection.GetDatabase().StringSetAsync(ReduceKey(batchId), "1", _ttl, When.NotExists);
 
@@ -112,7 +121,7 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
     public async Task CompleteAsync(string batchId, CancellationToken cancellationToken = default)
     {
         var db = _connection.GetDatabase();
-        await db.KeyDeleteAsync([MetaKey(batchId), ResultsKey(batchId), ReduceKey(batchId), ItemsKey(batchId), FanOutKey(batchId)]);
+        await db.KeyDeleteAsync([MetaKey(batchId), ResultsKey(batchId), ReduceKey(batchId), ItemsKey(batchId), FanOutKey(batchId), FanOutProgressKey(batchId)]);
     }
 
     private static string MetaKey(string batchId) => $"vc:mapreduce:{batchId}:meta";
@@ -120,4 +129,5 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
     private static string ReduceKey(string batchId) => $"vc:mapreduce:{batchId}:reduce";
     private static string ItemsKey(string batchId) => $"vc:mapreduce:{batchId}:items";
     private static string FanOutKey(string batchId) => $"vc:mapreduce:{batchId}:fanout";
+    private static string FanOutProgressKey(string batchId) => $"vc:mapreduce:{batchId}:fanoutprogress";
 }

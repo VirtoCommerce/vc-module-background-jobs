@@ -326,6 +326,36 @@ public class MapReduceTests
         Assert.Single(bus.Enqueued.OfType<ReduceTaskEnvelope>());   // finalized rather than stuck
     }
 
+    // A retried fan-out resumes from the stored checkpoint instead of re-dispatching indices already enqueued (which
+    // would re-run those map handlers).
+    [Fact]
+    public async Task FanOut_ResumesFromCheckpoint_SkippingDispatchedIndices()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var serializer = new JsonJobPayloadSerializer();
+        var store = new InMemoryMapReduceBatchStore();
+        var bus = new CapturingBackgroundJob();
+        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
+
+        await store.CreateAsync(new MapReduceBatch { BatchId = "b", Total = 4 }, ct);
+        var items = Enumerable.Range(0, 4)
+            .Select(i =>
+            {
+                var (type, json) = serializer.Serialize(new SquareItem(i));
+                return new MapItem { ItemType = type, ItemJson = json };
+            })
+            .ToList();
+        await store.SaveItemsAsync("b", items, ct);
+
+        // Simulate a prior partial fan-out that already dispatched indices 0..1.
+        await store.SetFanOutProgressAsync("b", 2, ct);
+
+        await fanOut.Execute(new MapFanOutEnvelope { BatchId = "b" }, Context(), ct);
+
+        var dispatched = bus.Enqueued.OfType<MapTaskEnvelope>().Select(x => x.Index).ToList();
+        Assert.Equal([2, 3], dispatched); // resumed from the checkpoint; 0 and 1 not re-dispatched
+    }
+
     // The same (item, result, state) set drives TWO different map handlers — naming the handler at enqueue picks which
     // one runs, mirroring the "one payload, several handlers" behaviour of IBackgroundJob.
     [Fact]

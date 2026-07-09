@@ -13,6 +13,10 @@ namespace VirtoCommerce.BackgroundJobs.Core.MapReduce;
 /// </summary>
 public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
 {
+    // Persist a fan-out dispatch checkpoint every this many items, so a retried fan-out resumes near the failure
+    // point instead of re-dispatching from index 0. Bounds the re-dispatch window without a store write per item.
+    private const int CheckpointEvery = 25;
+
     private readonly IMapReduceBatchStore _store;
     private readonly IBackgroundJob _backgroundJob;
     private readonly ILogger<FanOutCoordinator> _logger;
@@ -64,15 +68,21 @@ public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
                 return;
             }
 
-            _logger.LogInformation("Fanning out {Count} map task(s) for batch {BatchId}.", items.Count, envelope.BatchId);
+            // Resume from the last checkpoint so a retried fan-out doesn't re-dispatch already-enqueued indices (which
+            // would re-run those map handlers). Map delivery is at-least-once regardless — a map task can be
+            // redelivered independently — so handlers must be idempotent; this just avoids re-dispatching the whole
+            // set on a partial-failure retry.
+            var startIndex = await _store.GetFanOutProgressAsync(envelope.BatchId, cancellationToken);
 
-            var index = 0;
-            foreach (var item in items)
+            _logger.LogInformation("Fanning out map task(s) {Start}..{Total} for batch {BatchId}.", startIndex, items.Count, envelope.BatchId);
+
+            for (var index = startIndex; index < items.Count; index++)
             {
+                var item = items[index];
                 var mapEnvelope = new MapTaskEnvelope
                 {
                     BatchId = envelope.BatchId,
-                    Index = index++,
+                    Index = index,
                     ItemType = item.ItemType,
                     ItemJson = item.ItemJson,
                 };
@@ -80,12 +90,20 @@ public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
                 await _backgroundJob.Enqueue<MapCoordinator>(mapEnvelope,
                     new EnqueueOptions { Queue = batch.Queue, ProgressNotificationId = batch.ProgressNotificationId, Title = batch.Title },
                     cancellationToken);
+
+                // Checkpoint every few items so a retry resumes near the failure point rather than restarting; the
+                // window of possible re-dispatch is bounded by CheckpointEvery (index+1 tasks are now dispatched).
+                if ((index + 1) % CheckpointEvery == 0)
+                {
+                    await _store.SetFanOutProgressAsync(envelope.BatchId, index + 1, cancellationToken);
+                }
             }
         }
         catch
         {
-            // Fan-out failed part-way: release the claim so a retry can re-run it (map results are keyed by index,
-            // so re-enqueuing already-dispatched indices is idempotent) instead of leaving the batch with no tasks.
+            // Fan-out failed part-way: release the claim so a retry can re-run it (resuming from the last checkpoint;
+            // map results are keyed by index, so re-enqueuing an index is idempotent) instead of leaving the batch
+            // with no tasks.
             await _store.ReleaseFanOutAsync(envelope.BatchId, CancellationToken.None);
             throw;
         }
