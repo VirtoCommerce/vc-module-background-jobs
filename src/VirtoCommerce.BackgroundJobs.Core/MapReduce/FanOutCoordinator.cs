@@ -47,6 +47,23 @@ public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
         {
             var items = await _store.GetItemsAsync(envelope.BatchId, cancellationToken);
 
+            // Defensive: fan-out only runs for a non-empty batch (MapReduceJob enqueues reduce directly when Total == 0
+            // and never fans out), so a stored-item count that doesn't match Total means the items were lost or expired
+            // — a corrupt batch. Fanning out a short set would never reach Total, so completion (and the reduce trigger
+            // in MapCoordinator) would never fire and the progress notification would hang until TTL. Instead, log it
+            // and enqueue reduce directly so the batch still reaches a terminal state (finalize + close notification +
+            // cleanup). This path is not reachable in the normal flow; it's a guard against a stuck batch.
+            if (items.Count != batch.Total)
+            {
+                _logger.LogError(
+                    "Fan-out for batch {BatchId} found {Count} stored item(s) but expected {Total}; finalizing via reduce to avoid a stuck batch.",
+                    envelope.BatchId, items.Count, batch.Total);
+
+                await _backgroundJob.Enqueue<ReduceCoordinator>(new ReduceTaskEnvelope { BatchId = envelope.BatchId },
+                    new EnqueueOptions { Queue = batch.Queue }, cancellationToken);
+                return;
+            }
+
             _logger.LogInformation("Fanning out {Count} map task(s) for batch {BatchId}.", items.Count, envelope.BatchId);
 
             var index = 0;

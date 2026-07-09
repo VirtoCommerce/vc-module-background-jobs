@@ -308,6 +308,24 @@ public class MapReduceTests
         Assert.True(await store.TryBeginReduceAsync("b", ct));
     }
 
+    // Corrupt batch (metadata says Total > 0 but no items were stored): fan-out must finalize via reduce instead of
+    // enqueuing a short set that never reaches Total and leaves the batch hanging until TTL.
+    [Fact]
+    public async Task FanOut_ItemCountMismatch_FinalizesInsteadOfHanging()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = new InMemoryMapReduceBatchStore();
+        var bus = new CapturingBackgroundJob();
+        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
+
+        await store.CreateAsync(new MapReduceBatch { BatchId = "b", Total = 2 }, ct); // expects 2 items; none stored
+
+        await fanOut.Execute(new MapFanOutEnvelope { BatchId = "b" }, Context(), ct);
+
+        Assert.Empty(bus.Enqueued.OfType<MapTaskEnvelope>());       // nothing to map
+        Assert.Single(bus.Enqueued.OfType<ReduceTaskEnvelope>());   // finalized rather than stuck
+    }
+
     // The same (item, result, state) set drives TWO different map handlers — naming the handler at enqueue picks which
     // one runs, mirroring the "one payload, several handlers" behaviour of IBackgroundJob.
     [Fact]
