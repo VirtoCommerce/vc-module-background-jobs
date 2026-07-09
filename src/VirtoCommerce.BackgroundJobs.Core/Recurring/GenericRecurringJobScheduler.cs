@@ -26,6 +26,12 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
 {
     private static readonly TimeSpan _maxSleep = TimeSpan.FromSeconds(60);
 
+    // A due occurrence that fails to ENQUEUE (a transient engine/broker error, not lock contention) is retried this
+    // many times with a short backoff before it is treated as poison and skipped — so a transient error doesn't
+    // permanently drop a scheduled run, while a persistently-failing occurrence can't loop forever.
+    private const int _maxEnqueueAttempts = 5;
+    private static readonly TimeSpan _retryBackoff = TimeSpan.FromSeconds(10);
+
     private readonly IServiceProvider _serviceProvider;
     private readonly IDistributedLockService _distributedLock;
     private readonly ILogger<GenericRecurringJobScheduler> _logger;
@@ -105,9 +111,30 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
                 }
                 catch (Exception ex)
                 {
-                    // A genuine enqueue error (not lock contention) — advance so a poison occurrence doesn't loop forever.
-                    _logger.LogError(ex, "Recurring job '{JobId}' failed to enqueue", job.Registration.Id);
-                    settled = true;
+                    // A genuine enqueue error (not lock contention). Retry the SAME occurrence a bounded number of
+                    // times with a backoff so a transient engine/broker blip doesn't permanently drop a scheduled run;
+                    // only once retries are exhausted do we treat it as poison and advance (so it can't loop forever).
+                    int attempts;
+                    lock (_sync)
+                    {
+                        attempts = ++job.EnqueueFailures;
+                    }
+
+                    if (attempts < _maxEnqueueAttempts)
+                    {
+                        lock (_sync)
+                        {
+                            job.RetryAfter = now + _retryBackoff;
+                        }
+                        _logger.LogWarning(ex, "Recurring job '{JobId}' failed to enqueue (attempt {Attempt}/{Max}); retrying the occurrence in {Backoff}s.",
+                            job.Registration.Id, attempts, _maxEnqueueAttempts, _retryBackoff.TotalSeconds);
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "Recurring job '{JobId}' failed to enqueue {Max} times; skipping this occurrence.",
+                            job.Registration.Id, _maxEnqueueAttempts);
+                        settled = true;
+                    }
                 }
 
                 // Only advance past the occurrence once it is settled (fired here, or confirmed handled by another
@@ -118,6 +145,8 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
                     lock (_sync)
                     {
                         job.NextUtc = job.Parsed.GetNextOccurrence(occurrence, job.Registration.TimeZone);
+                        job.EnqueueFailures = 0;
+                        job.RetryAfter = null;
                     }
                 }
             }
@@ -137,7 +166,7 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
     {
         lock (_sync)
         {
-            return _jobs.Values.Where(x => x.NextUtc is not null && x.NextUtc <= now).ToList();
+            return _jobs.Values.Where(x => x.NextUtc is not null && DueAt(x) <= now).ToList();
         }
     }
 
@@ -145,11 +174,15 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
     {
         lock (_sync)
         {
-            var next = _jobs.Values.Where(x => x.NextUtc is not null).Select(x => x.NextUtc!.Value).DefaultIfEmpty(now + _maxSleep).Min();
+            var next = _jobs.Values.Where(x => x.NextUtc is not null).Select(DueAt).DefaultIfEmpty(now + _maxSleep).Min();
             var delay = next - now;
             return delay < TimeSpan.Zero ? TimeSpan.Zero : delay > _maxSleep ? _maxSleep : delay;
         }
     }
+
+    // The earliest time an occurrence may fire: normally its cron slot (NextUtc), but held off to RetryAfter while a
+    // transient enqueue failure is backing off.
+    private static DateTime DueAt(ScheduledJob job) => job.RetryAfter ?? job.NextUtc!.Value;
 
     // Returns true when the occurrence is settled (we fired it, or confirmed another instance already did); false on
     // lock contention, so the caller retries the occurrence instead of skipping it.
@@ -222,5 +255,11 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
         public RecurringJobRegistration Registration { get; } = registration;
         public CronExpression Parsed { get; } = parsed;
         public DateTime? NextUtc { get; set; }
+
+        /// <summary>Consecutive enqueue failures for the CURRENT occurrence; reset to 0 once it settles.</summary>
+        public int EnqueueFailures { get; set; }
+
+        /// <summary>When set, the current occurrence is not retried before this time (transient-failure backoff).</summary>
+        public DateTime? RetryAfter { get; set; }
     }
 }
