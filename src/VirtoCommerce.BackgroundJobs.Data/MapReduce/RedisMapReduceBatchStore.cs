@@ -43,10 +43,13 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
         var db = _connection.GetDatabase();
         var key = ItemsKey(batchId);
 
-        // Called exactly ONCE per batch, inline in the producer (MapReduceJob.Enqueue), with a freshly generated
-        // batchId that is never reused — so appending is safe (no prior items to duplicate) and the fan-out job is
-        // enqueued only AFTER this returns, so a partially-written list is never observed. A failure here throws back
-        // to the caller (no fan-out enqueued); the orphaned :items key self-cleans via TTL.
+        // REPLACE, don't append: delete any existing list first so a re-save for the same batchId cannot double the
+        // items. Appending would fan out more map tasks than Total and let reduce fire after only the first Total
+        // indices complete. This matches the in-memory store's replace semantics. In the normal flow SaveItemsAsync
+        // runs once per fresh batchId, inline in the producer and before the fan-out job is enqueued, so the delete is
+        // a no-op — but making it idempotent removes the footgun instead of relying on that invariant.
+        await db.KeyDeleteAsync(key);
+
         // Push in chunks so a huge batch doesn't become one oversized RPUSH command.
         const int chunkSize = 500;
         for (var offset = 0; offset < items.Count; offset += chunkSize)
