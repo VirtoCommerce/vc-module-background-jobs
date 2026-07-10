@@ -108,7 +108,7 @@ public class ExtensibilityTests
         AbstractTypeFactory<OrderEmailPayload>.OverrideType<OrderEmailPayload, ExtendedOrderEmailPayload>();
 
         // Only the vendor handler is registered; the payload is extended.
-        var (jobs, recorder) = Build(services => services.AddBackgroundJob<OrderEmailPayload, OrderEmailJob>());
+        var (jobs, recorder) = Build(services => services.AddBackgroundJob<OrderEmailJob, OrderEmailPayload>());
 
         // Create via the factory (returns the extended type), set base + extended fields, enqueue as the base type.
         OrderEmailPayload payload = AbstractTypeFactory<OrderEmailPayload>.TryCreateInstance();
@@ -132,8 +132,8 @@ public class ExtensibilityTests
 
         var (jobs, recorder) = Build(services =>
         {
-            services.AddBackgroundJob<OrderEmailPayload, OrderEmailJob>();
-            services.AddBackgroundJob<OrderEmailPayload, CustomOrderEmailJob>();
+            services.AddBackgroundJob<OrderEmailJob, OrderEmailPayload>();
+            services.AddBackgroundJob<CustomOrderEmailJob, OrderEmailPayload>();
         });
 
         OrderEmailPayload payload = AbstractTypeFactory<OrderEmailPayload>.TryCreateInstance();

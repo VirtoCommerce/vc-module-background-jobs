@@ -144,7 +144,7 @@ JobEngineBackgroundJob  ── builds JobEnvelope (serializes payload) ──►
 | Engine port | `IJobEngine` | The active engine (Hangfire/RabbitMQ). One per instance. |
 | Dispatcher | `IJobDispatcher` | Shared execution path: deserialize → resolve handler → run. |
 | Progress | `IJobProgress` | Reports progress to the admin UI (SignalR). |
-| Recurring registration | `AddRecurringJob<TPayload,THandler>` | Declare a handler + cron/setting-driven schedule (engine-agnostic). |
+| Recurring registration | `AddRecurringJob<THandler,TPayload>` | Declare a handler + cron/setting-driven schedule (engine-agnostic). |
 | Recurring scheduler port | `IRecurringJobScheduler` | Engine impl that schedules recurring jobs (Hangfire-native / in-process cron); NoEngine fallback warns. |
 | Legacy recurring | `IRecurringJobService` | Expression-based cron registration (Hangfire only; back-compat). |
 
@@ -175,7 +175,7 @@ public class SendOrderEmailJob(IEmailSender sender) : IBackgroundJobHandler<Send
 }
 
 // 3) Register in the module's Initialize(IServiceCollection). The payload type is inferred from the handler;
-//    use AddBackgroundJob<TPayload, THandler>() if you prefer to state it explicitly.
+//    use AddBackgroundJob<THandler, TPayload>() if you prefer to state it explicitly.
 services.AddBackgroundJob<SendOrderEmailJob>();
 
 // 4) Enqueue (engine-agnostic). Prefer the HANDLER-EXPLICIT form: the call site names the action that will run,
@@ -265,25 +265,25 @@ A recurring job is the same handler declared with a schedule — no recurring-sp
 Hangfire and RabbitMQ.
 
 ```csharp
-// Explicit cron (payload type inferred from the handler; use AddRecurringJob<TPayload, THandler>(...) to state it)
+// Explicit cron (payload type inferred from the handler; use AddRecurringJob<THandler, TPayload>(...) to state it)
 services.AddRecurringJob<SendDigestJob>(schedule => schedule
     .WithId("SendDigest")
     .WithCron("0 7 * * *")        // 5- or 6-field cron
     .WithQueue("maintenance"));   // optional
 
 // With a parameterized payload — the simplest form: pass the configured payload directly (no factory).
-services.AddRecurringJob<SendDigestPayload, SendDigestJob>(
+services.AddRecurringJob<SendDigestJob, SendDigestPayload>(
     new SendDigestPayload { Top = 10, Period = "daily" },
     schedule => schedule.WithId("SendDigest").WithCron("0 7 * * *"));
 
 // Need a fresh/dynamic value each run (e.g. a timestamp)? Use the factory overload — it runs once per occurrence
 // (build via AbstractTypeFactory inside the factory to keep the payload partner-overridable).
-services.AddRecurringJob<SendDigestPayload, SendDigestJob>(
+services.AddRecurringJob<SendDigestJob, SendDigestPayload>(
     () => new SendDigestPayload { Top = 10, RunAtTicks = DateTime.UtcNow.Ticks },
     schedule => schedule.WithId("SendDigest").WithCron("0 7 * * *"));
 
 // Setting-driven (enabler on/off + cron setting; re-applied live when either setting changes)
-services.AddRecurringJob<PrunePayload, PruneHandler>(schedule => schedule
+services.AddRecurringJob<PruneHandler, PrunePayload>(schedule => schedule
     .WithId("Prune")
     .FromSettings(EnablePruneSetting, CronPruneSetting));
 ```

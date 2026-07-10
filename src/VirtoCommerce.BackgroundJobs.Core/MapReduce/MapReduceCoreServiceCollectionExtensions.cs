@@ -15,9 +15,9 @@ public static class MapReduceCoreServiceCollectionExtensions
     public static IServiceCollection AddMapReduceCore(this IServiceCollection services)
     {
         services.TryAddScoped<IMapReduceJob, MapReduceJob>();
-        services.AddBackgroundJob<MapFanOutEnvelope, FanOutCoordinator>();
-        services.AddBackgroundJob<MapTaskEnvelope, MapCoordinator>();
-        services.AddBackgroundJob<ReduceTaskEnvelope, ReduceCoordinator>();
+        services.AddBackgroundJob<FanOutCoordinator, MapFanOutEnvelope>();
+        services.AddBackgroundJob<MapCoordinator, MapTaskEnvelope>();
+        services.AddBackgroundJob<ReduceCoordinator, ReduceTaskEnvelope>();
         return services;
     }
 }

@@ -237,8 +237,8 @@ public class BackgroundJobsTests
         var recorder = new HandlerRecorder();
         var services = new ServiceCollection();
         services.AddSingleton(recorder);
-        services.AddBackgroundJob<TestPayload, FirstHandler>();
-        services.AddBackgroundJob<TestPayload, SecondHandler>();
+        services.AddBackgroundJob<FirstHandler, TestPayload>();
+        services.AddBackgroundJob<SecondHandler, TestPayload>();
         using var provider = services.BuildServiceProvider();
 
         var serializer = new JsonJobPayloadSerializer();
@@ -275,8 +275,8 @@ public class BackgroundJobsTests
         services.Configure<BackgroundJobsOptions>(_ => { });
         services.AddSingleton(Mock.Of<IUserNameResolver>());
         services.AddSingleton(Mock.Of<IPushNotificationManager>());
-        services.AddBackgroundJob<TestPayload, FirstHandler>();
-        services.AddBackgroundJob<TestPayload, SecondHandler>();
+        services.AddBackgroundJob<FirstHandler, TestPayload>();
+        services.AddBackgroundJob<SecondHandler, TestPayload>();
 
         using var provider = services.BuildServiceProvider();
         var jobs = provider.GetRequiredService<IBackgroundJob>();

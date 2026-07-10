@@ -7,9 +7,11 @@ using Cronos;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using VirtoCommerce.Platform.Core.Common;
 using VirtoCommerce.Platform.Core.DistributedLock;
 using VirtoCommerce.Platform.Core.Exceptions;
 using VirtoCommerce.Platform.Core.Jobs;
+using VirtoCommerce.Platform.Core.Security;
 
 namespace VirtoCommerce.BackgroundJobs.Core.Recurring;
 
@@ -25,6 +27,10 @@ namespace VirtoCommerce.BackgroundJobs.Core.Recurring;
 public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurringJobScheduler
 {
     private static readonly TimeSpan _maxSleep = TimeSpan.FromSeconds(60);
+
+    // Max length of the synthesized "system:{recurringJobId}" user name; matches the Hangfire user-context filter so
+    // recurring-job identities are consistent across engines (and fit the user-name storage).
+    private const int _systemUserNameLength = 64;
 
     // A due occurrence that fails to ENQUEUE (a transient engine/broker error, not lock contention) is retried this
     // many times with a short backoff before it is treated as poison and skipped — so a transient error doesn't
@@ -204,6 +210,15 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
                     }
 
                     var backgroundJob = scope.ServiceProvider.GetRequiredService<IBackgroundJob>();
+
+                    // Run the occurrence AS the recurring job's system identity, mirroring the Hangfire user-context
+                    // filter's "system:{recurringJobId}". IBackgroundJob.Enqueue stamps the CURRENT user onto the
+                    // envelope, and the shared dispatcher restores it on the worker — so this makes the identity flow
+                    // uniformly on EVERY engine (RabbitMQ, Google Cloud Tasks, …), not just Hangfire. The resolver keeps
+                    // it in an AsyncLocal (there's no HttpContext on this background thread), so the Trigger below reads
+                    // it back. Set per occurrence, just before enqueuing.
+                    scope.ServiceProvider.GetRequiredService<IUserNameResolver>()
+                        .SetCurrentUserName($"system:{registration.Id}".Truncate(_systemUserNameLength));
 
                     // Enqueue BEFORE persisting the occurrence marker: this gives at-LEAST-once semantics. If the
                     // process dies between Trigger and SetLastOccurrence the marker still reads "unfired", so the next

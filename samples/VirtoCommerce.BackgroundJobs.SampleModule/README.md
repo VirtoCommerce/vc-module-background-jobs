@@ -74,7 +74,7 @@ public class SampleJob(ILogger<SampleJob> logger) : IBackgroundJobHandler<Sample
 
 // Register (Module.Initialize).
 AbstractTypeFactory<SampleJobPayload>.RegisterType<SampleJobPayload>();
-services.AddBackgroundJob<SampleJobPayload, SampleJob>();
+services.AddBackgroundJob<SampleJob, SampleJobPayload>();
 
 // Enqueue (anywhere, via the IBackgroundJob facade).
 var payload = AbstractTypeFactory<SampleJobPayload>.TryCreateInstance();
@@ -100,7 +100,7 @@ public class SampleRecurringJob(ILogger<SampleRecurringJob> logger) : IBackgroun
 
 // Register handler + schedule (Module.Initialize). The factory overload passes a configured payload —
 // it runs once per occurrence, so you can set parameters (or compute per-run values).
-services.AddRecurringJob<SampleRecurringJobPayload, SampleRecurringJob>(
+services.AddRecurringJob<SampleRecurringJob, SampleRecurringJobPayload>(
     () => new SampleRecurringJobPayload { Label = "heartbeat" },
     schedule => schedule
         .WithId("BackgroundJobs.Sample.Heartbeat")

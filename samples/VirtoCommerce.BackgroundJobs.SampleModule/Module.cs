@@ -18,13 +18,13 @@ public class Module : IModule
         AbstractTypeFactory<SampleJobPayload>.RegisterType<SampleJobPayload>();
 
         // Register the handler so the active engine's dispatcher can resolve and run it. The payload type is inferred
-        // from the handler's IBackgroundJobHandler<TPayload> interface (or use AddBackgroundJob<TPayload, THandler>()).
+        // from the handler's IBackgroundJobHandler<TPayload> interface (or use AddBackgroundJob<THandler, TPayload>()).
         serviceCollection.AddBackgroundJob<SampleJob>();
 
         // A recurring job is just a handler + a schedule. The active engine (Hangfire/RabbitMQ) fires it on cron
         // and runs the handler on a worker — identical code on either engine. The factory overload passes a
         // configured payload (here a label); it runs once per occurrence.
-        serviceCollection.AddRecurringJob<SampleRecurringJobPayload, SampleRecurringJob>(
+        serviceCollection.AddRecurringJob<SampleRecurringJob, SampleRecurringJobPayload>(
             () => new SampleRecurringJobPayload { Label = "heartbeat" },
             schedule => schedule
                 .WithId("BackgroundJobs.Sample.Heartbeat")
