@@ -5,6 +5,7 @@ using VirtoCommerce.BackgroundJobs.SampleModule.Jobs.Indexing;
 using VirtoCommerce.Platform.Core.Common;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Modularity;
+using VirtoCommerce.Platform.Core.Settings;
 
 namespace VirtoCommerce.BackgroundJobs.SampleModule;
 
@@ -23,12 +24,16 @@ public class Module : IModule
 
         // A recurring job is just a handler + a schedule. The active engine (Hangfire/RabbitMQ) fires it on cron
         // and runs the handler on a worker — identical code on either engine. The factory overload passes a
-        // configured payload (here a label); it runs once per occurrence.
+        // configured payload (here a label); it runs once per occurrence. The schedule is setting-driven via
+        // FromSettings — the enabler + cron settings are editable in the admin UI (the cron uses the Cron value type,
+        // so it is validated and shows a plain-English description) and applied live when either setting changes.
         serviceCollection.AddRecurringJob<SampleRecurringJob, SampleRecurringJobPayload>(
             () => new SampleRecurringJobPayload { Label = "heartbeat" },
             schedule => schedule
                 .WithId("BackgroundJobs.Sample.Heartbeat")
-                .WithCron("*/5 * * * *"));
+                .FromSettings(
+                    ModuleConstants.Settings.General.EnableHeartbeat,
+                    ModuleConstants.Settings.General.HeartbeatCron));
 
         // Map/reduce: register the map + reduce handlers for one batch type. Fan out indexing over pages of ids that
         // run in parallel across workers, then aggregate once. See README "Map/reduce: parallel product indexing".
@@ -37,6 +42,10 @@ public class Module : IModule
 
     public void PostInitialize(IApplicationBuilder appBuilder)
     {
+        // Register the module's settings so they appear in the admin UI (grouped by GroupName) and resolve at runtime —
+        // including the Cron-typed heartbeat schedule the recurring job reads via FromSettings.
+        var settingsRegistrar = appBuilder.ApplicationServices.GetRequiredService<ISettingsRegistrar>();
+        settingsRegistrar.RegisterSettings(ModuleConstants.Settings.AllSettings, ModuleInfo.Id);
     }
 
     public void Uninstall()

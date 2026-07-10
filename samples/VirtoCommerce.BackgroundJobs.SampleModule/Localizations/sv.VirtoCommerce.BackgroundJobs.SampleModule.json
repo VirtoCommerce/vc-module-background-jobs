@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "BackgroundJobs": {
+      "Sample": {
+        "EnableHeartbeat": {
+          "title": "Aktivera heartbeat-jobb",
+          "description": "När det är aktiverat kör exempelmodulen ett återkommande heartbeat-bakgrundsjobb enligt schemat nedan."
+        },
+        "HeartbeatCron": {
+          "title": "Heartbeat-schema",
+          "description": "Cron-uttryck som styr hur ofta heartbeat-jobbet körs. Välj en förinställning eller skriv en egen; en lättläst sammanfattning visas medan du redigerar."
+        }
+      }
+    }
+  }
+}

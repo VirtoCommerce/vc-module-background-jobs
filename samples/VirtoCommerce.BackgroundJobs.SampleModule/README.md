@@ -99,14 +99,19 @@ public class SampleRecurringJob(ILogger<SampleRecurringJob> logger) : IBackgroun
 }
 
 // Register handler + schedule (Module.Initialize). The factory overload passes a configured payload —
-// it runs once per occurrence, so you can set parameters (or compute per-run values).
+// it runs once per occurrence, so you can set parameters (or compute per-run values). The schedule is setting-driven
+// (FromSettings): the enabler + cron are editable in the admin UI and applied live when changed.
 services.AddRecurringJob<SampleRecurringJob, SampleRecurringJobPayload>(
     () => new SampleRecurringJobPayload { Label = "heartbeat" },
     schedule => schedule
         .WithId("BackgroundJobs.Sample.Heartbeat")
-        .WithCron("*/5 * * * *"));   // every 5 minutes
+        .FromSettings(
+            ModuleConstants.Settings.General.EnableHeartbeat,   // Boolean, default true
+            ModuleConstants.Settings.General.HeartbeatCron));   // Cron, default "*/5 * * * *"
 ```
-With Hangfire it appears in the `/hangfire` Recurring Jobs dashboard; with RabbitMQ the in-process scheduler fires
+The cron uses the **`Cron` setting value type** ([`ModuleConstants.cs`](ModuleConstants.cs)): the admin edits it with a
+preset picker and a live plain-English description ("Every 5 minutes"), and an invalid expression is rejected on save.
+With Hangfire the job appears in the `/hangfire` Recurring Jobs dashboard; with RabbitMQ the in-process scheduler fires
 it (exactly once across the fleet) and enqueues it for a worker.
 
 ### Map/reduce — parallel product indexing

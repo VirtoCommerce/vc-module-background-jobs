@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "BackgroundJobs": {
+      "Sample": {
+        "EnableHeartbeat": {
+          "title": "Enable heartbeat job",
+          "description": "When enabled, the sample module runs a recurring heartbeat background job on the schedule below."
+        },
+        "HeartbeatCron": {
+          "title": "Heartbeat schedule",
+          "description": "Cron expression controlling how often the heartbeat job runs. Pick a preset or type your own; a plain-English summary is shown as you edit."
+        }
+      }
+    }
+  }
+}

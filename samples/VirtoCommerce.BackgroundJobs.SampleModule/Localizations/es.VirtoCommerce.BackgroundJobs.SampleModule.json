@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "BackgroundJobs": {
+      "Sample": {
+        "EnableHeartbeat": {
+          "title": "Habilitar el trabajo de heartbeat",
+          "description": "Cuando está habilitado, el módulo de ejemplo ejecuta un trabajo en segundo plano de latido recurrente según la programación siguiente."
+        },
+        "HeartbeatCron": {
+          "title": "Programación del heartbeat",
+          "description": "Expresión cron que controla la frecuencia con la que se ejecuta el trabajo de heartbeat. Elija una plantilla o escriba la suya; se muestra un resumen en lenguaje sencillo mientras edita."
+        }
+      }
+    }
+  }
+}

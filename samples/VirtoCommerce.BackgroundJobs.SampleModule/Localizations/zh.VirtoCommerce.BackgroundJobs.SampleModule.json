@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "BackgroundJobs": {
+      "Sample": {
+        "EnableHeartbeat": {
+          "title": "启用心跳作业",
+          "description": "启用后，示例模块将按照下面的计划运行定期的心跳后台作业。"
+        },
+        "HeartbeatCron": {
+          "title": "心跳计划",
+          "description": "用于控制心跳作业运行频率的 cron 表达式。选择一个预设或输入自定义值；编辑时会显示通俗易懂的摘要。"
+        }
+      }
+    }
+  }
+}
