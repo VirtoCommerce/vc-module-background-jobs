@@ -23,19 +23,11 @@ public interface IMapReduceBatchStore
     Task<IReadOnlyList<MapItem>> GetItemsAsync(string batchId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Atomically claim the one-time fan-out for a batch — returns true for the first caller; a redelivered or
-    /// retried fan-out job gets false and must skip, so the map tasks are enqueued exactly once (no duplicate map
-    /// work). Pair with <see cref="ReleaseFanOutAsync"/> so a fan-out that fails mid-way can be retried.
-    /// </summary>
-    Task<bool> TryBeginFanOutAsync(string batchId, CancellationToken cancellationToken = default);
-
-    /// <summary>Releases the fan-out claim so a failed fan-out can be retried (the claim becomes re-acquirable).</summary>
-    Task ReleaseFanOutAsync(string batchId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// How many map tasks the fan-out has already dispatched (a checkpoint of contiguous indices 0..N-1). A retried
-    /// fan-out reads this and resumes from there instead of re-dispatching from index 0, so already-dispatched map
-    /// handlers aren't re-run. Returns 0 when the fan-out hasn't checkpointed yet.
+    /// How many map tasks the fan-out has already dispatched (a checkpoint of contiguous indices 0..N-1). This is the
+    /// fan-out's idempotency AND crash-recovery mechanism: a redelivered fan-out — after a clean redelivery or a hard
+    /// worker crash mid-dispatch — reads this and resumes from there instead of re-dispatching from index 0, so a
+    /// fully-completed fan-out re-enqueues nothing and an interrupted one still finishes the remaining indices.
+    /// Returns 0 when the fan-out hasn't checkpointed yet.
     /// </summary>
     Task<int> GetFanOutProgressAsync(string batchId, CancellationToken cancellationToken = default);
 

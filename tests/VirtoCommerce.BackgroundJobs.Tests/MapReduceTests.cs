@@ -89,6 +89,24 @@ public class MapReduceTests
         }
     }
 
+    // Throws on the Nth Enqueue call (simulating a hard worker crash mid-fan-out), then behaves normally.
+    private sealed class CrashOnceBackgroundJob(int throwOnCall) : IBackgroundJob
+    {
+        private int _calls;
+        public List<object> Enqueued { get; } = [];
+
+        public Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null, CancellationToken ct = default)
+            where THandler : class
+        {
+            if (++_calls == throwOnCall)
+            {
+                throw new InvalidOperationException("simulated crash mid-fan-out");
+            }
+            Enqueued.Add(payload);
+            return Task.FromResult(Guid.NewGuid().ToString("N"));
+        }
+    }
+
     private static JobExecutionContext Context() =>
         new("test", NoOpJobProgress.Instance, new Dictionary<string, string>());
 
@@ -354,6 +372,38 @@ public class MapReduceTests
 
         var dispatched = bus.Enqueued.OfType<MapTaskEnvelope>().Select(x => x.Index).ToList();
         Assert.Equal([2, 3], dispatched); // resumed from the checkpoint; 0 and 1 not re-dispatched
+    }
+
+    // A hard failure mid fan-out must NOT strand the batch: the redelivered fan-out re-dispatches the remaining
+    // indices. (The old one-time claim would have been orphaned by the crash and made the retry skip dispatch,
+    // leaving the batch below Total forever.)
+    [Fact]
+    public async Task FanOut_CrashMidDispatch_RetryDispatchesAllIndices()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var serializer = new JsonJobPayloadSerializer();
+        var store = new InMemoryMapReduceBatchStore();
+        var bus = new CrashOnceBackgroundJob(throwOnCall: 2); // enqueue index 0, then "crash" on index 1
+        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
+
+        await store.CreateAsync(new MapReduceBatch { BatchId = "b", Total = 3 }, ct);
+        var items = Enumerable.Range(0, 3)
+            .Select(i =>
+            {
+                var (type, json) = serializer.Serialize(new SquareItem(i));
+                return new MapItem { ItemType = type, ItemJson = json };
+            })
+            .ToList();
+        await store.SaveItemsAsync("b", items, ct);
+
+        // First delivery crashes mid-dispatch.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fanOut.Execute(new MapFanOutEnvelope { BatchId = "b" }, Context(), ct));
+
+        // Redelivery must still dispatch every index (not be blocked) so the batch can reach Total.
+        await fanOut.Execute(new MapFanOutEnvelope { BatchId = "b" }, Context(), ct);
+
+        var indices = bus.Enqueued.OfType<MapTaskEnvelope>().Select(x => x.Index).Distinct().Order().ToList();
+        Assert.Equal([0, 1, 2], indices);
     }
 
     // The same (item, result, state) set drives TWO different map handlers — naming the handler at enqueue picks which
