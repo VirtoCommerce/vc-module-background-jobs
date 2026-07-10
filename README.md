@@ -71,9 +71,9 @@ When `Provider` is `RabbitMQ`, the engine publishes each job as a persistent mes
 in-process consumer (running when `Mode` is `Worker`/`Both`) drains it and dispatches the handler, retrying a
 failed job by re-publishing with an incremented attempt up to `MaxRetryAttempts`. Once retries are exhausted the
 job is routed to a dead-letter queue (`{queue}.dlq`, carrying `x-original-queue`/`x-attempts`/`x-death-reason`
-headers) for inspection or replay — or dropped if `UseDeadLetterQueue` is `false`. RabbitMQ keeps no job ledger,
-so `GET api/platform/jobs/{id}` reports `Unknown` and job deletion is unsupported — observe jobs via progress
-notifications instead.
+headers) for inspection or replay — or dropped if `UseDeadLetterQueue` is `false`. RabbitMQ keeps no job ledger, so
+`GET api/platform/jobs/{id}` treats every id as unknown (reported as a completed job, so status pollers stop rather
+than hang) and job deletion is unsupported — observe jobs via progress notifications instead.
 
 **Recurring jobs** work on **either** engine. A recurring job is an ordinary `IBackgroundJobHandler<TPayload>` plus a
 schedule declared with `AddRecurringJob` (see Usage). On Hangfire they use Hangfire's native recurring scheduler

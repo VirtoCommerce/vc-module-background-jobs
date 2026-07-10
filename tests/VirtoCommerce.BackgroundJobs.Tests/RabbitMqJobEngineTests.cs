@@ -25,16 +25,15 @@ public class RabbitMqJobEngineTests
     }
 
     [Fact]
-    public async Task GetStatus_Returns_Unknown_NotCompleted()
+    public async Task GetStatus_Returns_Null_Because_No_Ledger()
     {
         var engine = CreateEngine();
 
         var status = await engine.GetStatus("job-1", TestContext.Current.CancellationToken);
 
-        Assert.NotNull(status);
-        Assert.Equal("job-1", status.Id);
-        Assert.Equal("Unknown", status.State);
-        Assert.False(status.Completed);
+        // RabbitMQ keeps no job ledger, so every id is unknown — GetStatus returns null (the IJobEngine unknown
+        // signal). The monitoring API maps null to a completed job so status pollers stop instead of hanging forever.
+        Assert.Null(status);
     }
 
     [Fact]

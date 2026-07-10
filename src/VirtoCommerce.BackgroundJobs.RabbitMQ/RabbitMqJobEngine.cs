@@ -23,8 +23,8 @@ namespace VirtoCommerce.BackgroundJobs.RabbitMQ;
 /// it is re-created transparently if it drops.
 /// </para>
 /// <para>
-/// RabbitMQ has no native job store, so <see cref="GetStatus"/> and <see cref="Delete"/> are best-effort: status is
-/// reported as <c>Unknown</c> and delete is unsupported (progress is observed over SignalR instead).
+/// RabbitMQ has no native job store, so <see cref="GetStatus"/> and <see cref="Delete"/> are best-effort:
+/// <see cref="GetStatus"/> returns <c>null</c> (unknown) and delete is unsupported (progress is observed over SignalR instead).
 /// </para>
 /// </summary>
 public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
@@ -118,19 +118,14 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
     }
 
     /// <summary>
-    /// Best-effort status: RabbitMQ keeps no job ledger, so once a message is published its lifecycle is not
-    /// queryable by id. Returns <c>Unknown</c>/not-completed. Use progress push-notifications to observe a job.
+    /// RabbitMQ keeps no job ledger, so once a message is published its lifecycle is not queryable by id — every job
+    /// is effectively unknown. Returns <c>null</c> (the <see cref="IJobEngine"/> "unknown/expired" signal) so callers
+    /// treat it like any unknown job; the monitoring API maps that to a completed result so pollers stop rather than
+    /// waiting forever on a status this engine can never report. Observe a job's real progress over SignalR instead.
     /// </summary>
     public Task<Job?> GetStatus(string jobId, CancellationToken cancellationToken = default)
     {
-        var result = new Job
-        {
-            Id = jobId,
-            State = "Unknown",
-            Completed = false,
-        };
-
-        return Task.FromResult<Job?>(result);
+        return Task.FromResult<Job?>(null);
     }
 
     /// <summary>Not supported on RabbitMQ — a published message cannot be recalled by id. Always returns false.</summary>
