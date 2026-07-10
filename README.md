@@ -266,7 +266,7 @@ Hangfire and RabbitMQ.
 
 ```csharp
 // Explicit cron (payload type inferred from the handler; use AddRecurringJob<TPayload, THandler>(...) to state it)
-services.AddRecurringJob<SendDigestJob>(s => s
+services.AddRecurringJob<SendDigestJob>(schedule => schedule
     .WithId("SendDigest")
     .WithCron("0 7 * * *")        // 5- or 6-field cron
     .WithQueue("maintenance"));   // optional
@@ -274,16 +274,16 @@ services.AddRecurringJob<SendDigestJob>(s => s
 // With a parameterized payload — the simplest form: pass the configured payload directly (no factory).
 services.AddRecurringJob<SendDigestPayload, SendDigestJob>(
     new SendDigestPayload { Top = 10, Period = "daily" },
-    s => s.WithId("SendDigest").WithCron("0 7 * * *"));
+    schedule => schedule.WithId("SendDigest").WithCron("0 7 * * *"));
 
 // Need a fresh/dynamic value each run (e.g. a timestamp)? Use the factory overload — it runs once per occurrence
 // (build via AbstractTypeFactory inside the factory to keep the payload partner-overridable).
 services.AddRecurringJob<SendDigestPayload, SendDigestJob>(
     () => new SendDigestPayload { Top = 10, RunAtTicks = DateTime.UtcNow.Ticks },
-    s => s.WithId("SendDigest").WithCron("0 7 * * *"));
+    schedule => schedule.WithId("SendDigest").WithCron("0 7 * * *"));
 
 // Setting-driven (enabler on/off + cron setting; re-applied live when either setting changes)
-services.AddRecurringJob<PrunePayload, PruneHandler>(s => s
+services.AddRecurringJob<PrunePayload, PruneHandler>(schedule => schedule
     .WithId("Prune")
     .FromSettings(EnablePruneSetting, CronPruneSetting));
 ```

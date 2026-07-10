@@ -102,7 +102,7 @@ public class SampleRecurringJob(ILogger<SampleRecurringJob> logger) : IBackgroun
 // it runs once per occurrence, so you can set parameters (or compute per-run values).
 services.AddRecurringJob<SampleRecurringJobPayload, SampleRecurringJob>(
     () => new SampleRecurringJobPayload { Label = "heartbeat" },
-    s => s
+    schedule => schedule
         .WithId("BackgroundJobs.Sample.Heartbeat")
         .WithCron("*/5 * * * *"));   // every 5 minutes
 ```

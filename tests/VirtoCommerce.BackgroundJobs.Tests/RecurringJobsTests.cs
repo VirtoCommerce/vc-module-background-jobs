@@ -32,7 +32,7 @@ public class RecurringJobsTests
     {
         var services = new ServiceCollection();
 
-        services.AddRecurringJob<SamplePayload, SampleHandler>(s => s
+        services.AddRecurringJob<SamplePayload, SampleHandler>(schedule => schedule
             .WithId("sample")
             .WithCron("0 2 * * *")
             .WithQueue("maintenance"));
@@ -53,7 +53,7 @@ public class RecurringJobsTests
         var services = new ServiceCollection();
 
         Assert.Throws<InvalidOperationException>(() =>
-            services.AddRecurringJob<SamplePayload, SampleHandler>(s => s.WithId("no-schedule")));
+            services.AddRecurringJob<SamplePayload, SampleHandler>(schedule => schedule.WithId("no-schedule")));
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public class RecurringJobsTests
     {
         var services = new ServiceCollection();
 
-        services.AddRecurringJob<SampleHandler>(s => s.WithId("inferred").WithCron("0 2 * * *"));
+        services.AddRecurringJob<SampleHandler>(schedule => schedule.WithId("inferred").WithCron("0 2 * * *"));
 
         using var provider = services.BuildServiceProvider();
 
@@ -79,7 +79,7 @@ public class RecurringJobsTests
 
         // WithCron and FromSettings are mutually exclusive.
         Assert.Throws<InvalidOperationException>(() =>
-            services.AddRecurringJob<SamplePayload, SampleHandler>(s => s
+            services.AddRecurringJob<SamplePayload, SampleHandler>(schedule => schedule
                 .WithId("both")
                 .WithCron("0 2 * * *")
                 .FromSettings(enabler, cron)));
@@ -89,7 +89,7 @@ public class RecurringJobsTests
     public async Task Registration_Trigger_Enqueues_Payload_On_Configured_Queue()
     {
         var services = new ServiceCollection();
-        services.AddRecurringJob<SamplePayload, SampleHandler>(s => s
+        services.AddRecurringJob<SamplePayload, SampleHandler>(schedule => schedule
             .WithId("sample")
             .WithCron("0 2 * * *")
             .WithQueue("maintenance"));
@@ -122,7 +122,7 @@ public class RecurringJobsTests
         var services = new ServiceCollection();
         services.AddRecurringJob<SamplePayload, SampleHandler>(
             () => new SamplePayload { Value = "configured" },
-            s => s.WithId("sample").WithCron("0 2 * * *"));
+            schedule => schedule.WithId("sample").WithCron("0 2 * * *"));
 
         using var provider = services.BuildServiceProvider();
         var registration = provider.GetServices<RecurringJobRegistration>().Single();
@@ -148,7 +148,7 @@ public class RecurringJobsTests
         // Value overload: pass the configured payload directly, no factory.
         services.AddRecurringJob<SamplePayload, SampleHandler>(
             new SamplePayload { Value = "configured" },
-            s => s.WithId("sample").WithCron("0 2 * * *"));
+            schedule => schedule.WithId("sample").WithCron("0 2 * * *"));
 
         using var provider = services.BuildServiceProvider();
         var registration = provider.GetServices<RecurringJobRegistration>().Single();
@@ -170,7 +170,7 @@ public class RecurringJobsTests
     public async Task Registration_Trigger_Parameterless_Enqueues_NonNull_Payload()
     {
         var services = new ServiceCollection();
-        services.AddRecurringJob<SamplePayload, SampleHandler>(s => s.WithId("sample").WithCron("0 2 * * *"));
+        services.AddRecurringJob<SamplePayload, SampleHandler>(schedule => schedule.WithId("sample").WithCron("0 2 * * *"));
 
         using var provider = services.BuildServiceProvider();
         var registration = provider.GetServices<RecurringJobRegistration>().Single();
@@ -193,7 +193,7 @@ public class RecurringJobsTests
     {
         var services = new ServiceCollection();
 
-        services.AddRecurringJob<SamplePayload, SampleHandler>(s => s
+        services.AddRecurringJob<SamplePayload, SampleHandler>(schedule => schedule
             .WithId("lockout")
             .WithCron("0 2 * * *")
             .WithEnabled(false));
