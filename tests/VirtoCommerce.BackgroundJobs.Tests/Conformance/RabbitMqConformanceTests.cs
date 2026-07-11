@@ -48,6 +48,8 @@ public sealed class RabbitMqConformanceFixture : JobEngineConformanceFixture
                 ["VirtoCommerce:BackgroundJobs:MaxRetryAttempts"] = "3",
                 ["VirtoCommerce:RabbitMQ:Uri"] = connection,
                 ["VirtoCommerce:RabbitMQ:Queues:0"] = ConformanceConstants.CustomQueue,
+                // Pin both knobs so the run is deterministic (PrefetchCount defaults to 0 = auto-scale to CPU count).
+                ["VirtoCommerce:RabbitMQ:PrefetchCount"] = "4",
                 ["VirtoCommerce:RabbitMQ:ConsumerDispatchConcurrency"] = "4",
             })
             .Build();

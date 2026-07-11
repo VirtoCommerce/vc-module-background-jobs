@@ -344,3 +344,4 @@ dist/
 
 # Exclude Visual Studio test run settings
 *.runsettings
+/tests/VirtoCommerce.BackgroundJobs.Benchmarks/reports

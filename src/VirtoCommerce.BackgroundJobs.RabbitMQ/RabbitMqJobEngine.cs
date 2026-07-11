@@ -38,6 +38,9 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
     private readonly IRabbitMqConnectionProvider _connectionProvider;
     private readonly ILogger<RabbitMqJobEngine> _logger;
     private readonly SemaphoreSlim _publishLock = new(1, 1);
+    // Upper bound for a single publish+confirm, used INSTEAD of the caller's token so a client disconnect can't tear
+    // an in-flight publish, while a genuinely unresponsive broker still fails instead of hanging the publish lock.
+    private static readonly TimeSpan _publishTimeout = TimeSpan.FromSeconds(30);
     private readonly HashSet<string> _declaredQueues = new(StringComparer.Ordinal);
     private IChannel? _channel;
 
@@ -51,6 +54,12 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
 
     public async Task<string> Enqueue(JobEnvelope envelope, EnqueueOptions options, CancellationToken cancellationToken = default)
     {
+        // Enqueue is atomic: cancellation is honored only BEFORE the publish starts (nothing is submitted yet). Once
+        // publishing begins we do NOT pass the caller's token to the broker — a client disconnect / request abort must
+        // not tear an in-flight confirmed publish (that would log noisy errors and leave the job ambiguously enqueued).
+        // A publish is sub-millisecond; a stuck broker is bounded by _publishTimeout below.
+        cancellationToken.ThrowIfCancellationRequested();
+
         var queue = string.IsNullOrEmpty(envelope.Queue) ? "default" : envelope.Queue!;
         var jobId = Guid.NewGuid().ToString("N");
         var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(envelope));
@@ -62,11 +71,15 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
             ContentType = "application/json",
         };
 
-        // The channel isn't thread-safe; serialize publishes (and the lazy declare) on the shared channel.
-        await _publishLock.WaitAsync(cancellationToken);
+        // The channel isn't thread-safe; serialize publishes (and the lazy declare) on the shared channel. Use a local
+        // timeout token (NOT the caller's) so the publish runs to completion regardless of the request's lifetime.
+        using var publishCts = new CancellationTokenSource(_publishTimeout);
+        var publishToken = publishCts.Token;
+
+        await _publishLock.WaitAsync(publishToken);
         try
         {
-            var channel = await EnsureChannelAsync(cancellationToken);
+            var channel = await EnsureChannelAsync(publishToken);
 
             // Declare each queue once per channel lifetime (idempotent, but avoids a round-trip per publish).
             if (_declaredQueues.Add(queue))
@@ -77,7 +90,7 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
                     exclusive: false,
                     autoDelete: false,
                     arguments: null,
-                    cancellationToken: cancellationToken);
+                    cancellationToken: publishToken);
             }
 
             await channel.BasicPublishAsync(
@@ -86,7 +99,7 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
                 mandatory: false,
                 basicProperties: properties,
                 body: body,
-                cancellationToken: cancellationToken);
+                cancellationToken: publishToken);
         }
         finally
         {
@@ -96,6 +109,60 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
         _logger.LogInformation("Published job {JobId} ({JobType}) to RabbitMQ queue '{Queue}' (broker confirmed)", jobId, envelope.JobType, queue);
 
         return jobId;
+    }
+
+    /// <summary>
+    /// Bulk publish under a single channel-lock acquisition: issue every publish first, then await all publisher
+    /// confirmations together, so the confirms pipeline instead of paying one full round-trip per message (the
+    /// dominant cost of looping <see cref="Enqueue"/>). Atomic w.r.t. the caller's token, like <see cref="Enqueue"/>.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> EnqueueBatch(IReadOnlyCollection<JobEnvelope> envelopes, EnqueueOptions options, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (envelopes.Count == 0)
+        {
+            return [];
+        }
+
+        using var publishCts = new CancellationTokenSource(_publishTimeout);
+        var publishToken = publishCts.Token;
+
+        var ids = new List<string>(envelopes.Count);
+        var confirmations = new List<Task>(envelopes.Count);
+
+        await _publishLock.WaitAsync(publishToken);
+        try
+        {
+            var channel = await EnsureChannelAsync(publishToken);
+
+            foreach (var envelope in envelopes)
+            {
+                var queue = string.IsNullOrEmpty(envelope.Queue) ? "default" : envelope.Queue!;
+                if (_declaredQueues.Add(queue))
+                {
+                    await channel.QueueDeclareAsync(queue, durable: true, exclusive: false, autoDelete: false, arguments: null, cancellationToken: publishToken);
+                }
+
+                var jobId = Guid.NewGuid().ToString("N");
+                ids.Add(jobId);
+                var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(envelope));
+                var properties = new BasicProperties { MessageId = jobId, Persistent = true, ContentType = "application/json" };
+
+                // Issue the publish but defer awaiting its confirmation — collect them so confirms pipeline.
+                confirmations.Add(channel.BasicPublishAsync(
+                    exchange: string.Empty, routingKey: queue, mandatory: false,
+                    basicProperties: properties, body: body, cancellationToken: publishToken).AsTask());
+            }
+
+            await Task.WhenAll(confirmations);
+        }
+        finally
+        {
+            _publishLock.Release();
+        }
+
+        _logger.LogInformation("Batch-published {Count} jobs to RabbitMQ (broker confirmed)", ids.Count);
+        return ids;
     }
 
     // Caller holds _publishLock.

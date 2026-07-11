@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,7 +24,7 @@ public sealed class JobEngineBackgroundJob(
     IUserNameResolver userNameResolver,
     // Optional: provided by the active engine module. Null when no engine is installed — enqueue then throws the
     // actionable BackgroundJobEngineNotInstalledException instead of failing DI resolution of this facade.
-    IJobEngine? engine = null) : IBackgroundJob
+    IJobEngine? engine = null) : IBackgroundJob, IBulkBackgroundJob
 {
     private readonly BackgroundJobsOptions _options = options.Value;
 
@@ -60,6 +62,19 @@ public sealed class JobEngineBackgroundJob(
             ownsNotification = true;
         }
 
+        // Stamp the enqueue time (for queue-latency telemetry) and, if a producer set an ambient correlation id
+        // (e.g. a load-test run), the run id — so every job on every engine carries the same measurable headers.
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [JobHeaders.EnqueuedAt] = DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture),
+        };
+
+        var runId = JobEnqueueContext.RunId;
+        if (!string.IsNullOrEmpty(runId))
+        {
+            headers[JobHeaders.RunId] = runId;
+        }
+
         var envelope = new JobEnvelope
         {
             JobType = payloadContractType.AssemblyQualifiedName!,
@@ -72,9 +87,67 @@ public sealed class JobEngineBackgroundJob(
             Title = title,
             CompletesProgressNotification = ownsNotification,
             UserName = userName,
+            Headers = headers,
         };
 
         return await engine.Enqueue(envelope, options ?? new EnqueueOptions(), cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<string>> EnqueueBatch<THandler>(IReadOnlyCollection<object> payloads,
+        EnqueueOptions? options = null, CancellationToken cancellationToken = default)
+        where THandler : class
+    {
+        ArgumentNullException.ThrowIfNull(payloads);
+
+        if (engine is null)
+        {
+            throw new BackgroundJobEngineNotInstalledException();
+        }
+
+        if (payloads.Count == 0)
+        {
+            return [];
+        }
+
+        var userName = userNameResolver.GetCurrentUserName();
+        var runId = JobEnqueueContext.RunId;
+        var handlerTypeName = typeof(THandler).AssemblyQualifiedName!;
+        var queue = options?.Queue ?? _options.DefaultQueue;
+
+        // Bulk enqueue is fire-and-forget only: no per-job progress notification (that would create N of them).
+        var envelopes = new List<JobEnvelope>(payloads.Count);
+        foreach (var payload in payloads)
+        {
+            ArgumentNullException.ThrowIfNull(payload);
+
+            var payloadContractType = ResolveHandlerPayloadType(typeof(THandler), payload.GetType());
+            var (payloadType, payloadJson) = serializer.Serialize(payload);
+
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [JobHeaders.EnqueuedAt] = DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture),
+            };
+
+            if (!string.IsNullOrEmpty(runId))
+            {
+                headers[JobHeaders.RunId] = runId;
+            }
+
+            envelopes.Add(new JobEnvelope
+            {
+                JobType = payloadContractType.AssemblyQualifiedName!,
+                HandlerType = handlerTypeName,
+                PayloadType = payloadType,
+                PayloadJson = payloadJson,
+                Queue = queue,
+                UniqueKey = options?.UniqueKey,
+                Title = options?.Title,
+                UserName = userName,
+                Headers = headers,
+            });
+        }
+
+        return await engine.EnqueueBatch(envelopes, options ?? new EnqueueOptions(), cancellationToken);
     }
 
     // Picks the IBackgroundJobHandler<T> the handler implements for this payload (exact T first, then an assignable

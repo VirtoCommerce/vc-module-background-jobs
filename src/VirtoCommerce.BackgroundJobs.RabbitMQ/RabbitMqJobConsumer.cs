@@ -109,7 +109,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         var channel = await _connectionProvider.CreateChannelAsync(cancellationToken: cancellationToken);
         try
         {
-            await channel.BasicQosAsync(prefetchSize: 0, prefetchCount: _rabbitMqOptions.PrefetchCount, global: false, cancellationToken);
+            await channel.BasicQosAsync(prefetchSize: 0, prefetchCount: _rabbitMqOptions.EffectivePrefetchCount(), global: false, cancellationToken);
 
             var consumer = new AsyncEventingBasicConsumer(channel);
             consumer.ReceivedAsync += OnReceivedAsync;

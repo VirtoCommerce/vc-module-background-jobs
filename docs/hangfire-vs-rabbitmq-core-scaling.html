@@ -1,0 +1,398 @@
+<title>Hangfire vs RabbitMQ — 1 & 2 core benchmark</title>
+<style>
+  :root {
+    --ground: #f6f8fa;
+    --panel: #ffffff;
+    --panel-2: #f0f3f6;
+    --ink: #161b22;
+    --ink-soft: #48515c;
+    --ink-faint: #6b7683;
+    --line: #dce2e8;
+    --line-soft: #e8edf1;
+    --rmq: #0d9488;
+    --rmq-soft: #99e6dd;
+    --hf: #d97706;
+    --hf-soft: #f4c88a;
+    --good: #15803d;
+    --warn: #b45309;
+    --shadow: 0 1px 2px rgba(20,27,34,.05), 0 6px 20px rgba(20,27,34,.06);
+    --radius: 10px;
+    --maxw: 940px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0e1116;
+      --panel: #161b22;
+      --panel-2: #1b212a;
+      --ink: #e7edf3;
+      --ink-soft: #a4afba;
+      --ink-faint: #7b8794;
+      --line: #262d37;
+      --line-soft: #202730;
+      --rmq: #2dd4bf;
+      --rmq-soft: #0f5850;
+      --hf: #f59e0b;
+      --hf-soft: #6b4310;
+      --good: #4 ade80;
+      --good: #4ade80;
+      --warn: #fbbf24;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f6f8fa; --panel: #ffffff; --panel-2: #f0f3f6; --ink: #161b22;
+    --ink-soft: #48515c; --ink-faint: #6b7683; --line: #dce2e8; --line-soft: #e8edf1;
+    --rmq: #0d9488; --rmq-soft: #99e6dd; --hf: #d97706; --hf-soft: #f4c88a;
+    --good: #15803d; --warn: #b45309; --shadow: 0 1px 2px rgba(20,27,34,.05), 0 6px 20px rgba(20,27,34,.06);
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e1116; --panel: #161b22; --panel-2: #1b212a; --ink: #e7edf3;
+    --ink-soft: #a4afba; --ink-faint: #7b8794; --line: #262d37; --line-soft: #202730;
+    --rmq: #2dd4bf; --rmq-soft: #0f5850; --hf: #f59e0b; --hf-soft: #6b4310;
+    --good: #4ade80; --warn: #fbbf24; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 24px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: clamp(28px, 5vw, 56px) clamp(18px, 4vw, 32px) 72px; }
+  .mono { font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
+
+  .eyebrow {
+    font-size: 12px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(28px, 5vw, 42px); line-height: 1.1; letter-spacing: -.02em;
+    margin: 0 0 14px; font-weight: 700; text-wrap: balance;
+  }
+  h1 .vs { color: var(--ink-faint); font-weight: 400; }
+  .lede { font-size: 17px; color: var(--ink-soft); margin: 0; max-width: 62ch; }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 22px;
+    font-size: 13px; color: var(--ink-faint);
+  }
+  .meta span { display: inline-flex; align-items: center; gap: 7px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .dot.rmq { background: var(--rmq); }
+  .dot.hf { background: var(--hf); }
+
+  h2 {
+    font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 18px;
+    padding-bottom: 10px; border-bottom: 1px solid var(--line);
+  }
+  section { margin-top: 48px; }
+
+  /* Verdict */
+  .verdict {
+    margin-top: 34px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .verdict-head {
+    padding: 18px 22px; border-bottom: 1px solid var(--line-soft);
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .verdict-head strong { font-size: 15px; }
+  .verdict-head .tag {
+    font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--rmq); border: 1px solid var(--rmq); border-radius: 100px; padding: 3px 11px;
+  }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); }
+  .stat { padding: 20px 22px; border-right: 1px solid var(--line-soft); }
+  .stat:last-child { border-right: 0; }
+  .stat .num { font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+  .stat .num.rmq { color: var(--rmq); }
+  .stat .lbl { font-size: 12.5px; color: var(--ink-soft); margin-top: 8px; }
+  @media (max-width: 680px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .stat:nth-child(2) { border-right: 0; }
+    .stat:nth-child(1), .stat:nth-child(2) { border-bottom: 1px solid var(--line-soft); }
+  }
+
+  /* Table */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); min-width: 640px; }
+  thead th {
+    text-align: right; font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--ink-faint); padding: 13px 16px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  thead th:first-child, tbody td:first-child { text-align: left; }
+  tbody td { padding: 13px 16px; text-align: right; font-size: 14px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: 0; }
+  .engine { display: inline-flex; align-items: center; gap: 9px; font-weight: 600; }
+  .core-band td { background: var(--panel-2); }
+  .core-band td:first-child {
+    font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft);
+  }
+  .win { color: var(--rmq); font-weight: 700; }
+  td .unit { color: var(--ink-faint); font-size: 12px; margin-left: 2px; }
+
+  /* Charts */
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 720px) { .charts { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 22px 16px; }
+  .card h3 { margin: 0; font-size: 15px; font-weight: 650; }
+  .card .sub { margin: 4px 0 6px; font-size: 12.5px; color: var(--ink-faint); }
+  .card svg { width: 100%; height: auto; display: block; }
+  .legend { display: flex; gap: 18px; margin-top: 6px; font-size: 12.5px; color: var(--ink-soft); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend .swatch { width: 11px; height: 11px; border-radius: 3px; }
+
+  /* Findings */
+  .findings { display: grid; gap: 2px; }
+  .finding {
+    display: grid; grid-template-columns: 42px 1fr; gap: 18px; align-items: start;
+    padding: 18px 0; border-bottom: 1px solid var(--line-soft);
+  }
+  .finding:last-child { border-bottom: 0; }
+  .finding .k { font-size: 22px; font-weight: 700; color: var(--rmq); letter-spacing: -.02em; line-height: 1.2; }
+  .finding .k.neutral { color: var(--ink-faint); }
+  .finding h4 { margin: 0 0 4px; font-size: 15.5px; font-weight: 650; }
+  .finding p { margin: 0; font-size: 14px; color: var(--ink-soft); }
+  .finding b { color: var(--ink); font-weight: 650; }
+
+  .note {
+    margin-top: 46px; font-size: 13px; color: var(--ink-faint);
+    background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: var(--radius);
+    padding: 18px 20px; line-height: 1.65;
+  }
+  .note b { color: var(--ink-soft); }
+  .note code {
+    font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+    background: var(--panel); border: 1px solid var(--line-soft); border-radius: 5px; padding: 1px 5px;
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Background Processing Hub · Engine benchmark</p>
+    <h1>RabbitMQ <span class="vs">vs</span> Hangfire at 1 &amp; 2 cores</h1>
+    <p class="lede">Simulating Virto&nbsp;Cloud pod CPU limits on the shared job-dispatch path. Same image, same workload, same handlers — the engine is the only variable.</p>
+    <div class="meta">
+      <span><span class="dot rmq"></span>RabbitMQ + Redis (auto-scaled prefetch)</span>
+      <span><span class="dot hf"></span>Hangfire on SQL Server (native workers)</span>
+      <span class="mono">Local · 2026-07-11</span>
+    </div>
+  </header>
+
+  <div class="verdict">
+    <div class="verdict-head">
+      <strong>RabbitMQ leads at every core count tested</strong>
+      <span class="tag">Recommended for constrained pods</span>
+    </div>
+    <div class="stats">
+      <div class="stat">
+        <div class="num rmq">2.6×</div>
+        <div class="lbl">faster map/reduce drain, both 1 &amp; 2 cores</div>
+      </div>
+      <div class="stat">
+        <div class="num rmq">~½</div>
+        <div class="lbl">the CPU per job on sustained 200/s load</div>
+      </div>
+      <div class="stat">
+        <div class="num rmq">¼</div>
+        <div class="lbl">the allocation rate → far less GC pressure</div>
+      </div>
+      <div class="stat">
+        <div class="num">2.0×</div>
+        <div class="lbl">linear scaling 1→2 cores for both engines</div>
+      </div>
+    </div>
+  </div>
+
+  <section>
+    <h2>The matrix</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Engine</th>
+            <th>Concurrency</th>
+            <th>Map/reduce drain</th>
+            <th>CPU peak</th>
+            <th>WS peak</th>
+            <th>Sustained 200/s</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="core-band"><td colspan="6">1 core &nbsp;·&nbsp; DOTNET_PROCESSOR_COUNT=1 + affinity pinned</td></tr>
+          <tr>
+            <td><span class="engine"><span class="dot rmq"></span>RabbitMQ</span></td>
+            <td class="mono">prefetch 10</td>
+            <td class="mono"><span class="win">141</span><span class="unit">j/s</span></td>
+            <td class="mono">0.70</td>
+            <td class="mono">231<span class="unit">MB</span></td>
+            <td class="mono">held · avg <b class="win">0.31</b></td>
+          </tr>
+          <tr>
+            <td><span class="engine"><span class="dot hf"></span>Hangfire</span></td>
+            <td class="mono">workers 5</td>
+            <td class="mono">55<span class="unit">j/s</span></td>
+            <td class="mono">0.69</td>
+            <td class="mono">247<span class="unit">MB</span></td>
+            <td class="mono">held · avg 0.56 <span class="unit">(pk 1.06)</span></td>
+          </tr>
+          <tr class="core-band"><td colspan="6">2 cores &nbsp;·&nbsp; DOTNET_PROCESSOR_COUNT=2 + affinity pinned</td></tr>
+          <tr>
+            <td><span class="engine"><span class="dot rmq"></span>RabbitMQ</span></td>
+            <td class="mono">prefetch 20</td>
+            <td class="mono"><span class="win">282</span><span class="unit">j/s</span></td>
+            <td class="mono">1.23</td>
+            <td class="mono">274<span class="unit">MB</span></td>
+            <td class="mono">held · avg <b class="win">0.46</b></td>
+          </tr>
+          <tr>
+            <td><span class="engine"><span class="dot hf"></span>Hangfire</span></td>
+            <td class="mono">workers 10</td>
+            <td class="mono">109<span class="unit">j/s</span></td>
+            <td class="mono">1.73</td>
+            <td class="mono">300<span class="unit">MB</span></td>
+            <td class="mono">held · avg 0.95 <span class="unit">(pk 1.89)</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Head to head</h2>
+    <div class="charts">
+
+      <div class="card">
+        <h3>Map/reduce throughput</h3>
+        <p class="sub">2000 jobs, 50&nbsp;ms IO map · higher is better</p>
+        <svg viewBox="0 0 340 220" role="img" aria-label="Map/reduce throughput: RabbitMQ 141 and 282, Hangfire 55 and 109 jobs per second.">
+          <!-- gridlines -->
+          <g stroke="var(--line-soft)" stroke-width="1">
+            <line x1="46" y1="24"  x2="330" y2="24"/>
+            <line x1="46" y1="66"  x2="330" y2="66"/>
+            <line x1="46" y1="108" x2="330" y2="108"/>
+            <line x1="46" y1="150" x2="330" y2="150"/>
+            <line x1="46" y1="180" x2="330" y2="180"/>
+          </g>
+          <!-- y labels (max 300 -> y=24; baseline 300..0 across 156px) -->
+          <g fill="var(--ink-faint)" font-size="10" font-family="ui-monospace,Consolas,monospace" text-anchor="end">
+            <text x="40" y="27">300</text>
+            <text x="40" y="69">225</text>
+            <text x="40" y="111">150</text>
+            <text x="40" y="153">75</text>
+            <text x="40" y="183">0</text>
+          </g>
+          <!-- bars: baseline y=180, scale 156px = 300 j/s => px = val*0.52 -->
+          <!-- 1-core group -->
+          <rect x="70"  y="106.68" width="34" height="73.32"  rx="3" fill="var(--rmq)"/>
+          <rect x="108" y="151.4"  width="34" height="28.6"   rx="3" fill="var(--hf)"/>
+          <!-- 2-core group -->
+          <rect x="196" y="33.36"  width="34" height="146.64" rx="3" fill="var(--rmq)"/>
+          <rect x="234" y="123.32" width="34" height="56.68"  rx="3" fill="var(--hf)"/>
+          <!-- value labels -->
+          <g font-size="11" font-family="ui-monospace,Consolas,monospace" font-weight="700" text-anchor="middle">
+            <text x="87"  y="100"   fill="var(--rmq)">141</text>
+            <text x="125" y="145"   fill="var(--hf)">55</text>
+            <text x="213" y="27"    fill="var(--rmq)">282</text>
+            <text x="251" y="117"   fill="var(--hf)">109</text>
+          </g>
+          <!-- x labels -->
+          <g fill="var(--ink-soft)" font-size="11" text-anchor="middle">
+            <text x="106" y="200" font-weight="600">1 core</text>
+            <text x="232" y="200" font-weight="600">2 cores</text>
+          </g>
+        </svg>
+        <div class="legend">
+          <span><span class="swatch" style="background:var(--rmq)"></span>RabbitMQ</span>
+          <span><span class="swatch" style="background:var(--hf)"></span>Hangfire</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>CPU cost to hold 200 jobs/s</h3>
+        <p class="sub">sustained 2&nbsp;min · lower is better</p>
+        <svg viewBox="0 0 340 220" role="img" aria-label="CPU cost at 200 per second: RabbitMQ 0.31 and 0.46 cores, Hangfire 0.56 and 0.95 cores.">
+          <g stroke="var(--line-soft)" stroke-width="1">
+            <line x1="46" y1="24"  x2="330" y2="24"/>
+            <line x1="46" y1="63"  x2="330" y2="63"/>
+            <line x1="46" y1="102" x2="330" y2="102"/>
+            <line x1="46" y1="141" x2="330" y2="141"/>
+            <line x1="46" y1="180" x2="330" y2="180"/>
+          </g>
+          <g fill="var(--ink-faint)" font-size="10" font-family="ui-monospace,Consolas,monospace" text-anchor="end">
+            <text x="40" y="27">1.0</text>
+            <text x="40" y="66">0.75</text>
+            <text x="40" y="105">0.5</text>
+            <text x="40" y="144">0.25</text>
+            <text x="40" y="183">0</text>
+          </g>
+          <!-- baseline y=180, scale 156px = 1.0 core => px = val*156 -->
+          <!-- 1-core -->
+          <rect x="70"  y="131.64" width="34" height="48.36"  rx="3" fill="var(--rmq)"/>
+          <rect x="108" y="92.64"  width="34" height="87.36"  rx="3" fill="var(--hf)"/>
+          <!-- 2-core -->
+          <rect x="196" y="108.24" width="34" height="71.76"  rx="3" fill="var(--rmq)"/>
+          <rect x="234" y="31.8"   width="34" height="148.2"  rx="3" fill="var(--hf)"/>
+          <g font-size="11" font-family="ui-monospace,Consolas,monospace" font-weight="700" text-anchor="middle">
+            <text x="87"  y="125"  fill="var(--rmq)">0.31</text>
+            <text x="125" y="86"   fill="var(--hf)">0.56</text>
+            <text x="213" y="102"  fill="var(--rmq)">0.46</text>
+            <text x="251" y="25"   fill="var(--hf)">0.95</text>
+          </g>
+          <g fill="var(--ink-soft)" font-size="11" text-anchor="middle">
+            <text x="106" y="200" font-weight="600">1 core</text>
+            <text x="232" y="200" font-weight="600">2 cores</text>
+          </g>
+        </svg>
+        <div class="legend">
+          <span><span class="swatch" style="background:var(--rmq)"></span>RabbitMQ</span>
+          <span><span class="swatch" style="background:var(--hf)"></span>Hangfire</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>What the numbers say</h2>
+    <div class="findings">
+      <div class="finding">
+        <div class="k">2.6×</div>
+        <div>
+          <h4>RabbitMQ drains map/reduce far faster — at lower CPU</h4>
+          <p>141 vs 55 j/s at 1 core, 282 vs 109 at 2 cores. And it does it at <b>lower peak CPU</b> (1.23 vs 1.73 cores at 2-core) — Hangfire round-trips every child job through SQL, RabbitMQ streams from the broker with a prefetch-gated consumer.</p>
+        </div>
+      </div>
+      <div class="finding">
+        <div class="k">½</div>
+        <div>
+          <h4>Roughly half the CPU per job under sustained load</h4>
+          <p>Both engines hold 200/s with zero failures, but RabbitMQ does it at avg <b>0.31→0.46 cores</b> vs Hangfire's <b>0.56→0.95</b>. At 1 vCPU Hangfire <b>peaks at 1.06 cores</b> — momentarily saturating the whole pod, threadpool queue climbing to 43 — while RabbitMQ leaves half the core free.</p>
+        </div>
+      </div>
+      <div class="finding">
+        <div class="k">¼</div>
+        <div>
+          <h4>A quarter of the allocation rate</h4>
+          <p>On the 2-core map/reduce, RabbitMQ allocated <b>14&nbsp;MB/s</b> against Hangfire's <b>58&nbsp;MB/s</b> — SQL command arguments and job-state churn dominate Hangfire's heap. Less allocation means fewer gen-2 collections and steadier tail latency.</p>
+        </div>
+      </div>
+      <div class="finding">
+        <div class="k neutral">=</div>
+        <div>
+          <h4>Both scale linearly 1→2 cores</h4>
+          <p>RabbitMQ 141→282 (prefetch auto-scales 10→20); Hangfire 55→109 (workers 5→10). Each roughly <b>doubles</b>, so the per-core gap is structural — it holds at every core count, not a tuning artifact.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="note">
+    <b>Method.</b> Single VirtoCommerce platform instance, same benchmark handlers, driven by NBomber; per-process CPU / working-set / GC / threadpool sampled with <code>dotnet-counters</code>. Pod CPU limits simulated with <code>DOTNET_PROCESSOR_COUNT</code> (runtime pool &amp; GC sizing + both engines' self-scaling) plus processor affinity as a physical cap. RabbitMQ ran <code>AutoScaleConcurrency=true, ConcurrencyPerCore=10</code>; Hangfire ran native workers (<code>WorkerCount</code> unset → cores&nbsp;×&nbsp;5). Map/reduce drain is total-time (2000 jobs ÷ wall seconds). These are <b>relative</b> local numbers for engine comparison — absolute cloud figures need managed RabbitMQ / Redis / SQL on representative nodes. The <b>0.5-core</b> row was not run (needs a Windows Job Object hard CPU-rate cap).
+  </div>
+
+</div>

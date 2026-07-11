@@ -58,8 +58,9 @@ sections (`VirtoCommerce:Hangfire`, `VirtoCommerce:RabbitMQ`), so the existing H
   "RabbitMQ": {
     "HostName": "localhost", "Port": 5672, "UserName": "guest", "Password": "guest", "VirtualHost": "/",
     // "Uri": "amqp://guest:guest@localhost:5672/",  // alternative to the host/port/credential fields above
-    "PrefetchCount": 1,        // unacknowledged messages a consumer prefetches (QoS) — also the default parallelism
-    // "ConsumerDispatchConcurrency": 10,  // handlers run in parallel per instance; defaults to PrefetchCount when unset
+    "PrefetchCount": 0,        // unacked prefetch (QoS) + throughput gate; 0 (default) auto-scales to ProcessorCount x ConcurrencyPerCore, a positive value pins it
+    // "ConsumerDispatchConcurrency": 0,   // handlers run in parallel per instance; 0 (default) follows the effective PrefetchCount
+    // "ConcurrencyPerCore": 10,           // target concurrent handlers per CPU when auto-scaling; ~1-2 for CPU-bound work
     "Queues": [],              // extra queues the consumer drains besides BackgroundJobs.DefaultQueue
     "UseDeadLetterQueue": true,    // route retry-exhausted jobs to "{queue}.dlq" instead of dropping them
     "DeadLetterQueueSuffix": ".dlq"
@@ -386,13 +387,16 @@ concurrency is the active engine's worker concurrency, not a map/reduce-specific
 | Provider | Concurrent map tasks **per instance** | Knob | Default |
 |---|---|---|---|
 | **Hangfire** | `WorkerCount` (server worker threads) | `VirtoCommerce:Hangfire:WorkerCount` | ~`ProcessorCount * 5` |
-| **RabbitMQ** | `ConsumerDispatchConcurrency` (parallel handler dispatch), bounded by `PrefetchCount` | `VirtoCommerce:RabbitMQ:ConsumerDispatchConcurrency` (defaults to `PrefetchCount`) | `1` |
+| **RabbitMQ** | `ConsumerDispatchConcurrency` (parallel handler dispatch), bounded by `PrefetchCount` | `VirtoCommerce:RabbitMQ:ConsumerDispatchConcurrency` (follows `PrefetchCount` when `<= 0`) | `0` → auto (`ProcessorCount × ConcurrencyPerCore`) |
 
 > **RabbitMQ gotcha:** `PrefetchCount` alone does *not* parallelize work — it only controls how many unacked
 > messages the broker delivers. The client still invokes the consumer handler **one at a time** unless
-> `ConsumerDispatchConcurrency` is &gt; 1. This module defaults `ConsumerDispatchConcurrency` to `PrefetchCount`, so
-> setting `"PrefetchCount": 10` gives you 10 concurrent handlers; set `ConsumerDispatchConcurrency` explicitly to
-> decouple the two (high prefetch for throughput, bounded handler parallelism).
+> `ConsumerDispatchConcurrency` is &gt; 1. Both knobs **default to `0`, which auto-scales** to the CPU count the pod
+> sees (`ProcessorCount × ConcurrencyPerCore`, `ConcurrencyPerCore` = 10), so a worker self-sizes with no
+> per-environment config; `ConsumerDispatchConcurrency` follows the effective `PrefetchCount`. Set a **positive**
+> value on either to pin it — e.g. `"PrefetchCount": 10` gives 10 concurrent handlers; set
+> `ConsumerDispatchConcurrency` explicitly to decouple the two (high prefetch for throughput, bounded handler
+> parallelism). For CPU-bound handlers drop `ConcurrencyPerCore` to ~1–2.
 >
 > So a 20 000-page batch where each page takes 5 s finishes in ≈ `20000 / WorkerCount * 5 s` per Hangfire instance,
 > and ≈ `20000 / ConsumerDispatchConcurrency * 5 s` per RabbitMQ instance. The sample's `IndexPageHandler` logs

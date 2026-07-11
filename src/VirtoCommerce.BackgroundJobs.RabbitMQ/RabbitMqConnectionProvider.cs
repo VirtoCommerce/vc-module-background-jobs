@@ -70,8 +70,8 @@ public sealed class RabbitMqConnectionProvider : IRabbitMqConnectionProvider
 
             // Parallel consumer dispatch. Without this (default 1) the client invokes the consumer handler
             // sequentially even when PrefetchCount delivers several unacked messages, so jobs run one-at-a-time.
-            // Default it to PrefetchCount so prefetch controls parallelism; allow an explicit override.
-            ConsumerDispatchConcurrency = Math.Max((ushort)1, _options.ConsumerDispatchConcurrency ?? _options.PrefetchCount),
+            // Follows the effective prefetch (which auto-scales when left at 0) unless dispatch is set explicitly.
+            ConsumerDispatchConcurrency = _options.EffectiveDispatchConcurrency(),
         };
 
         if (!string.IsNullOrWhiteSpace(_options.Uri))

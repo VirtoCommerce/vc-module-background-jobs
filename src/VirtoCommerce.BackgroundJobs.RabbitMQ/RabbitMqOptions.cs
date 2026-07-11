@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace VirtoCommerce.BackgroundJobs.RabbitMQ;
@@ -37,19 +38,24 @@ public class RabbitMqOptions
     public string? ManagementUri { get; set; }
 
     /// <summary>
-    /// Number of unacknowledged messages a single consumer prefetches (QoS). Defaults to 1 for fair dispatch.
+    /// Number of unacknowledged messages a single consumer prefetches (QoS) — also the throughput gate, since the
+    /// broker never delivers more than this many unacked messages at once. <b>Left at the default 0 (or any value
+    /// &lt;= 0) it auto-scales</b> to the CPU count the process sees (<c>ProcessorCount × <see cref="ConcurrencyPerCore"/></c>,
+    /// clamped to <see cref="MaxAutoConcurrency"/>), so a worker self-sizes to its Kubernetes pod with no per-environment
+    /// config. Set a positive value to pin it explicitly.
     /// </summary>
-    public ushort PrefetchCount { get; set; } = 1;
+    public int PrefetchCount { get; set; }
 
     /// <summary>
     /// Number of consumer callbacks the client dispatches IN PARALLEL (RabbitMQ.Client's
-    /// <c>ConsumerDispatchConcurrency</c>). This — not <see cref="PrefetchCount"/> alone — is what makes jobs run
-    /// concurrently on one instance: prefetch only caps how many unacked messages the broker delivers, but the
-    /// client still invokes the handler one-at-a-time unless this is &gt; 1. When unset (null) it defaults to
-    /// <see cref="PrefetchCount"/>, so raising prefetch alone increases parallelism as expected. Set it explicitly
-    /// to decouple the two (e.g. a high prefetch for throughput but a bounded number of concurrent handlers).
+    /// <c>ConsumerDispatchConcurrency</c>). This — together with <see cref="PrefetchCount"/> — is what makes jobs run
+    /// concurrently on one instance: prefetch caps how many unacked messages the broker delivers, and this caps how
+    /// many the client hands to the handler at once. <b>Left at the default 0 (or any value &lt;= 0) it auto-scales</b>,
+    /// following the effective <see cref="PrefetchCount"/>, so raising prefetch alone increases parallelism as expected.
+    /// Set a positive value to decouple the two (e.g. a high prefetch for throughput but a bounded number of concurrent
+    /// handlers).
     /// </summary>
-    public ushort? ConsumerDispatchConcurrency { get; set; }
+    public int ConsumerDispatchConcurrency { get; set; }
 
     /// <summary>
     /// Additional queues the in-process consumer drains. The engine-agnostic default queue
@@ -67,4 +73,42 @@ public class RabbitMqOptions
 
     /// <summary>Suffix appended to the work queue name to form its dead-letter queue (default <c>.dlq</c>).</summary>
     public string DeadLetterQueueSuffix { get; set; } = ".dlq";
+
+    /// <summary>Target concurrent handlers per CPU used when <see cref="PrefetchCount"/> auto-scales (i.e. is
+    /// &lt;= 0). Default 10 suits IO-bound jobs; use ~1–2 for CPU-bound work.</summary>
+    public int ConcurrencyPerCore { get; set; } = 10;
+
+    /// <summary>Upper clamp for the auto-derived concurrency (guards against very large machines). Default 200.</summary>
+    public int MaxAutoConcurrency { get; set; } = 200;
+
+    /// <summary>
+    /// The prefetch (QoS) count to apply: the explicit <see cref="PrefetchCount"/> when it is &gt; 0, otherwise
+    /// (the default, or any value &lt;= 0) the auto-scaled <c>ProcessorCount × ConcurrencyPerCore</c> clamped to
+    /// <see cref="MaxAutoConcurrency"/>. Never below 1; capped at <see cref="ushort.MaxValue"/>.
+    /// </summary>
+    public ushort EffectivePrefetchCount()
+    {
+        // Explicit value wins and is honored as-is (only bounded to the ushort wire range); MaxAutoConcurrency
+        // only clamps the auto-derived value.
+        if (PrefetchCount > 0)
+        {
+            return (ushort)Math.Clamp(PrefetchCount, 1, ushort.MaxValue);
+        }
+
+        var scaled = Math.Clamp(Environment.ProcessorCount * ConcurrencyPerCore, 1, Math.Min(MaxAutoConcurrency, ushort.MaxValue));
+        return (ushort)scaled;
+    }
+
+    /// <summary>The parallel-dispatch count to apply: the explicit <see cref="ConsumerDispatchConcurrency"/> when it is
+    /// &gt; 0, otherwise (the default, or any value &lt;= 0) it auto-scales by following
+    /// <see cref="EffectivePrefetchCount"/>. Never below 1.</summary>
+    public ushort EffectiveDispatchConcurrency()
+    {
+        if (ConsumerDispatchConcurrency > 0)
+        {
+            return (ushort)Math.Clamp(ConsumerDispatchConcurrency, 1, ushort.MaxValue);
+        }
+
+        return Math.Max((ushort)1, EffectivePrefetchCount());
+    }
 }

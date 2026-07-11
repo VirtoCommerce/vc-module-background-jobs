@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using VirtoCommerce.BackgroundJobs.SampleModule.Jobs;
+using VirtoCommerce.BackgroundJobs.SampleModule.Jobs.Benchmark;
 using VirtoCommerce.BackgroundJobs.SampleModule.Jobs.Indexing;
 using VirtoCommerce.Platform.Core.Common;
 using VirtoCommerce.Platform.Core.Jobs;
@@ -38,6 +39,13 @@ public class Module : IModule
         // Map/reduce: register the map + reduce handlers for one batch type. Fan out indexing over pages of ids that
         // run in parallel across workers, then aggregate once. See README "Map/reduce: parallel product indexing".
         serviceCollection.AddMapReduceJob<IndexPageHandler, IndexSummaryReducer>();
+
+        // Benchmark workloads (tunable, async, idempotent) used to compare engines under load — driven by the
+        // BenchmarkController load endpoints and the NBomber scenarios. See docs/benchmark-plan.md.
+        AbstractTypeFactory<BenchmarkPayload>.RegisterType<BenchmarkPayload>();
+        serviceCollection.AddSingleton<BenchmarkRunRegistry>();
+        serviceCollection.AddBackgroundJob<BenchmarkJob>();
+        serviceCollection.AddMapReduceJob<BenchmarkMapHandler, BenchmarkReducer>();
     }
 
     public void PostInitialize(IApplicationBuilder appBuilder)

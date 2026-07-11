@@ -15,5 +15,8 @@
   <ItemGroup>
     <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1044.0-alpha.13347-vcst-5245" />
     <PackageReference Include="Cronos" Version="0.9.0" />
+    <!-- TelemetryClient type only; resolved optionally at runtime so installs without the AI module are unaffected. -->
+    <PackageReference Include="Microsoft.ApplicationInsights" Version="2.22.0" />
+
   </ItemGroup>
 </Project>

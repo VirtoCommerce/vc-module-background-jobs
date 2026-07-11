@@ -102,8 +102,14 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
         // Engine-agnostic services (always registered — producers need to enqueue; the facade's IJobEngine is an
         // optional dependency, so it resolves even with no engine and throws an actionable error on use).
         services.AddSingleton<IJobPayloadSerializer, JsonJobPayloadSerializer>();
+        // Engine-agnostic job telemetry. Its TelemetryClient dependency is optional, so this is inert unless the
+        // platform's Application Insights module is installed (then jobs/* metrics + JobCompleted events flow to AI).
+        services.AddSingleton<JobTelemetry>();
         services.AddSingleton<IJobDispatcher, DefaultJobDispatcher>();
-        services.AddScoped<IBackgroundJob, JobEngineBackgroundJob>();
+        // One facade instance behind both the single-job and bulk producer contracts.
+        services.AddScoped<JobEngineBackgroundJob>();
+        services.AddScoped<IBackgroundJob>(sp => sp.GetRequiredService<JobEngineBackgroundJob>());
+        services.AddScoped<IBulkBackgroundJob>(sp => sp.GetRequiredService<JobEngineBackgroundJob>());
 
         // The recurring applier is engine-agnostic and always registered; it drives whatever IRecurringJobScheduler
         // the active engine (built-in or custom) registers, and warns when none is present.

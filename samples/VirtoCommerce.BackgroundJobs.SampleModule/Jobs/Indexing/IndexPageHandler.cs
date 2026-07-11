@@ -19,7 +19,7 @@ public sealed class IndexPageHandler(ILogger<IndexPageHandler> logger) : IMapJob
     // same worker pool as every other background job. Shared across all (transient) handler instances.
     private static int _running;
 
-    public Task<IndexPageResult> Map(IndexPage page, IJobExecutionContext context, CancellationToken cancellationToken = default)
+    public async Task<IndexPageResult> Map(IndexPage page, IJobExecutionContext context, CancellationToken cancellationToken = default)
     {
         var running = Interlocked.Increment(ref _running);
         logger.LogInformation(
@@ -31,10 +31,10 @@ public sealed class IndexPageHandler(ILogger<IndexPageHandler> logger) : IMapJob
             var failed = page.DocumentIds.Where(id => id.StartsWith("bad-", StringComparison.OrdinalIgnoreCase)).ToArray();
             var indexed = page.DocumentIds.Length - failed.Length;
 
-            Thread.Sleep(TimeSpan.FromSeconds(5)); // simulate work
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken); // simulate work (async — never block a worker thread)
 
             // (real work would go here: indexer.IndexDocuments(page.DocumentType, page.DocumentIds, ct))
-            return Task.FromResult(new IndexPageResult(indexed, failed));
+            return new IndexPageResult(indexed, failed);
         }
         finally
         {
