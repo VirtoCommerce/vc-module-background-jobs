@@ -13,6 +13,9 @@ public static class BackgroundJobsConfigurationExtensions
     /// <summary>Configuration key selecting the active engine.</summary>
     public const string ProviderKey = "VirtoCommerce:BackgroundJobs:Provider";
 
+    /// <summary>Configuration key toggling legacy Hangfire bootstrap (see <see cref="BackgroundJobsOptions.EnableLegacyHangfire"/>).</summary>
+    public const string EnableLegacyHangfireKey = "VirtoCommerce:BackgroundJobs:EnableLegacyHangfire";
+
     /// <summary>Provider assumed when the key is empty (back-compat: Hangfire was the platform's only engine).</summary>
     public const string DefaultProvider = BackgroundJobsProviders.Hangfire;
 

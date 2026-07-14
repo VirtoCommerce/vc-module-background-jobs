@@ -49,42 +49,51 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
     {
         var options = GetOptions(config);
         var processes = options.Mode != BackgroundJobsMode.Producer;
-
-        if (IsHangfire(options) && processes)
+        if (!processes)
         {
-            // The Hangfire background-job server processes jobs on this instance (Mode = Worker/Both).
-            // Back-compat: the legacy VirtoCommerce:Hangfire:UseHangfireServer flag can still disable it.
-            if (!config.GetValue("VirtoCommerce:Hangfire:UseHangfireServer", true))
-            {
-                Logger.LogInformation("Background jobs: Hangfire server disabled by VirtoCommerce:Hangfire:UseHangfireServer; this instance enqueues only.");
-                return;
-            }
-
-            Logger.LogInformation("Background jobs: starting Hangfire processing server (Mode = {Mode}).", options.Mode);
-
-            services.AddHangfireServer(serverOptions =>
-            {
-                // Always include the agnostic default queue so a non-"default" DefaultQueue still has a worker
-                // (Hangfire's built-in list is just ["default"]). Lowercased to match how jobs are enqueued.
-                var queues = config.GetSection("VirtoCommerce:Hangfire:Queues").Get<List<string>>() ?? [];
-                queues.Add(options.DefaultQueue);
-                serverOptions.Queues = queues
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Select(x => x.ToLowerInvariant())
-                    .Distinct()
-                    .ToArray();
-
-                var workerCount = config.GetValue<int?>("VirtoCommerce:Hangfire:WorkerCount", null);
-                if (workerCount != null)
-                {
-                    serverOptions.WorkerCount = workerCount.Value;
-                }
-            });
+            // Producer-only instance: enqueues but runs no processing host (no Hangfire server, no RabbitMQ consumer).
+            return;
         }
-        else if (IsRabbitMq(options) && processes)
+
+        // Hangfire processing server — runs when Hangfire is the active engine OR legacy Hangfire is enabled, so
+        // legacy modules' Hangfire jobs are processed alongside the active engine (e.g. RabbitMQ). The legacy
+        // VirtoCommerce:Hangfire:UseHangfireServer flag can still disable just this server.
+        if (IsHangfire(options) || options.EnableLegacyHangfire)
         {
-            // The in-process RabbitMQ consumer drains the queue and dispatches handlers on this instance
-            // (Mode = Worker/Both).
+            if (config.GetValue("VirtoCommerce:Hangfire:UseHangfireServer", true))
+            {
+                Logger.LogInformation("Background jobs: starting Hangfire processing server (Mode = {Mode}).", options.Mode);
+
+                services.AddHangfireServer(serverOptions =>
+                {
+                    // Always include the agnostic default queue so a non-"default" DefaultQueue still has a worker
+                    // (Hangfire's built-in list is just ["default"]). Lowercased to match how jobs are enqueued.
+                    var queues = config.GetSection("VirtoCommerce:Hangfire:Queues").Get<List<string>>() ?? [];
+                    queues.Add(options.DefaultQueue);
+                    serverOptions.Queues = queues
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Select(x => x.ToLowerInvariant())
+                        .Distinct()
+                        .ToArray();
+
+                    var workerCount = config.GetValue<int?>("VirtoCommerce:Hangfire:WorkerCount", null);
+                    if (workerCount != null)
+                    {
+                        serverOptions.WorkerCount = workerCount.Value;
+                    }
+                });
+            }
+            else
+            {
+                Logger.LogInformation("Background jobs: Hangfire server disabled by VirtoCommerce:Hangfire:UseHangfireServer.");
+            }
+        }
+
+        // RabbitMQ in-process consumer — runs when RabbitMQ is the active engine (drains the queue and dispatches
+        // handlers on this instance). Coexists with the Hangfire server above under legacy mode; they process
+        // disjoint stores (RabbitMQ queue vs Hangfire SQL), so there is no conflict.
+        if (IsRabbitMq(options))
+        {
             Logger.LogInformation("Background jobs: starting RabbitMQ in-process consumer (Mode = {Mode}).", options.Mode);
             services.AddRabbitMqJobConsumer();
         }
@@ -119,16 +128,23 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
         // Map/reduce orchestration (facade + coordinators + batch store) — engine-agnostic, rides the active engine.
         services.AddMapReduce();
 
-        // Select the active engine. Built-in engines register here; an unknown provider is left for a custom engine
-        // module to satisfy (it self-activates in its own IPlatformStartup and registers IJobEngine).
-        if (IsHangfire(options))
+        // Bootstrap Hangfire INFRASTRUCTURE (storage/DI, IBackgroundJobClient/IRecurringJobManager, and the legacy
+        // VirtoCommerce.Platform.Hangfire.IRecurringJobService + executor) whenever Hangfire is the active engine OR
+        // legacy Hangfire is enabled — so modules that call the Hangfire API directly keep working even when another
+        // engine (e.g. RabbitMQ) is the active IJobEngine. The IJobEngine binding is chosen separately, below.
+        var bootstrapHangfire = IsHangfire(options) || options.EnableLegacyHangfire;
+        if (bootstrapHangfire)
         {
-            // Hangfire storage/DI (custom extension moved from the platform) + the legacy
-            // VirtoCommerce.Platform.Hangfire.IRecurringJobService used by existing modules.
             services.AddHangfire(config);
-
             services.AddSingleton<IRecurringJobService, HangfireRecurringJobService>();
             services.AddTransient<HangfireJobExecutor>();
+        }
+
+        // Select the ACTIVE engine (what IBackgroundJob / map-reduce / the agnostic recurring applier route to).
+        // Built-in engines register here; an unknown provider is left for a custom engine module to satisfy
+        // (it self-activates in its own IPlatformStartup and registers IJobEngine).
+        if (IsHangfire(options))
+        {
             services.AddSingleton<IJobEngine, HangfireJobEngine>();
 
             Logger.LogInformation("Background jobs: Hangfire engine registered as the active IJobEngine.");
@@ -137,13 +153,15 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
         {
             services.AddRabbitMqJobEngine(config);
 
-            Logger.LogInformation("Background jobs: RabbitMQ engine registered as the active IJobEngine.");
+            Logger.LogInformation(
+                "Background jobs: RabbitMQ engine registered as the active IJobEngine{Legacy}.",
+                options.EnableLegacyHangfire ? " (Hangfire also bootstrapped for legacy modules)" : string.Empty);
         }
         else
         {
             Logger.LogInformation(
-                "Background jobs: provider '{Provider}' is not built-in; expecting a custom engine module to register IJobEngine.",
-                options.Provider);
+                "Background jobs: provider '{Provider}' is not built-in; expecting a custom engine module to register IJobEngine{Legacy}.",
+                options.Provider, options.EnableLegacyHangfire ? " (Hangfire also bootstrapped for legacy modules)" : string.Empty);
         }
 
         AddRecurringJobScheduler(services, options);

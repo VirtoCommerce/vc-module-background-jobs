@@ -19,8 +19,21 @@ public enum BackgroundJobsMode
 /// </summary>
 public sealed class BackgroundJobsOptions
 {
-    /// <summary>Active engine for this instance: <c>Hangfire</c> (default) or <c>RabbitMQ</c>. One per instance.</summary>
+    /// <summary>Active engine for this instance: <c>Hangfire</c> (default) or <c>RabbitMQ</c>. One per instance.
+    /// This selects the engine behind the agnostic <see cref="Platform.Core.Jobs.IBackgroundJob"/> facade (and
+    /// map/reduce + the platform's recurring jobs). Legacy modules that call Hangfire directly are governed by
+    /// <see cref="EnableLegacyHangfire"/>, not this property.</summary>
     public string Provider { get; set; } = BackgroundJobsProviders.Hangfire;
+
+    /// <summary>
+    /// When <c>true</c> (default), Hangfire's infrastructure (storage, <c>IBackgroundJobClient</c>/
+    /// <c>IRecurringJobManager</c>, the processing server on Worker/Both, the <c>/hangfire</c> dashboard and schema)
+    /// is initialized <b>even when <see cref="Provider"/> is not Hangfire</b>, so modules that use the Hangfire API
+    /// directly keep working alongside another active engine (e.g. RabbitMQ). Set <c>false</c> for a pure
+    /// non-Hangfire instance (no server, no dashboard, no schema). When <see cref="Provider"/> is Hangfire this has
+    /// no effect — Hangfire is always initialized as the active engine.
+    /// </summary>
+    public bool EnableLegacyHangfire { get; set; } = true;
 
     /// <summary>Instance role: Producer, Worker, or Both (default).</summary>
     public BackgroundJobsMode Mode { get; set; } = BackgroundJobsMode.Both;

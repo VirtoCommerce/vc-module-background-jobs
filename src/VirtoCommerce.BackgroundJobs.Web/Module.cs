@@ -45,19 +45,24 @@ public class Module : IModule, IHasConfiguration
         var permissionsRegistrar = serviceProvider.GetRequiredService<IPermissionsRegistrar>();
         permissionsRegistrar.RegisterPermissions(ModuleInfo.Id, "BackgroundJobs", ModuleConstants.Security.Permissions.AllPermissions);
 
-        // Initialize the Hangfire engine: create the storage schema, wire the dashboard, register job filters,
-        // the recurring-job setting watcher and the developer tool. This must run AFTER the platform database is
-        // migrated — PostInitialize executes inside the platform's synchronized critical section, after platform
-        // migrations, which is exactly where the platform used to call UseHangfire.
-        // Only when Hangfire is the active provider: with another provider (e.g. RabbitMQ) the Hangfire services
-        // are never registered, so UseHangfire would fail resolving Hangfire.IGlobalConfiguration.
-        if (IsHangfireProvider())
+        // Initialize Hangfire: create the storage schema, wire the /hangfire dashboard, register job filters, the
+        // recurring-job setting watcher and the developer tool. Must run AFTER the platform database is migrated —
+        // PostInitialize executes inside the platform's synchronized critical section, after platform migrations.
+        // Runs when Hangfire is the active provider OR legacy Hangfire is enabled (default), so modules that use the
+        // Hangfire API directly keep working even when another engine (e.g. RabbitMQ) is active. The Hangfire
+        // infrastructure it depends on (IGlobalConfiguration etc.) is registered in PlatformStartup under the same
+        // condition.
+        var isHangfireProvider = Configuration.IsBackgroundJobsProvider(BackgroundJobsProviders.Hangfire);
+        var enableLegacyHangfire = Configuration.GetValue(BackgroundJobsConfigurationExtensions.EnableLegacyHangfireKey, true);
+
+        if (isHangfireProvider || enableLegacyHangfire)
         {
             appBuilder.UseHangfire(Configuration);
         }
-        else if (IsRabbitMqProvider())
+
+        // RabbitMQ has no in-platform dashboard; surface its management UI as an external developer tool.
+        if (IsRabbitMqProvider())
         {
-            // RabbitMQ has no in-platform dashboard; surface its management UI as an external developer tool.
             RegisterRabbitMqDeveloperTool(serviceProvider);
         }
 
@@ -100,8 +105,6 @@ public class Module : IModule, IHasConfiguration
                 break;
         }
     }
-
-    private bool IsHangfireProvider() => Configuration.IsBackgroundJobsProvider(BackgroundJobsProviders.Hangfire);
 
     private bool IsRabbitMqProvider() => Configuration.IsBackgroundJobsProvider(BackgroundJobsProviders.RabbitMq);
 

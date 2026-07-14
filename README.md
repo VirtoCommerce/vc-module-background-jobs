@@ -46,8 +46,9 @@ sections (`VirtoCommerce:Hangfire`, `VirtoCommerce:RabbitMQ`), so the existing H
 ```jsonc
 "VirtoCommerce": {
   "BackgroundJobs": {
-    "Provider": "Hangfire",     // Hangfire | RabbitMQ  (one engine per instance)
+    "Provider": "Hangfire",     // Hangfire | RabbitMQ  (the ACTIVE engine behind IBackgroundJob / map-reduce / platform recurring)
     "Mode": "Both",              // Producer | Worker | Both
+    "EnableLegacyHangfire": true, // keep Hangfire initialized for legacy direct-Hangfire modules even under another engine (see below)
     "DefaultQueue": "default",
     "MaxRetryAttempts": 3
   },
@@ -83,6 +84,26 @@ each occurrence and enqueues the payload, with fleet-safe exactly-once firing vi
 occurrence marker (Redis when configured, in-memory for a single instance). The legacy expression-based
 `IRecurringJobService` remains Hangfire-only for backward compatibility. If no engine module is installed, the
 platform still boots and logs a warning that recurring jobs are not scheduled.
+
+#### RabbitMQ primary with legacy Hangfire (`EnableLegacyHangfire`)
+
+`Provider` selects the **active engine** — the one behind `IBackgroundJob`, map/reduce, and the platform's own
+recurring jobs. Separately, **`EnableLegacyHangfire` (default `true`) keeps Hangfire fully initialized** (storage,
+`IBackgroundJobClient`/`IRecurringJobManager`, the processing server on `Worker`/`Both`, the `/hangfire` dashboard and
+schema) **even when `Provider` is not Hangfire**. This lets you make RabbitMQ primary for new work while modules that
+still call the Hangfire API directly (`BackgroundJob.Enqueue`, `RecurringJob.AddOrUpdate`, `IBackgroundJobClient`, or
+the legacy `VirtoCommerce.Platform.Hangfire.IRecurringJobService`) keep working — the two run side by side over disjoint
+stores (RabbitMQ queue vs Hangfire SQL). New modules should use the engine-agnostic `IBackgroundJob` /
+`IBackgroundJobHandler<T>`, which ride the active engine.
+
+- **RabbitMQ-primary, legacy supported:** `Provider = RabbitMQ` (leave `EnableLegacyHangfire = true`). Requires a
+  Hangfire store — `VirtoCommerce:Hangfire:JobStorageType` defaults to `Memory`; set `Database`/`SqlServer` for durable
+  legacy jobs.
+- **Pure RabbitMQ (no Hangfire):** `Provider = RabbitMQ`, `EnableLegacyHangfire = false` — no Hangfire server,
+  dashboard, or schema.
+- **Upgrade note:** because it defaults to `true`, an existing RabbitMQ-only instance will begin bootstrapping Hangfire
+  after upgrade (server on `Worker`/`Both`, `/hangfire`, and SQL schema if `JobStorageType = Database`). Set
+  `EnableLegacyHangfire = false` to keep it Hangfire-free.
 
 ### Application Settings
 
