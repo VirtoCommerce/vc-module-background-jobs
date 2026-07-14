@@ -269,7 +269,7 @@
       </div>
       <div class="cover-meta">
         <span>Virto Commerce · Platform</span>
-        <span>Draft · 2026-07-11 · numbers TBD after runs</span>
+        <span>2026-07-12 · local (1 / 2 / 16-core) + cloud B1 rounds complete</span>
       </div>
     </div>
   </section>
@@ -313,47 +313,65 @@
   <!-- 3. Topology -->
   <section class="slide" data-section="Architecture" data-title="Deployment topology">
     <div class="breadcrumb">Architecture</div>
-    <h1 class="slide-title">The deployment schema we're testing</h1>
-    <p class="slide-lead">Same container image, two roles: a <strong>Producer</strong> (BFF) enqueues; a scalable <strong>Worker</strong> tier drains. RabbitMQ carries the queue; Redis holds map/reduce batch state.</p>
+    <h1 class="slide-title">Virto Commerce on <span class="accent">Virto Cloud</span></h1>
+    <p class="slide-lead">One container image, three roles. Two <strong>Producer</strong> tiers — the storefront <strong>Backend for Frontend</strong> and the <strong>Backend for Admin</strong> — scale on CPU/memory (HPA) and enqueue to RabbitMQ. A dedicated <strong>Backend for Jobs</strong> worker tier consumes the queue and scales on queue depth via <strong>KEDA (0→N)</strong>.</p>
     <div class="schema">
-      <svg viewBox="0 0 1060 300" xmlns="http://www.w3.org/2000/svg">
-        <!-- Frontend -->
-        <rect class="box" x="20" y="120" width="140" height="60" rx="10"/>
-        <text class="lbl" x="90" y="146" text-anchor="middle" font-size="15">Frontend</text>
-        <text class="lbl-sm" x="90" y="164" text-anchor="middle">SPA / storefront</text>
-        <!-- BFF Producer -->
-        <rect class="box-accent" x="210" y="105" width="180" height="90" rx="10"/>
-        <text class="lbl" x="300" y="132" text-anchor="middle" font-size="15">BFF · Producer</text>
-        <text class="lbl-sm" x="300" y="150" text-anchor="middle">Mode=Producer</text>
-        <text class="lbl-sm" x="300" y="168" text-anchor="middle" font-size="11">fire-and-forget · map/reduce</text>
+      <svg viewBox="0 0 1080 410" xmlns="http://www.w3.org/2000/svg">
+        <!-- Clients -->
+        <rect class="box" x="14" y="44" width="148" height="66" rx="10"/>
+        <text class="lbl" x="88" y="72" text-anchor="middle" font-size="15">Frontend</text>
+        <text class="lbl-sm" x="88" y="90" text-anchor="middle" font-size="11">vc-frontend (Vue 3)</text>
+        <rect class="box" x="14" y="164" width="148" height="66" rx="10"/>
+        <text class="lbl" x="88" y="192" text-anchor="middle" font-size="15">Admin UI</text>
+        <text class="lbl-sm" x="88" y="210" text-anchor="middle" font-size="11">AngularJS SPA</text>
+
+        <!-- Line 1 — Backend for Frontend (Producer) -->
+        <rect class="box-accent" x="200" y="36" width="220" height="82" rx="10"/>
+        <text class="lbl" x="310" y="64" text-anchor="middle" font-size="15">Backend for Frontend</text>
+        <text class="lbl-sm" x="310" y="82" text-anchor="middle">Mode=Producer</text>
+        <text class="lbl-sm" x="310" y="100" text-anchor="middle" font-size="11" fill="#FF6B2C">scaled by CPU / Memory (HPA)</text>
+
+        <!-- Line 2 — Backend for Admin (Producer) -->
+        <rect class="box-accent" x="200" y="156" width="220" height="82" rx="10"/>
+        <text class="lbl" x="310" y="184" text-anchor="middle" font-size="15">Backend for Admin</text>
+        <text class="lbl-sm" x="310" y="202" text-anchor="middle">Mode=Producer</text>
+        <text class="lbl-sm" x="310" y="220" text-anchor="middle" font-size="11" fill="#FF6B2C">scaled by CPU / Memory (HPA)</text>
+
+        <!-- Line 3 — Backend for Jobs (Worker) -->
+        <rect class="box-green" x="212" y="308" width="220" height="98" rx="10" opacity="0.35"/>
+        <rect class="box-green" x="200" y="300" width="220" height="98" rx="10"/>
+        <text class="lbl" x="310" y="330" text-anchor="middle" font-size="15">Backend for Jobs</text>
+        <text class="lbl-sm" x="310" y="348" text-anchor="middle">Mode=Worker</text>
+        <text class="lbl-sm" x="310" y="366" text-anchor="middle" font-size="11">consume → dispatch → handler</text>
+        <text class="mono-svg" x="310" y="390" text-anchor="middle" font-size="12" fill="#22C55E">KEDA · 0 .. N · queue depth</text>
+
         <!-- RabbitMQ -->
-        <rect class="box-cyan" x="470" y="40" width="160" height="70" rx="10"/>
-        <text class="lbl" x="550" y="70" text-anchor="middle" font-size="15">RabbitMQ</text>
-        <text class="lbl-sm" x="550" y="88" text-anchor="middle" font-size="11">durable queue · .dlq</text>
+        <rect class="box-cyan" x="505" y="96" width="158" height="72" rx="10"/>
+        <text class="lbl" x="584" y="127" text-anchor="middle" font-size="15">RabbitMQ</text>
+        <text class="lbl-sm" x="584" y="145" text-anchor="middle" font-size="11">durable queue · .dlq</text>
         <!-- Redis -->
-        <rect class="box-purple" x="470" y="190" width="160" height="70" rx="10"/>
-        <text class="lbl" x="550" y="220" text-anchor="middle" font-size="15">Redis</text>
-        <text class="lbl-sm" x="550" y="238" text-anchor="middle" font-size="11">map/reduce state</text>
-        <!-- Workers -->
-        <rect class="box-green" x="730" y="95" width="180" height="110" rx="10"/>
-        <text class="lbl" x="820" y="122" text-anchor="middle" font-size="15">Worker tier</text>
-        <text class="lbl-sm" x="820" y="140" text-anchor="middle">Mode=Worker</text>
-        <text class="lbl-sm" x="820" y="158" text-anchor="middle" font-size="11">consumer → dispatch → handler</text>
-        <text class="mono-svg" x="820" y="182" text-anchor="middle" font-size="12" fill="#22C55E">KEDA · 0 .. N</text>
-        <!-- stacked worker hint -->
-        <rect class="box-green" x="740" y="87" width="180" height="110" rx="10" opacity="0.35"/>
-        <!-- arrows -->
-        <line class="arrow" x1="160" y1="150" x2="206" y2="150"/>
-        <path class="arrow-accent" d="M390 140 L466 75" marker-end="url(#ah)"/>
-        <path class="arrow-accent" d="M390 160 L466 220" marker-end="url(#ah)"/>
-        <path class="arrow" d="M630 75 L740 130" marker-end="url(#ah)"/>
-        <path class="arrow" d="M630 225 L740 175" marker-end="url(#ah)" stroke-dasharray="4 3"/>
+        <rect class="box-purple" x="505" y="300" width="158" height="72" rx="10"/>
+        <text class="lbl" x="584" y="331" text-anchor="middle" font-size="15">Redis</text>
+        <text class="lbl-sm" x="584" y="349" text-anchor="middle" font-size="11">map/reduce state</text>
+
+        <!-- arrows: clients -> producers -->
+        <line class="arrow" x1="162" y1="77" x2="196" y2="77" marker-end="url(#ah)"/>
+        <line class="arrow" x1="162" y1="197" x2="196" y2="197" marker-end="url(#ah)"/>
+        <!-- producers -> RabbitMQ (enqueue) -->
+        <path class="arrow-accent" d="M420 92 L501 122" marker-end="url(#ah)"/>
+        <path class="arrow-accent" d="M420 186 L501 146" marker-end="url(#ah)"/>
+        <text class="lbl-sm" x="470" y="108" text-anchor="middle" font-size="10">enqueue</text>
+        <!-- RabbitMQ -> worker (consume, line 3) -->
+        <path class="arrow" d="M558 168 L402 312" marker-end="url(#ah)"/>
+        <text class="lbl-sm" x="505" y="252" text-anchor="middle" font-size="10">consume</text>
+        <!-- worker <-> Redis (map/reduce state) -->
+        <path class="arrow" d="M422 350 L501 336" marker-end="url(#ah)" stroke-dasharray="4 3"/>
         <defs>
           <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#5E6675"/></marker>
         </defs>
       </svg>
     </div>
-    <div class="callout info"><span class="ci">Hangfire variant</span><span>No broker — the Producer enqueues into <strong>SQL Server</strong>, the Worker runs the Hangfire server polling the same DB, scaled by <strong>HPA on CPU</strong> (no queue-depth trigger, no scale-to-zero). That asymmetry is a headline result, not a defect.</span></div>
+    <div class="callout info"><span class="ci">roles</span><span>Producers (<strong>Frontend</strong> &amp; <strong>Admin</strong> backends) scale on <strong>CPU/memory (HPA)</strong> — they only enqueue, so they stay responsive. Only the <strong>Backend for Jobs</strong> worker scales on <strong>queue depth (KEDA 0→N)</strong>, so idle job capacity costs nothing. <em>Hangfire variant:</em> no broker — producers enqueue into SQL and the worker polls it (HPA on CPU only; no scale-to-zero).</span></div>
   </section>
 
   <!-- 4. Two engines -->
@@ -600,7 +618,7 @@ mem ≈ <span class="num">~120 MB</span> baseline + (ready+unacked) × (body + <
   <!-- 14. Comparison matrix -->
   <section class="slide" data-section="Test Plan" data-title="Comparison matrix">
     <div class="breadcrumb">Test Plan · the deliverable</div>
-    <h1 class="slide-title">The scorecard <span class="accent">(local round — cloud pending)</span></h1>
+    <h1 class="slide-title">The scorecard <span class="accent">(local 16-core round)</span></h1>
     <p class="slide-lead">First local round, 16-core box, <code>Mode=Both</code>, RabbitMQ dispatch=20. Relative signals — loads were concurrency-bound, not CPU-bound; absolute + autoscaling numbers come from the cloud round.</p>
     <table class="compare">
       <thead><tr><th style="width:34%">Dimension</th><th>Hangfire (SQL)</th><th>RabbitMQ + Redis</th></tr></thead>
@@ -612,9 +630,28 @@ mem ≈ <span class="num">~120 MB</span> baseline + (ready+unacked) × (body + <
         <tr><td>Bulk enqueue (10k)</td><td>32.2 s</td><td>17.5 s → <strong>~0.5 s</strong> <span class="pill green">batch 30×</span></td></tr>
         <tr><td>External dependencies</td><td>SQL Server</td><td>RabbitMQ + Redis</td></tr>
         <tr><td>Scale-to-zero</td><td><span class="pill red">no</span></td><td><span class="pill green">yes (KEDA)</span></td></tr>
-        <tr><td>Latency p95 / cost per 1M</td><td colspan="2"><span class="pill tbd">cloud round</span></td></tr>
+        <tr><td>Cloud B1 (1 vCPU) head-to-head</td><td colspan="2">next slide — RabbitMQ <strong>5.5× drain</strong>, <strong>0.3% vs 62%</strong> fail at 200/s</td></tr>
+        <tr><td>Multi-pod scale / KEDA / cost per 1M</td><td colspan="2"><span class="pill tbd">cloud scale round</span></td></tr>
       </tbody>
     </table>
+  </section>
+
+  <!-- 14b. Cloud B1 results -->
+  <section class="slide" data-section="Test Plan" data-title="Cloud B1 results">
+    <div class="breadcrumb">Test Plan · cloud round (B1, vcst-dev)</div>
+    <h1 class="slide-title">Cloud proof — <span class="accent">RabbitMQ vs Hangfire on 1 vCPU</span></h1>
+    <p class="slide-lead">Same Azure App Service <strong>B1 (1 vCPU / 1.75 GB)</strong>, same workload, engine switched; server-side read from Application Insights. The gap is far wider than local: Hangfire pays <strong>remote Azure SQL</strong> latency on every job, while RabbitMQ just publishes to the broker.</p>
+    <table class="compare">
+      <thead><tr><th style="width:40%">Metric (B1, 1 vCPU)</th><th>Hangfire (SQL)</th><th>RabbitMQ + Redis</th></tr></thead>
+      <tbody>
+        <tr><td>Map/reduce drain (2000, IO 50ms)</td><td>24 jobs/s</td><td><strong>131 jobs/s</strong> <span class="pill green">5.5×</span></td></tr>
+        <tr><td>Sustained 200/s — failures</td><td><span class="pill red">62%</span> (503 + timeout)</td><td><strong>0.3%</strong> <span class="pill green">68 / 24k</span></td></tr>
+        <tr><td>Sustained 200/s — p95 latency</td><td>101 s</td><td><strong>~0.7 s</strong></td></tr>
+        <tr><td>CPU (map/reduce peak)</td><td>34%</td><td>7.6%</td></tr>
+        <tr><td>Memory peak</td><td>489–784 MB</td><td>289–325 MB</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn"><span class="ci">why</span><span>On B1 Hangfire is <strong>never CPU-bound</strong> — it saturates at the <strong>enqueue→remote-SQL</strong> path (~125/s accepted), rejecting the rest as 503/timeout at the App Service layer. RabbitMQ's enqueue is a cheap broker publish, so a 1-vCPU pod absorbs 200/s at ~1% CPU. <em>(cpu / largepayload parity pending a longer token.)</em></span></div>
   </section>
 
   <!-- 15. What we add -->
