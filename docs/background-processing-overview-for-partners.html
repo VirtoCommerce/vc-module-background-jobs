@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Background Processing — Partner Overview — Virto Commerce</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-dark: #0B0E14;
+    --bg-darker: #060810;
+    --bg-card: #131825;
+    --bg-card-hover: #1A2032;
+    --border: #232938;
+    --text-primary: #E6EAF3;
+    --text-secondary: #9AA3B5;
+    --text-muted: #5E6675;
+    --accent: #FF6B2C; /* Virto orange */
+    --accent-soft: rgba(255, 107, 44, 0.12);
+    --accent-glow: rgba(255, 107, 44, 0.35);
+    --cyan: #4FD1FF;   /* RabbitMQ */
+    --green: #22C55E;
+    --amber: #FBBF24;  /* Hangfire */
+    --orange: #F97316;
+    --purple: #A78BFA;
+    --magenta: #F472B6;
+    --red: #F87171;
+}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: var(--bg-darker);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+}
+  code, .mono { font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace; }
+.stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+.slide {
+    position: absolute;
+    width: 1200px;
+    height: 720px;
+    background: var(--bg-dark);
+    border-radius: 24px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5), 0 0 0 1px var(--border);
+    padding: 56px 64px;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 200ms ease, visibility 0s 200ms;
+    overflow: hidden;
+    transform: scale(var(--fit-scale, 1));
+    transform-origin: center;
+}
+.slide.active { opacity: 1; visibility: visible; transition: opacity 240ms ease; }
+.slide.cover {
+    padding: 0;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(255,107,44,0.18), transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(79,209,255,0.10), transparent 50%),
+      var(--bg-dark);
+}
+.cover-inner { height: 100%; padding: 80px 96px; display: flex; flex-direction: column; justify-content: space-between; }
+.cover-tag {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 8px 14px; background: var(--accent-soft);
+    border: 1px solid var(--accent); border-radius: 999px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--accent); width: fit-content;
+}
+.cover-tag .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
+.cover-title { font-size: 66px; font-weight: 800; line-height: 1.05; letter-spacing: -0.025em; margin-top: 32px; text-wrap: balance; }
+.cover-title .accent {
+    background: linear-gradient(135deg, var(--accent) 0%, #FFB37A 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.cover-subtitle { font-size: 22px; color: var(--text-secondary); font-weight: 400; max-width: 860px; margin-top: 24px; line-height: 1.4; }
+.cover-meta { display: flex; gap: 36px; align-items: flex-end; justify-content: space-between; color: var(--text-muted); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 500; }
+.cover-chips { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 36px; }
+.chip { padding: 10px 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 999px; font-size: 14px; color: var(--text-primary); font-weight: 500; }
+.chip strong { color: var(--accent); margin-right: 6px; }
+.slide.section { background: radial-gradient(circle at 70% 50%, rgba(255,107,44,0.12), transparent 60%), var(--bg-dark); }
+.section-num { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--accent); letter-spacing: 0.18em; font-weight: 600; }
+.section-title { font-size: 58px; font-weight: 800; margin-top: 16px; line-height: 1.05; letter-spacing: -0.02em; text-wrap: balance; }
+.section-blurb { font-size: 20px; color: var(--text-secondary); margin-top: 28px; max-width: 860px; line-height: 1.5; }
+.breadcrumb { font-size: 12px; color: var(--accent); font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 14px; }
+  h1.slide-title { font-size: 38px; font-weight: 700; line-height: 1.15; letter-spacing: -0.015em; margin-bottom: 12px; text-wrap: balance; }
+  h1.slide-title .accent {
+    background: linear-gradient(135deg, var(--accent) 0%, #FFB37A 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.slide-lead { font-size: 17px; color: var(--text-secondary); line-height: 1.5; max-width: 1010px; margin-bottom: 22px; }
+.slide-body { font-size: 16px; line-height: 1.55; color: var(--text-primary); }
+.slide-body strong { color: var(--text-primary); font-weight: 600; }
+.slide-body code { font-size: 13.5px; background: var(--bg-card); padding: 2px 8px; border-radius: 5px; border: 1px solid var(--border); color: var(--cyan); }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
+.card h3 { font-size: 17px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary); display: flex; align-items: center; gap: 10px; }
+.card p { font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+  table.compare { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 14px; }
+  table.compare th, table.compare td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  table.compare th { color: var(--text-muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare td strong { color: var(--text-primary); }
+  table.compare td.num { font-variant-numeric: tabular-nums; font-family: 'JetBrains Mono', monospace; }
+  table.compare td.hf { color: var(--amber); }
+  table.compare td.rmq { color: var(--cyan); }
+.pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.pill.green { background: rgba(34,197,94,0.15); color: var(--green); }
+.pill.amber { background: rgba(251,191,36,0.15); color: var(--amber); }
+.pill.cyan { background: rgba(79,209,255,0.15); color: var(--cyan); }
+.pill.red { background: rgba(248,113,113,0.15); color: var(--red); }
+  pre.snippet {
+    background: var(--bg-darker); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 22px; font-family: 'JetBrains Mono', monospace; font-size: 14px;
+    color: var(--text-primary); line-height: 1.6; overflow-x: auto; margin-top: 8px;
+}
+  pre.snippet.sm { font-size: 12.5px; line-height: 1.55; }
+  pre.snippet .kw { color: var(--accent); }
+  pre.snippet .str { color: var(--green); }
+  pre.snippet .com { color: var(--text-muted); font-style: italic; }
+  pre.snippet .key { color: var(--cyan); }
+  pre.snippet .num { color: var(--amber); }
+  pre.snippet .type { color: var(--purple); }
+.schema { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; display: flex; align-items: center; justify-content: center; }
+.schema svg { width: 100%; height: auto; max-height: 100%; }
+  text.lbl { fill: var(--text-primary); font-family: 'Inter', sans-serif; font-weight: 500; }
+  text.lbl-sm { fill: var(--text-secondary); font-family: 'Inter', sans-serif; font-size: 12px; }
+  text.mono-svg { font-family: 'JetBrains Mono', monospace; }
+  rect.box { fill: var(--bg-darker); stroke: var(--border); stroke-width: 1.5; }
+  rect.box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+  rect.box-cyan { fill: rgba(79,209,255,0.08); stroke: var(--cyan); stroke-width: 1.5; }
+  rect.box-purple { fill: rgba(167,139,250,0.08); stroke: var(--purple); stroke-width: 1.5; }
+  rect.box-green { fill: rgba(34,197,94,0.06); stroke: var(--green); stroke-width: 1.5; }
+  path.arrow, line.arrow { stroke: var(--text-muted); stroke-width: 1.5; fill: none; }
+  path.arrow-accent, line.arrow-accent { stroke: var(--accent); stroke-width: 2; fill: none; }
+.stat-row { display: flex; gap: 18px; margin-top: 18px; }
+.stat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; flex: 1; }
+.stat .val { font-family: 'JetBrains Mono', monospace; font-size: 30px; font-weight: 700; color: var(--accent); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.stat .val.cyan { color: var(--cyan); }
+.stat .lab { font-size: 12.5px; color: var(--text-secondary); margin-top: 6px; line-height: 1.4; }
+.callout { display: flex; gap: 12px; align-items: flex-start; border-radius: 12px; padding: 14px 18px; margin-top: 16px; font-size: 14px; line-height: 1.5; }
+.callout .ci { flex-shrink: 0; font-family: 'JetBrains Mono', monospace; font-weight: 700; }
+.callout.warn { background: rgba(251,191,36,0.10); border: 1px solid rgba(251,191,36,0.4); color: var(--text-primary); }
+.callout.warn .ci { color: var(--amber); }
+.callout.info { background: rgba(79,209,255,0.08); border: 1px solid rgba(79,209,255,0.3); color: var(--text-secondary); }
+.callout.info .ci { color: var(--cyan); }
+.callout.good { background: rgba(34,197,94,0.10); border: 1px solid rgba(34,197,94,0.35); color: var(--text-secondary); }
+.callout.good .ci { color: var(--green); }
+.callout strong { color: var(--text-primary); }
+.feat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 18px; }
+.feat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 16px; }
+.feat .fnum { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); font-weight: 600; }
+.feat h4 { font-size: 15px; font-weight: 600; margin: 8px 0 6px; color: var(--text-primary); }
+.feat p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; }
+.psf-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px 22px; height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.psf-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--psf-color, var(--accent)); opacity: 0.6; }
+.psf-card .psf-label { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--psf-color, var(--accent)); margin-bottom: 14px; }
+.psf-card h3 { font-size: 20px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; letter-spacing: -0.01em; }
+.psf-card ul { list-style: none; padding: 0; margin: 0; flex: 1; }
+.psf-card li { position: relative; padding: 10px 0 10px 20px; border-bottom: 1px dashed var(--border); font-size: 14px; line-height: 1.55; color: var(--text-secondary); }
+.psf-card li:last-child { border-bottom: none; }
+.psf-card li::before { content: ''; position: absolute; left: 2px; top: 17px; width: 6px; height: 6px; border-radius: 50%; background: var(--psf-color); }
+.psf-card li strong { color: var(--text-primary); font-weight: 600; }
+.psf-card.problem { --psf-color: #F87171; }
+.psf-card.solution { --psf-color: var(--accent); }
+.psf-card.features { --psf-color: var(--green); }
+  /* ── Release steps (a real ordered sequence → numbered markers) ── */
+.steps { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.step { display: flex; gap: 18px; align-items: stretch; background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 16px 20px; position: relative; }
+.step .n { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; color: var(--accent); min-width: 46px; padding-top: 2px; }
+.step .st-body { flex: 1; }
+.step h4 { font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
+.step p { font-size: 13.5px; color: var(--text-secondary); line-height: 1.5; }
+.step p code { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--cyan); background: var(--bg-darker); padding: 1px 6px; border-radius: 4px; }
+.step.ga { border-color: rgba(34,197,94,0.4); }
+.step.ga .n { color: var(--green); }
+.step .tag { position: absolute; top: 14px; right: 18px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  /* ── Code steps (numbered how-to with a snippet per step) ── */
+.code-steps { display: flex; flex-direction: column; gap: 11px; margin-top: 14px; }
+.cstep { background: var(--bg-card); border: 1px solid var(--border); border-radius: 13px; padding: 13px 18px; }
+.cstep .chead { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.cstep .cn { width: 26px; height: 26px; border-radius: 7px; background: var(--accent-soft); border: 1px solid var(--accent); color: var(--accent); font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.cstep .ct { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.cstep .cmeta { margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--text-muted); background: var(--bg-darker); border: 1px solid var(--border); padding: 3px 9px; border-radius: 6px; }
+.cstep pre.snippet { margin-top: 0; padding: 10px 15px; font-size: 12.5px; line-height: 1.5; }
+  /* ── Tenant isolation grid ── */
+.tenant-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 8px; }
+.tenant { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+.tenant .tname { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--cyan); font-weight: 600; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+.tenant .rep { display: flex; gap: 4px; margin-top: 8px; }
+.tenant .rep span { flex: 1; height: 26px; border-radius: 5px; background: rgba(255,107,44,0.18); border: 1px solid var(--accent); }
+.tenant .rep span.off { background: var(--bg-darker); border: 1px dashed var(--border); }
+.tenant .sub { font-size: 11.5px; color: var(--text-muted); margin-top: 10px; }
+.nav-bar { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; background: rgba(19,24,37,0.95); backdrop-filter: blur(14px); border: 1px solid var(--border); border-radius: 999px; padding: 10px 16px; z-index: 100; box-shadow: 0 8px 30px rgba(0,0,0,0.4); }
+.nav-btn { background: transparent; border: none; color: var(--text-secondary); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 120ms; }
+.nav-btn:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.nav-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.nav-counter { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text-secondary); min-width: 60px; text-align: center; font-weight: 500; }
+.nav-counter .accent { color: var(--accent); }
+.toc-btn { position: fixed; top: 24px; left: 24px; width: 44px; height: 44px; background: rgba(19,24,37,0.95); backdrop-filter: blur(14px); border: 1px solid var(--border); border-radius: 12px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 100; transition: all 120ms; }
+.toc-btn:hover { color: var(--text-primary); background: var(--bg-card-hover); }
+.toc-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toc-panel { position: fixed; top: 0; left: 0; width: 380px; height: 100%; background: rgba(11,14,20,0.97); backdrop-filter: blur(20px); border-right: 1px solid var(--border); transform: translateX(-100%); transition: transform 280ms cubic-bezier(0.16,1,0.3,1); z-index: 200; display: flex; flex-direction: column; }
+.toc-panel.open { transform: translateX(0); }
+.toc-header { padding: 28px 28px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.toc-header h2 { font-size: 14px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
+.toc-close { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 20px; line-height: 1; }
+.toc-close:hover { color: var(--text-primary); }
+.toc-list { flex: 1; overflow-y: auto; padding: 12px 0; }
+.toc-list::-webkit-scrollbar { width: 6px; }
+.toc-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.toc-item { display: flex; align-items: center; gap: 14px; padding: 10px 28px; cursor: pointer; transition: background 120ms; font-size: 14px; color: var(--text-secondary); }
+.toc-item:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.toc-item.active { color: var(--accent); background: var(--accent-soft); border-left: 3px solid var(--accent); padding-left: 25px; }
+.toc-item .num { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); min-width: 22px; }
+.toc-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); opacity: 0; pointer-events: none; transition: opacity 240ms; z-index: 199; }
+.toc-overlay.open { opacity: 1; pointer-events: auto; }
+.kbd-hint { position: fixed; top: 24px; right: 24px; color: var(--text-muted); font-size: 12px; z-index: 100; }
+  kbd { display: inline-block; background: var(--bg-card); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: 2px 7px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-secondary); margin: 0 2px; }
+.slide.cta { text-align: center; background: radial-gradient(circle at 50% 60%, rgba(255,107,44,0.15), transparent 50%), var(--bg-dark); display: flex; flex-direction: column; justify-content: center; align-items: center; }
+.cta-title { font-size: 66px; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 24px; text-wrap: balance; }
+.cta-title .accent { background: linear-gradient(135deg, var(--accent) 0%, #FFB37A 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.cta-links { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; max-width: 920px; margin-top: 24px; }
+.cta-link { padding: 14px 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; color: var(--text-primary); font-weight: 500; font-size: 15px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<button class="toc-btn" id="tocBtn" aria-label="Toggle table of contents">
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
+</button>
+<div class="kbd-hint"><kbd>←</kbd><kbd>→</kbd> navigate · <kbd>T</kbd> contents · <kbd>F</kbd> fullscreen</div>
+
+<div class="toc-overlay" id="tocOverlay"></div>
+<aside class="toc-panel" id="tocPanel">
+  <div class="toc-header"><h2>Contents</h2><button class="toc-close" id="tocClose" aria-label="Close">✕</button></div>
+  <div class="toc-list" id="tocList"></div>
+</aside>
+
+<div class="stage" id="stage">
+
+  <!-- 1. Cover -->
+  <section class="slide cover active" data-section="Overview" data-title="Cover">
+    <div class="cover-inner">
+      <div>
+        <div class="cover-tag"><span class="dot"></span> Background Processing · Partner Overview</div>
+        <h1 class="cover-title">Background jobs,<br><span class="accent">engine-agnostic</span> and cloud-scale</h1>
+        <p class="cover-subtitle">One contract for all background work — pluggable engines (Hangfire, RabbitMQ, In-Memory), map/reduce, and recurring jobs. Generally available with <strong style="color:var(--text-primary)">no breaking changes</strong> for partners.</p>
+        <div class="cover-chips">
+          <span class="chip"><strong>GA</strong> no breaking changes</span>
+          <span class="chip"><strong>3 engines</strong> Hangfire · RabbitMQ · In-Memory</span>
+          <span class="chip"><strong>Map/Reduce</strong> fan-out</span>
+          <span class="chip"><strong>KEDA</strong> scale-to-zero</span>
+        </div>
+      </div>
+      <div class="cover-meta">
+        <span>Virto Commerce</span>
+        <span>Partner Overview</span>
+        <span>2026</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Problem / Solution / Value -->
+  <section class="slide" data-section="Overview" data-title="Problem · Solution · Value">
+    <div class="breadcrumb">Why this matters</div>
+    <h1 class="slide-title">Problem, solution &amp; value</h1>
+    <div class="grid-3" style="margin-top: 14px;">
+      <div class="psf-card problem">
+        <span class="psf-label">Problem</span>
+        <h3>Hangfire is hard-wired in</h3>
+        <ul>
+          <li>Every module <strong>imports Hangfire</strong> directly — one engine, no choice.</li>
+          <li>SQL-polling doesn't scale on the cloud: work is <strong>rejected under load</strong>, not queued.</li>
+          <li><strong>No map/reduce</strong> for large fan-out (indexing, bulk ops).</li>
+          <li>Idle workers still cost — <strong>no scale-to-zero</strong>.</li>
+        </ul>
+      </div>
+      <div class="psf-card solution">
+        <span class="psf-label">Solution</span>
+        <h3>One contract, pluggable engines</h3>
+        <ul>
+          <li>Engine-agnostic <strong>IBackgroundJob</strong> abstraction in Platform.Core.</li>
+          <li>Swap the engine by config: <strong>Hangfire · RabbitMQ · In-Memory</strong>.</li>
+          <li>Built-in <strong>map/reduce</strong> and <strong>recurring</strong> jobs.</li>
+          <li>The same handler code runs unchanged on <strong>any engine</strong>.</li>
+        </ul>
+      </div>
+      <div class="psf-card features">
+        <span class="psf-label">Value</span>
+        <h3>Right engine per environment</h3>
+        <ul>
+          <li><strong>~2.6× throughput</strong> at half the CPU on RabbitMQ vs Hangfire.</li>
+          <li><strong>Scale-to-zero</strong> workers via KEDA — pay only for work.</li>
+          <li><strong>No breaking changes</strong> — legacy modules keep working.</li>
+          <li>Extend with the <strong>same Virto tools</strong> partners already use.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Features overview -->
+  <section class="slide" data-section="Overview" data-title="Features overview">
+    <div class="breadcrumb">What's in the box</div>
+    <h1 class="slide-title">Features overview</h1>
+    <p class="slide-lead">Everything the platform and partner modules need for background work — behind one small set of contracts in <code>Platform.Core</code>.</p>
+    <div class="feat-grid">
+      <div class="feat"><div class="fnum">01</div><h4>Engine-agnostic contract</h4><p><code>IBackgroundJob</code> / <code>IBackgroundJobHandler&lt;T&gt;</code> — enqueue once, run anywhere.</p></div>
+      <div class="feat"><div class="fnum">02</div><h4>Pluggable engines</h4><p>Hangfire (SQL), RabbitMQ (+ Redis), In-Memory — selected by configuration.</p></div>
+      <div class="feat"><div class="fnum">03</div><h4>Map / Reduce</h4><p>Parallel fan-out over items, one reduce — checkpoint/resume, exactly-once.</p></div>
+      <div class="feat"><div class="fnum">04</div><h4>Recurring jobs</h4><p>Cron or setting-driven schedules; fleet-safe exactly-once firing.</p></div>
+      <div class="feat"><div class="fnum">05</div><h4>Progress &amp; notifications</h4><p>Live job progress over SignalR to the admin UI.</p></div>
+      <div class="feat"><div class="fnum">06</div><h4>Retry &amp; dead-letter</h4><p>Bounded retries with backoff, then a dead-letter queue for inspection.</p></div>
+      <div class="feat"><div class="fnum">07</div><h4>Legacy Hangfire mode</h4><p>Run RabbitMQ primary while legacy modules keep calling Hangfire directly.</p></div>
+      <div class="feat"><div class="fnum">08</div><h4>KEDA autoscaling</h4><p>Worker tier scales 0→N on queue depth; App Insights observability.</p></div>
+    </div>
+    <div class="callout info"><span class="ci">note</span><span>Contracts live in <strong>Platform.Core</strong>; the engine is an installable module. Consumer modules take <strong>no dependency</strong> on any specific engine.</span></div>
+  </section>
+
+  <!-- Supported providers -->
+  <section class="slide" data-section="Overview" data-title="Supported providers">
+    <div class="breadcrumb">What's in the box · engines</div>
+    <h1 class="slide-title">Supported providers — <span class="accent">pick per environment</span></h1>
+    <p class="slide-lead">The same handler code runs on any engine; the provider is chosen by configuration (<code>VirtoCommerce:BackgroundJobs:Provider</code>). Four engines ship today.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div class="card"><h3>Hangfire <span class="pill amber" style="margin-left:auto">default · legacy</span></h3><p>Durable jobs in <strong>SQL Server</strong> with the <code>/hangfire</code> dashboard and native recurring. The default engine — legacy modules keep calling it directly.</p></div>
+      <div class="card"><h3>RabbitMQ <span class="pill cyan" style="margin-left:auto">cloud</span></h3><p>Cloud-scale throughput over an <strong>AMQP broker</strong> (+ Redis for map/reduce state): DLQ, retry, <strong>KEDA scale-to-zero</strong>. Recommended for Virto Cloud.</p></div>
+      <div class="card"><h3>In-Memory <span class="pill green" style="margin-left:auto">dev · test</span></h3><p><strong>Zero-infrastructure</strong> in-process engine for local development and automated tests — non-durable, single-process.</p></div>
+      <div class="card"><h3>Google Cloud Tasks <span class="pill" style="margin-left:auto; background:rgba(167,139,250,0.15); color:var(--purple)">sample module</span></h3><p><strong>Serverless</strong> HTTP-push dispatch on GCP — no worker to run; Cloud Tasks calls your endpoint. Ships as a <strong>sample module</strong>, released separately.</p></div>
+    </div>
+    <div class="callout good"><span class="ci">new engine?</span><span>A <strong>conformance test kit</strong> makes writing one safe. Implement <code>IJobEngine</code>, run the shared <strong>JobEngineConformanceTests</strong> suite — enqueue, retry, status, delete, recurring — and a green run means your engine behaves like the built-ins. It's how all four above are validated.</span></div>
+  </section>
+
+  <!-- 4. Architecture -->
+  <section class="slide" data-section="Architecture" data-title="Virto Commerce on Virto Cloud">
+    <div class="breadcrumb">Architecture</div>
+    <h1 class="slide-title">Virto Commerce on <span class="accent">Virto Cloud</span></h1>
+    <p class="slide-lead"><strong>One container image, three roles.</strong> The same Virto Commerce build runs as a storefront BFF, an Admin backend, or a Backend-for-Jobs worker — the role is pure configuration (<code>VirtoCommerce:BackgroundJobs:Mode</code>), not a separate artifact. All instances share one Redis and one SQL.</p>
+    <div class="schema" style="max-height:310px;padding:14px 18px;">
+      <svg viewBox="0 0 1080 300" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="ah" markerWidth="9" markerHeight="9" refX="6.5" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#5E6675"/></marker>
+          <marker id="ah-a" markerWidth="9" markerHeight="9" refX="6.5" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#FF6B2C"/></marker>
+        </defs>
+
+        <!-- column labels -->
+        <text class="lbl-sm" x="83" y="16" text-anchor="middle" font-size="10.5" fill="#5E6675" letter-spacing="0.08em">CLIENTS</text>
+        <text class="lbl-sm" x="291" y="16" text-anchor="middle" font-size="10.5" fill="#FF6B2C" letter-spacing="0.08em">VIRTO COMMERCE · PRODUCERS</text>
+        <text class="lbl-sm" x="530" y="16" text-anchor="middle" font-size="10.5" fill="#4FD1FF" letter-spacing="0.08em">BROKER</text>
+        <text class="lbl-sm" x="745" y="16" text-anchor="middle" font-size="10.5" fill="#22C55E" letter-spacing="0.08em">VIRTO COMMERCE · WORKER</text>
+
+        <!-- clients -->
+        <rect class="box" x="18" y="50" width="130" height="52" rx="10"/>
+        <text class="lbl" x="83" y="74" text-anchor="middle" font-size="14">Frontend</text>
+        <text class="lbl-sm" x="83" y="91" text-anchor="middle" font-size="10.5">vc-frontend (Vue 3)</text>
+        <rect class="box" x="18" y="130" width="130" height="52" rx="10"/>
+        <text class="lbl" x="83" y="154" text-anchor="middle" font-size="14">Admin UI</text>
+        <text class="lbl-sm" x="83" y="171" text-anchor="middle" font-size="10.5">AngularJS SPA</text>
+
+        <!-- producers (same image · Mode=Producer) -->
+        <rect class="box-accent" x="196" y="40" width="190" height="72" rx="10"/>
+        <text class="lbl" x="291" y="62" text-anchor="middle" font-size="13.5">Backend for Frontend</text>
+        <text class="mono-svg" x="291" y="80" text-anchor="middle" font-size="10" fill="#FF6B2C">Mode=Producer · HPA 1..N</text>
+        <text class="mono-svg" x="291" y="99" text-anchor="middle" font-size="10" fill="#4FD1FF">◆ one Virto Commerce image</text>
+        <rect class="box-accent" x="196" y="120" width="190" height="72" rx="10"/>
+        <text class="lbl" x="291" y="142" text-anchor="middle" font-size="13.5">Backend for Admin</text>
+        <text class="mono-svg" x="291" y="160" text-anchor="middle" font-size="10" fill="#FF6B2C">Mode=Producer · HPA 1..N</text>
+        <text class="mono-svg" x="291" y="179" text-anchor="middle" font-size="10" fill="#4FD1FF">◆ one Virto Commerce image</text>
+
+        <!-- broker -->
+        <rect class="box-cyan" x="455" y="80" width="150" height="72" rx="10"/>
+        <text class="lbl" x="530" y="110" text-anchor="middle" font-size="15">RabbitMQ</text>
+        <text class="lbl-sm" x="530" y="130" text-anchor="middle" font-size="10.5">durable queue · .dlq</text>
+
+        <!-- worker (same image · Mode=Worker) -->
+        <rect class="box-green" x="650" y="72" width="190" height="90" rx="10"/>
+        <text class="lbl" x="745" y="93" text-anchor="middle" font-size="13.5">Backend for Jobs</text>
+        <text class="mono-svg" x="745" y="111" text-anchor="middle" font-size="10" fill="#22C55E">Mode=Worker · KEDA 0..N</text>
+        <text class="lbl-sm" x="745" y="130" text-anchor="middle" font-size="10">consume → dispatch → handler</text>
+        <text class="mono-svg" x="745" y="149" text-anchor="middle" font-size="10" fill="#4FD1FF">◆ one Virto Commerce image</text>
+
+        <!-- flow -->
+        <line class="arrow" x1="148" y1="76" x2="192" y2="76" marker-end="url(#ah)"/>
+        <line class="arrow" x1="148" y1="156" x2="192" y2="156" marker-end="url(#ah)"/>
+        <path class="arrow-accent" d="M386 84 L451 104" marker-end="url(#ah-a)"/>
+        <path class="arrow-accent" d="M386 148 L451 128" marker-end="url(#ah-a)"/>
+        <text class="mono-svg" x="420" y="104" text-anchor="middle" font-size="10" fill="#FF6B2C">enqueue</text>
+        <line class="arrow" x1="605" y1="116" x2="646" y2="116" marker-end="url(#ah)"/>
+        <text class="lbl-sm" x="625" y="106" text-anchor="middle" font-size="10">consume</text>
+
+        <!-- shared services band — one set per environment, used by every instance -->
+        <text class="lbl-sm" x="530" y="204" text-anchor="middle" font-size="10.5" fill="#5E6675" letter-spacing="0.08em">SHARED SERVICES · ONE SET PER ENVIRONMENT · USED BY EVERY INSTANCE</text>
+        <rect x="196" y="212" width="844" height="80" rx="12" fill="rgba(19,24,37,0.6)" stroke="#232938" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <rect class="box-purple" x="214" y="224" width="330" height="56" rx="9"/>
+        <text class="lbl" x="230" y="246" font-size="13">Redis</text>
+        <text class="lbl-sm" x="230" y="263" font-size="10">map/reduce state · progress backplane</text>
+        <text class="lbl-sm" x="230" y="277" font-size="10">cache invalidation · SignalR backplane</text>
+        <rect class="box" x="566" y="224" width="205" height="56" rx="9"/>
+        <text class="lbl" x="668" y="246" text-anchor="middle" font-size="13">SQL Server</text>
+        <text class="lbl-sm" x="668" y="266" text-anchor="middle" font-size="10">platform data · Hangfire jobs</text>
+        <rect class="box" x="793" y="224" width="229" height="56" rx="9"/>
+        <text class="lbl" x="907" y="246" text-anchor="middle" font-size="13">Elasticsearch / OpenSearch</text>
+        <text class="lbl-sm" x="907" y="266" text-anchor="middle" font-size="10">catalog &amp; search index</text>
+      </svg>
+    </div>
+    <div class="callout info"><span class="ci">note</span><span><strong>Same image, role by configuration.</strong> Every box is the identical Virto Commerce build; <code>Mode</code> picks Producer (enqueue) or Worker (process). Producers scale on CPU/memory (HPA); the worker tier scales on RabbitMQ queue depth via <strong>KEDA — 0→N, back to zero</strong> (a scaler, never in the message path). All instances share one <strong>Redis</strong> (progress backplane, cache invalidation, map/reduce state) and one <strong>SQL</strong>.</span></div>
+  </section>
+
+  <!-- 5. Release cycle -->
+  <section class="slide" data-section="Delivery" data-title="Release cycle · no breaking changes">
+    <div class="breadcrumb">Delivery · for partners</div>
+    <h1 class="slide-title">Release cycle — <span class="accent">no breaking changes</span></h1>
+    <div class="steps">
+      <div class="step ga">
+        <div class="n">1</div>
+        <div class="st-body">
+          <h4>Release Platform + BackgroundJobs module</h4>
+          <p>BackgroundJobs goes <strong>GA</strong>. Hangfire stays the default engine; the new abstraction ships alongside. <strong>Nothing breaks</strong> — existing modules run untouched.</p>
+        </div>
+        <span class="tag pill green">GA</span>
+      </div>
+      <div class="step">
+        <div class="n">2.1</div>
+        <div class="st-body">
+          <h4>Platform updates VC modules</h4>
+          <p>Virto migrates its own modules off direct Hangfire onto the new interface — indexing/search moved to <strong>Map/Reduce</strong>, recurring jobs onto <code>AddRecurringJob</code>, etc.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="n">2.2</div>
+        <div class="st-body">
+          <h4>Enable RabbitMQ in Virto Cloud + Legacy Hangfire mode</h4>
+          <p>RabbitMQ becomes the <strong>primary engine</strong> (<code>Provider=RabbitMQ</code>) with <code>EnableLegacyHangfire=true</code>: VC modules run on RabbitMQ, while <strong>custom modules keep working on Hangfire</strong> — side by side.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="n">3</div>
+        <div class="st-body">
+          <h4>Custom modules migrated → disable Legacy Hangfire</h4>
+          <p>Partners move custom modules onto the BackgroundJobs architecture at their own pace, then <code>EnableLegacyHangfire=false</code> — a pure RabbitMQ deployment.</p>
+        </div>
+      </div>
+    </div>
+    <div class="callout good"><span class="ci">promise</span><span>Every step is <strong>additive and opt-in</strong>. Partners choose when to migrate; legacy and new engines coexist until they're ready.</span></div>
+  </section>
+
+  <!-- 7. Section: Code -->
+  <section class="slide section" data-section="Code" data-title="Section: The code">
+    <div class="section-num">SECTION 05</div>
+    <h2 class="section-title">The C#<br>developers write</h2>
+    <p class="section-blurb">Handlers, recurring schedules and map/reduce — defined against <code style="color:var(--cyan)">Platform.Core</code> contracts, with no dependency on the active engine. The same code runs on Hangfire, RabbitMQ or In-Memory.</p>
+  </section>
+
+  <!-- 8. Code: fire-and-forget in four steps -->
+  <section class="slide" data-section="Code" data-title="Fire-and-forget · four steps">
+    <div class="breadcrumb">Code · fire-and-forget</div>
+    <h1 class="slide-title">A background job in <span class="accent">four steps</span></h1>
+    <div class="code-steps">
+      <div class="cstep">
+        <div class="chead"><span class="cn">1</span><span class="ct">Implement the payload</span><span class="cmeta">plain class</span></div>
+        <pre class="snippet"><span class="com">// A JSON-serializable class — the job's input</span>
+<span class="kw">public class</span> <span class="type">SendOrderEmailPayload</span> { <span class="kw">public string</span> OrderId { <span class="kw">get; set;</span> } }</pre>
+      </div>
+      <div class="cstep">
+        <div class="chead"><span class="cn">2</span><span class="ct">Implement the job handler</span><span class="cmeta">Jobs/ folder</span></div>
+        <pre class="snippet"><span class="com">// Implements IBackgroundJobHandler&lt;TPayload&gt; — Platform.Core, no engine reference</span>
+<span class="kw">public class</span> <span class="type">SendOrderEmailHandler</span>(<span class="type">IEmailSender</span> sender)
+    : <span class="type">IBackgroundJobHandler</span>&lt;<span class="type">SendOrderEmailPayload</span>&gt; {
+    <span class="kw">public</span> <span class="type">Task</span> Execute(<span class="type">SendOrderEmailPayload</span> p, <span class="type">IJobExecutionContext</span> ctx, <span class="type">CancellationToken</span> ct)
+        =&gt; sender.SendConfirmationAsync(p.OrderId, ct);
+}</pre>
+      </div>
+      <div class="cstep">
+        <div class="chead"><span class="cn">3</span><span class="ct">Register in DI</span><span class="cmeta">Module.cs</span></div>
+        <pre class="snippet">services.AddBackgroundJob&lt;<span class="type">SendOrderEmailHandler</span>, <span class="type">SendOrderEmailPayload</span>&gt;();</pre>
+      </div>
+      <div class="cstep">
+        <div class="chead"><span class="cn">4</span><span class="ct">Run it from your code</span><span class="cmeta">returns immediately</span></div>
+        <pre class="snippet"><span class="kw">await</span> _backgroundJob.Enqueue&lt;<span class="type">SendOrderEmailHandler</span>&gt;(<span class="kw">new</span>() { OrderId = order.Id });</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. Code: progress -->
+  <section class="slide" data-section="Code" data-title="Live progress → admin UI">
+    <div class="breadcrumb">Code · progress</div>
+    <h1 class="slide-title">Report live progress to the <span class="accent">admin UI</span></h1>
+    <p class="slide-lead">Long-running jobs stream progress to the admin UI over SignalR — a live progress bar, no polling. Opt in at enqueue time, then report from the handler through <code>ctx.Progress</code>.</p>
+    <pre class="snippet sm"><span class="com">// 1 — Enqueue with progress enabled</span>
+<span class="kw">await</span> _backgroundJob.Enqueue&lt;<span class="type">ReindexHandler</span>&gt;(payload, <span class="kw">new</span> <span class="type">EnqueueOptions</span> { ReportProgress = <span class="kw">true</span> });
+
+<span class="com">// 2 — Report from the handler — pushed to the admin UI as it runs</span>
+<span class="kw">public async</span> <span class="type">Task</span> Execute(<span class="type">ReindexPayload</span> p, <span class="type">IJobExecutionContext</span> ctx, <span class="type">CancellationToken</span> ct) {
+    <span class="kw">for</span> (<span class="kw">var</span> i = <span class="num">0</span>; i &lt; p.Total; i++) {
+        <span class="kw">await</span> Reindex(p.Items[i], ct);
+        <span class="kw">await</span> ctx.Progress.Report(<span class="kw">new</span> <span class="type">JobProgressInfo</span> {
+            Message = $<span class="str">"Indexed {i + 1}/{p.Total}"</span>, ProcessedCount = i + <span class="num">1</span>, TotalCount = p.Total }, ct);
+    }
+}</pre>
+    <div class="callout info"><span class="ci">UX</span><span>The platform turns each <strong>JobProgressInfo</strong> into a live notification — the admin sees a <strong>progress bar with a message and count</strong> while the job runs, and a completion state at the end. Fire-and-forget jobs simply skip this.</span></div>
+  </section>
+
+  <!-- 10. Code: customize / extend -->
+  <section class="slide" data-section="Code" data-title="Customize &amp; extend">
+    <div class="breadcrumb">Code · extensibility</div>
+    <h1 class="slide-title">Customize &amp; extend — <span class="accent">no platform fork</span></h1>
+    <p class="slide-lead">Jobs are defined against <code>Platform.Core</code> contracts and resolved from DI — so a partner extends them from their <strong>own module</strong>: enrich the payload, or replace the handler. <strong>The last registration wins</strong>, so your version overrides the platform default with no fork or patch.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div class="card"><h3>① Enrich the payload</h3><p>Subclass the platform payload (or define your own) with the extra fields your handler needs — the enqueue call carries them through unchanged.</p></div>
+      <div class="card"><h3>② Replace the handler</h3><p>Register your own <code>IBackgroundJobHandler&lt;T&gt;</code> for the same payload. Registered later, it wins — the platform's handler is transparently overridden.</p></div>
+    </div>
+    <pre class="snippet sm" style="margin-top:14px;"><span class="com">// In YOUR module — enrich the payload…</span>
+<span class="kw">public class</span> <span class="type">MyOrderEmailPayload</span> : <span class="type">SendOrderEmailPayload</span> { <span class="kw">public string</span> CampaignCode { <span class="kw">get; set;</span> } }
+
+<span class="com">// …and replace the handler (registered later → your handler wins)</span>
+<span class="kw">public class</span> <span class="type">MyOrderEmailHandler</span>(<span class="type">IEmailSender</span> sender, <span class="type">ICampaigns</span> campaigns)
+    : <span class="type">IBackgroundJobHandler</span>&lt;<span class="type">MyOrderEmailPayload</span>&gt; { <span class="com">/* your logic */</span> }
+
+services.AddBackgroundJob&lt;<span class="type">MyOrderEmailHandler</span>, <span class="type">MyOrderEmailPayload</span>&gt;();  <span class="com">// overrides the default</span></pre>
+  </section>
+
+  <!-- 9. Code: recurring -->
+  <section class="slide" data-section="Code" data-title="Recurring jobs">
+    <div class="breadcrumb">Code · recurring</div>
+    <h1 class="slide-title">Recurring jobs — a handler + a schedule</h1>
+    <p class="slide-lead">A recurring job is a handler + a schedule. Fixed cron, a fixed or per-run payload, or setting-driven — so admins change the schedule without a redeploy.</p>
+    <pre class="snippet sm"><span class="com">// Fixed cron — every 6 hours</span>
+services.AddRecurringJob&lt;<span class="type">ReindexCatalogJob</span>, <span class="type">ReindexPayload</span>&gt;(s =&gt; s.WithCron(<span class="str">"0 */6 * * *"</span>));
+
+<span class="com">// Pass a fixed payload each occurrence</span>
+services.AddRecurringJob&lt;<span class="type">SendDigestJob</span>, <span class="type">SendDigestPayload</span>&gt;(
+    <span class="kw">new</span> <span class="type">SendDigestPayload</span> { Top = <span class="num">10</span> }, s =&gt; s.WithCron(<span class="str">"0 8 * * *"</span>));       <span class="com">// daily 08:00</span>
+
+<span class="com">// …or build a fresh payload per run (e.g. a timestamp)</span>
+services.AddRecurringJob&lt;<span class="type">SnapshotJob</span>, <span class="type">SnapshotPayload</span>&gt;(
+    () =&gt; <span class="kw">new</span> <span class="type">SnapshotPayload</span> { AtUtc = <span class="type">DateTime</span>.UtcNow }, s =&gt; s.WithCron(<span class="str">"*/15 * * * *"</span>));
+
+<span class="com">// …or setting-driven: enabler + cron come from module settings</span>
+services.AddRecurringJob&lt;<span class="type">ProcessSubscriptionJob</span>, <span class="type">ProcessSubscriptionPayload</span>&gt;(
+    s =&gt; s.FromSettings(enabled: <span class="type">Settings</span>.EnableProcessJob, cron: <span class="type">Settings</span>.ProcessJobCron));</pre>
+    <div class="callout info"><span class="ci">fleet-safe</span><span>Exactly-once firing across instances via a distributed lock + a shared occurrence marker (Redis in the cloud). On Hangfire, recurring uses its native scheduler + dashboard.</span></div>
+  </section>
+
+  <!-- Cron setting type -->
+  <section class="slide" data-section="Code" data-title="Cron setting type">
+    <div class="breadcrumb">Code · settings</div>
+    <h1 class="slide-title">Cron as a <span class="accent">first-class setting type</span></h1>
+    <p class="slide-lead">Setting-driven schedules (<code>FromSettings</code>) need a cron an admin can change safely — so cron becomes a first-class platform setting type, <code>SettingValueType.Cron</code>.</p>
+    <div class="grid-2">
+      <div class="psf-card problem">
+        <span class="psf-label">Problem</span>
+        <h3>Hand-typed cron strings</h3>
+        <ul>
+          <li>Cron lives in a free-text setting — a <strong>typo ships a broken schedule</strong>.</li>
+          <li>No validation on save; no hint what <code>0 */6 * * *</code> means.</li>
+          <li>Admins guess the syntax; support tickets follow.</li>
+        </ul>
+      </div>
+      <div class="psf-card solution">
+        <span class="psf-label">Solution · SettingValueType.Cron</span>
+        <h3>Validated, guided, described</h3>
+        <ul>
+          <li><strong>Validated on save</strong> — an invalid expression is rejected.</li>
+          <li>Admin editor with <strong>presets</strong> + a <strong>live plain-English description</strong> (dCron).</li>
+          <li>Consumed directly by <code>AddRecurringJob(…FromSettings)</code>.</li>
+        </ul>
+      </div>
+    </div>
+    <pre class="snippet sm" style="margin-top:16px;"><span class="com">// Declare a cron setting — validated on save, edited with presets + a live description</span>
+<span class="kw">new</span> <span class="type">SettingDescriptor</span> {
+    Name = <span class="str">"MyModule.ProcessJobCron"</span>, GroupName = <span class="str">"MyModule|Jobs"</span>,
+    ValueType = <span class="type">SettingValueType</span>.Cron, DefaultValue = <span class="str">"0 */6 * * *"</span> }</pre>
+  </section>
+
+  <!-- Map/Reduce concept: problem / solution / how + visual schema -->
+  <section class="slide" data-section="Code" data-title="Map / Reduce · why">
+    <div class="breadcrumb">Code · map / reduce</div>
+    <h1 class="slide-title">Map / Reduce — big fan-out, done right</h1>
+    <p class="slide-lead">Reindex, recalc prices, bulk export — <strong>10k+ items</strong>. One serial job is slow and loses all progress on a crash. Map/Reduce <strong>fans the work across the fleet</strong> and <strong>reduces once</strong>.</p>
+    <div class="schema" style="max-height:300px;padding:14px 18px;">
+      <svg viewBox="0 0 1080 300" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="mr-ah" markerWidth="9" markerHeight="9" refX="6.5" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#5E6675"/></marker>
+          <marker id="mr-ag" markerWidth="9" markerHeight="9" refX="6.5" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#22C55E"/></marker>
+        </defs>
+
+        <text class="lbl-sm" x="90"  y="26" text-anchor="middle" font-size="11" fill="#5E6675" letter-spacing="0.08em">INPUT</text>
+        <text class="lbl-sm" x="280" y="26" text-anchor="middle" font-size="11" fill="#5E6675" letter-spacing="0.08em">COORDINATOR</text>
+        <text class="lbl-sm" x="490" y="26" text-anchor="middle" font-size="11" fill="#22C55E" letter-spacing="0.08em">MAP · PARALLEL</text>
+        <text class="lbl-sm" x="695" y="26" text-anchor="middle" font-size="11" fill="#5E6675" letter-spacing="0.08em">REDUCE ×1</text>
+        <text class="lbl-sm" x="880" y="26" text-anchor="middle" font-size="11" fill="#5E6675" letter-spacing="0.08em">OUTPUT</text>
+
+        <!-- input batch -->
+        <rect class="box-accent" x="20" y="112" width="140" height="76" rx="10"/>
+        <text class="lbl" x="90" y="146" text-anchor="middle" font-size="15">Batch</text>
+        <text class="lbl-sm" x="90" y="166" text-anchor="middle" font-size="11">10k+ items</text>
+
+        <!-- coordinator / hub -->
+        <rect class="box-accent" x="205" y="112" width="150" height="76" rx="10"/>
+        <text class="lbl" x="280" y="142" text-anchor="middle" font-size="14">Map/Reduce Hub</text>
+        <text class="lbl-sm" x="280" y="162" text-anchor="middle" font-size="10.5">split · checkpoint · track</text>
+
+        <!-- redis under hub -->
+        <rect class="box-purple" x="205" y="216" width="150" height="46" rx="9"/>
+        <text class="lbl" x="280" y="238" text-anchor="middle" font-size="12.5">Redis</text>
+        <text class="lbl-sm" x="280" y="253" text-anchor="middle" font-size="10">checkpoints · state</text>
+        <path class="arrow" d="M280 188 L280 214" marker-end="url(#mr-ah)" stroke-dasharray="4 3"/>
+
+        <!-- map lane -->
+        <rect class="box-green" x="405" y="44"  width="170" height="40" rx="8"/>
+        <text class="mono-svg" x="490" y="69" text-anchor="middle" font-size="11.5" fill="#22C55E">Map · item 1</text>
+        <rect class="box-green" x="405" y="96"  width="170" height="40" rx="8"/>
+        <text class="mono-svg" x="490" y="121" text-anchor="middle" font-size="11.5" fill="#22C55E">Map · item 2</text>
+        <rect class="box-green" x="405" y="148" width="170" height="40" rx="8"/>
+        <text class="mono-svg" x="490" y="173" text-anchor="middle" font-size="11.5" fill="#22C55E">Map · item 3</text>
+        <rect class="box-green" x="405" y="200" width="170" height="40" rx="8"/>
+        <text class="mono-svg" x="490" y="225" text-anchor="middle" font-size="11.5" fill="#22C55E">Map · item N</text>
+
+        <!-- reduce -->
+        <rect class="box-cyan" x="625" y="112" width="140" height="76" rx="10"/>
+        <text class="lbl" x="695" y="142" text-anchor="middle" font-size="15">Reduce</text>
+        <text class="lbl-sm" x="695" y="162" text-anchor="middle" font-size="10.5">all results · once</text>
+
+        <!-- output -->
+        <rect class="box" x="810" y="112" width="140" height="76" rx="10"/>
+        <text class="lbl" x="880" y="142" text-anchor="middle" font-size="15">Summary</text>
+        <text class="lbl-sm" x="880" y="162" text-anchor="middle" font-size="10.5">persisted</text>
+
+        <!-- flow -->
+        <line class="arrow" x1="160" y1="150" x2="201" y2="150" marker-end="url(#mr-ah)"/>
+        <!-- fan-out -->
+        <path class="arrow-accent" d="M355 150 L401 64"  marker-end="url(#mr-ag)" opacity="0.85"/>
+        <path class="arrow-accent" d="M355 150 L401 116" marker-end="url(#mr-ag)" opacity="0.85"/>
+        <path class="arrow-accent" d="M355 150 L401 168" marker-end="url(#mr-ag)" opacity="0.85"/>
+        <path class="arrow-accent" d="M355 150 L401 220" marker-end="url(#mr-ag)" opacity="0.85"/>
+        <text class="lbl-sm" x="384" y="44" text-anchor="middle" font-size="10" fill="#22C55E">fan-out</text>
+        <!-- fan-in -->
+        <path class="arrow" d="M575 64  L621 132" marker-end="url(#mr-ah)" opacity="0.8"/>
+        <path class="arrow" d="M575 116 L621 142" marker-end="url(#mr-ah)" opacity="0.8"/>
+        <path class="arrow" d="M575 168 L621 158" marker-end="url(#mr-ah)" opacity="0.8"/>
+        <path class="arrow" d="M575 220 L621 170" marker-end="url(#mr-ah)" opacity="0.8"/>
+        <text class="lbl-sm" x="600" y="44" text-anchor="middle" font-size="10">reduce once</text>
+        <!-- reduce → summary -->
+        <line class="arrow" x1="765" y1="150" x2="806" y2="150" marker-end="url(#mr-ah)"/>
+      </svg>
+    </div>
+    <div class="callout info"><span class="ci">how</span><span><strong>The Hub owns coordination.</strong> Each Map is <strong>checkpointed in Redis</strong> — a retried or crashed worker <strong>resumes, never repeats</strong> — and when the last item finishes the <strong>Reduce fires exactly once</strong>. A module implements just two interfaces; fan-out, resume and exactly-once come for free.</span></div>
+  </section>
+
+  <!-- Map/Reduce code in three steps -->
+  <section class="slide" data-section="Code" data-title="Map / Reduce · code">
+    <div class="breadcrumb">Code · map / reduce</div>
+    <h1 class="slide-title">Map / Reduce in <span class="accent">three steps</span></h1>
+    <div class="code-steps">
+      <div class="cstep">
+        <div class="chead"><span class="cn">1</span><span class="ct">Define the handler for one operation</span><span class="cmeta">IMapJobHandler</span></div>
+        <pre class="snippet"><span class="com">// MAP — runs per item, in parallel across the worker fleet</span>
+<span class="kw">public class</span> <span class="type">IndexPageHandler</span> : <span class="type">IMapJobHandler</span>&lt;<span class="type">IndexPage</span>, <span class="type">PageResult</span>&gt; {
+    <span class="kw">public</span> <span class="type">Task</span>&lt;<span class="type">PageResult</span>&gt; Map(<span class="type">IndexPage</span> page, <span class="type">IJobExecutionContext</span> ctx, <span class="type">CancellationToken</span> ct) { <span class="com">/* index one page */</span> }
+}</pre>
+      </div>
+      <div class="cstep">
+        <div class="chead"><span class="cn">2</span><span class="ct">Define the handler for the reduce (summary)</span><span class="cmeta">IReduceJobHandler</span></div>
+        <pre class="snippet"><span class="com">// REDUCE — runs once, with every item's result (success or failure)</span>
+<span class="kw">public class</span> <span class="type">IndexSummaryReducer</span> : <span class="type">IReduceJobHandler</span>&lt;<span class="type">IndexState</span>, <span class="type">PageResult</span>&gt; {
+    <span class="kw">public</span> <span class="type">Task</span> Reduce(<span class="type">IndexState</span> state, <span class="type">IReadOnlyList</span>&lt;<span class="type">MapResult</span>&lt;<span class="type">PageResult</span>&gt;&gt; results, ...) { <span class="com">/* persist summary */</span> }
+}</pre>
+      </div>
+      <div class="cstep">
+        <div class="chead"><span class="cn">3</span><span class="ct">Split into batches and run</span><span class="cmeta">from your code</span></div>
+        <pre class="snippet">services.AddMapReduceJob&lt;<span class="type">IndexPageHandler</span>, <span class="type">IndexSummaryReducer</span>&gt;();
+<span class="kw">await</span> _mapReduce.Enqueue&lt;<span class="type">IndexPageHandler</span>, <span class="type">IndexSummaryReducer</span>&gt;(pages, <span class="kw">new</span> <span class="type">IndexState</span>());</pre>
+      </div>
+    </div>
+    <div class="callout warn"><span class="ci">errors</span><span><strong>Error handling is built in.</strong> A failing Map is <strong>retried with backoff</strong>; after the attempt limit it's <strong>dead-lettered</strong> and recorded as a failed <code>MapResult</code> — the batch keeps going. Reduce receives <strong>every</strong> result and decides how to finish (fail, partial-commit, or report). Checkpointing means a crashed or retried worker <strong>resumes, never repeats</strong>.</span></div>
+  </section>
+
+  <!-- Trigger a job over REST -->
+  <section class="slide" data-section="Code" data-title="Trigger a job over REST">
+    <div class="breadcrumb">Code · REST API</div>
+    <h1 class="slide-title">Initiate a handler over <span class="accent">REST</span></h1>
+    <p class="slide-lead">There's no generic "run any job" endpoint. Your module exposes its own typed controller that injects <code>IBackgroundJob</code> and enqueues — you keep your routes, auth and payload contract; the platform provides an engine-agnostic endpoint to poll status.</p>
+    <pre class="snippet sm"><span class="com">// Your module's controller — inject IBackgroundJob, enqueue, return the job id</span>
+[<span class="type">Route</span>(<span class="str">"api/my-module/jobs"</span>)]
+<span class="kw">public class</span> <span class="type">MyJobsController</span>(<span class="type">IBackgroundJob</span> backgroundJob) : <span class="type">Controller</span> {
+    [<span class="type">HttpPost</span>(<span class="str">"send-email"</span>)]
+    <span class="kw">public async</span> <span class="type">Task</span>&lt;<span class="type">ActionResult</span>&lt;<span class="kw">string</span>&gt;&gt; Send([<span class="type">FromBody</span>] <span class="type">SendOrderEmailPayload</span> p, <span class="type">CancellationToken</span> ct)
+        =&gt; Ok(<span class="kw">await</span> backgroundJob.Enqueue&lt;<span class="type">SendOrderEmailHandler</span>&gt;(p, ct));   <span class="com">// → engine job id</span>
+}</pre>
+    <div class="breadcrumb" style="margin:14px 0 8px;">…then call it, and poll status on the platform's engine-agnostic endpoint</div>
+    <pre class="snippet sm"><span class="key">POST</span> /api/my-module/jobs/send-email     <span class="com">→ "a1b2c3d4"   (engine job id)</span>
+<span class="key">GET</span>  /api/platform/jobs/a1b2c3d4        <span class="com">→ { "id": "a1b2c3d4", "completed": false }</span></pre>
+    <div class="callout info"><span class="ci">API</span><span>The platform ships a read-only monitor — <code>GET /api/platform/jobs/{id}</code> — that reads status from the <strong>active engine</strong> (Hangfire, RabbitMQ, …) behind the <code>BackgroundJobsManage</code> permission. Enqueue stays in <strong>your</strong> controller, typed to your payload.</span></div>
+  </section>
+
+  <!-- 11. Performance -->
+  <section class="slide" data-section="Performance" data-title="Hangfire vs RabbitMQ">
+    <div class="breadcrumb">Performance · measured</div>
+    <h1 class="slide-title">Hangfire vs RabbitMQ — <span class="accent">measured</span></h1>
+    <p class="slide-lead">Same workload, same handlers, engine is the only variable. Local runs at pinned CPU limits; cloud on a 1-vCPU Azure App Service (B1), read from Application Insights.</p>
+    <table class="compare">
+      <thead><tr><th style="width:40%">Metric</th><th>Hangfire (SQL)</th><th>RabbitMQ + Redis</th><th>Advantage</th></tr></thead>
+      <tbody>
+        <tr><td>Map/reduce drain — local 1 core</td><td class="num hf">55 j/s</td><td class="num rmq"><strong>141 j/s</strong></td><td><span class="pill green">2.6×</span></td></tr>
+        <tr><td>Map/reduce drain — local 2 core</td><td class="num hf">109 j/s</td><td class="num rmq"><strong>282 j/s</strong></td><td><span class="pill green">2.6×</span></td></tr>
+        <tr><td>Map/reduce drain — <strong>cloud 1 vCPU</strong></td><td class="num hf">24 j/s</td><td class="num rmq"><strong>131 j/s</strong></td><td><span class="pill green">5.5×</span></td></tr>
+        <tr><td>CPU — sustained 200/s (cloud)</td><td class="num hf">saturates (~100%)</td><td class="num rmq"><strong>~1%</strong></td><td><span class="pill green">idle</span></td></tr>
+        <tr><td>Memory — worker under load (cloud)</td><td class="num hf">grows with backlog</td><td class="num rmq"><strong>flat · bounded</strong></td><td><span class="pill green">stable</span></td></tr>
+      </tbody>
+    </table>
+    <div class="callout info"><span class="ci">why</span><span>Hangfire round-trips every job through <strong>SQL</strong>; on the cloud that latency dominates and the producer rejects work under load. RabbitMQ enqueues with a cheap <strong>broker publish</strong>, and <strong>prefetch caps in-flight work</strong> — so a 1-vCPU pod absorbs 200/s at <strong>~1% CPU with flat, bounded memory</strong>, then scales out on queue depth with KEDA.</span></div>
+  </section>
+
+  <!-- Logging & observability -->
+  <section class="slide" data-section="Observability" data-title="Logging &amp; observability">
+    <div class="breadcrumb">Observability</div>
+    <h1 class="slide-title">Logging &amp; <span class="accent">observability</span></h1>
+    <p class="slide-lead">Every job is traceable end-to-end — structured logs through the run, metrics and events into Application Insights, and readiness on <code>/health</code>.</p>
+    <div class="feat-grid">
+      <div class="feat"><div class="fnum">01</div><h4>Structured lifecycle logs</h4><p>Enqueued → started → succeeded / failed / retried, each tagged with <strong>job id, handler, queue, attempt</strong>.</p></div>
+      <div class="feat"><div class="fnum">02</div><h4>App Insights metrics</h4><p><code>jobs/execution.duration.ms</code> and <code>jobs/queue.latency.ms</code>, plus a <strong>JobCompleted</strong> event.</p></div>
+      <div class="feat"><div class="fnum">03</div><h4>Failure diagnostics</h4><p>Exceptions logged with context; the poisoned message lands in the <strong>dead-letter queue</strong> with headers for inspection.</p></div>
+      <div class="feat"><div class="fnum">04</div><h4>Health &amp; readiness</h4><p><code>/health</code> reports engine readiness and flags a queue engine running on an <strong>in-memory store</strong>.</p></div>
+    </div>
+    <div class="callout info"><span class="ci">note</span><span>Telemetry is <strong>inert by default</strong> — job telemetry depends on an optional <code>TelemetryClient</code>, so metrics and events flow only once the platform's <strong>Application Insights</strong> module is installed. Logs always flow through the standard <code>ILogger</code> pipeline.</span></div>
+  </section>
+
+  <!-- CTA -->
+  <section class="slide cta" data-section="Wrap-up" data-title="Close">
+    <div>
+      <h1 class="cta-title">One contract.<br><span class="accent">Any engine. No breakage.</span></h1>
+      <p style="font-size:20px; color:var(--text-secondary); max-width:820px; margin:0 auto;">Ship GA with Hangfire today, flip Virto Cloud to RabbitMQ + KEDA tomorrow, and migrate custom modules whenever you're ready — the same handler code the whole way.</p>
+      <div class="cta-links">
+        <span class="cta-link">GA · no breaking changes</span>
+        <span class="cta-link">RabbitMQ primary + Legacy Hangfire</span>
+        <span class="cta-link">KEDA scale-to-zero per tenant</span>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<nav class="nav-bar">
+  <button class="nav-btn" id="prevBtn" aria-label="Previous slide"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4 L6 9 L11 14"/></svg></button>
+  <div class="nav-counter"><span class="accent" id="curNum">1</span> / <span id="totNum">14</span></div>
+  <button class="nav-btn" id="nextBtn" aria-label="Next slide"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4 L12 9 L7 14"/></svg></button>
+</nav>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  let current = 0;
+
+  function fitStage() {
+    const scale = Math.min(window.innerWidth / 1240, window.innerHeight / 760);
+    slides.forEach(s => s.style.setProperty('--fit-scale', scale));
+  }
+  window.addEventListener('resize', fitStage);
+  fitStage();
+
+  function show(i) {
+    current = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach((s, idx) => s.classList.toggle('active', idx === current));
+    document.getElementById('curNum').textContent = current + 1;
+    document.getElementById('prevBtn').disabled = current === 0;
+    document.getElementById('nextBtn').disabled = current === slides.length - 1;
+    updateTocActive();
+  }
+  document.getElementById('totNum').textContent = slides.length;
+  document.getElementById('prevBtn').onclick = () => show(current - 1);
+  document.getElementById('nextBtn').onclick = () => show(current + 1);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ') { show(current + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { show(current - 1); }
+    else if (e.key === 't' || e.key === 'T') { toggleToc(); }
+    else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) { document.documentElement.requestFullscreen(); }
+      else { document.exitFullscreen(); }
+    }
+    else if (e.key === 'Escape') { closeToc(); }
+  });
+
+  // ── TOC ──
+  const tocList = document.getElementById('tocList');
+  const tocPanel = document.getElementById('tocPanel');
+  const tocOverlay = document.getElementById('tocOverlay');
+  let lastSection = '';
+  slides.forEach((s, idx) => {
+    const section = s.dataset.section || '';
+    const title = s.dataset.title || `Slide ${idx + 1}`;
+    if (section !== lastSection) {
+      const lbl = document.createElement('div');
+      lbl.className = 'toc-section-label';
+      lbl.textContent = section;
+      tocList.appendChild(lbl);
+      lastSection = section;
+    }
+    const item = document.createElement('div');
+    item.className = 'toc-item';
+    item.dataset.idx = idx;
+    item.innerHTML = `<span class="num">${String(idx + 1).padStart(2, '0')}</span><span>${title}</span>`;
+    item.onclick = () => { show(idx); closeToc(); };
+    tocList.appendChild(item);
+  });
+  function updateTocActive() {
+    document.querySelectorAll('.toc-item').forEach(it => it.classList.toggle('active', +it.dataset.idx === current));
+  }
+  function toggleToc() { tocPanel.classList.toggle('open'); tocOverlay.classList.toggle('open'); }
+  function closeToc() { tocPanel.classList.remove('open'); tocOverlay.classList.remove('open'); }
+  document.getElementById('tocBtn').onclick = toggleToc;
+  document.getElementById('tocClose').onclick = closeToc;
+  tocOverlay.onclick = closeToc;
+
+  show(0);
+</script>
+</body>
+</html>
