@@ -45,9 +45,11 @@ public sealed class RabbitMqJobConsumer : BackgroundService
     // The consumer channel also publishes the retry / dead-letter copies. Enable publisher confirms (matching the
     // producer's publish channel) so BasicPublishAsync awaits broker durability before we ack the original delivery —
     // otherwise a connection/channel drop between the republish and the ack silently loses the retry/DLQ copy.
-    private static readonly CreateChannelOptions _channelOptions = new(
-        publisherConfirmationsEnabled: true,
-        publisherConfirmationTrackingEnabled: true);
+    // IMPORTANT: consumerDispatchConcurrency must be set explicitly here. The CreateChannelOptions constructor defaults
+    // it to 1 (NOT null), and a per-channel value overrides the connection factory's ConsumerDispatchConcurrency — so
+    // leaving it unset pins the consumer to serial dispatch (one delivery at a time) regardless of prefetch or config.
+    // Build per-instance (not static) because the value comes from the bound options.
+    private readonly CreateChannelOptions _channelOptions;
 
     private IChannel? _channel;
 
@@ -65,6 +67,14 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         _rabbitMqOptions = rabbitMqOptions.Value;
         _jobsOptions = jobsOptions.Value;
         _logger = logger;
+
+        // Publisher confirms for the retry/DLQ republish, AND the effective dispatch concurrency so the client hands
+        // deliveries to the handler in parallel. Without the explicit concurrency the ctor default (1) would pin the
+        // consumer to serial processing and silently override the connection factory's ConsumerDispatchConcurrency.
+        _channelOptions = new CreateChannelOptions(
+            publisherConfirmationsEnabled: true,
+            publisherConfirmationTrackingEnabled: true,
+            consumerDispatchConcurrency: _rabbitMqOptions.EffectiveDispatchConcurrency());
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
