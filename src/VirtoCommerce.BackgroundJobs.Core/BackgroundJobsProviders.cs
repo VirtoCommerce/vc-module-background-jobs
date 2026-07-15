@@ -10,4 +10,7 @@ public static class BackgroundJobsProviders
     public const string Hangfire = "Hangfire";
 
     public const string RabbitMq = "RabbitMQ";
+
+    /// <summary>Infrastructure-free in-process engine for local development / testing (non-durable, single-process).</summary>
+    public const string InMemory = "InMemory";
 }

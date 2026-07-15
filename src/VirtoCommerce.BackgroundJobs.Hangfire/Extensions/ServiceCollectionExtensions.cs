@@ -41,7 +41,7 @@ namespace VirtoCommerce.Platform.Hangfire.Extensions
         public static IServiceCollection AddHangfire(this IServiceCollection services, IConfiguration configuration)
         {
             services.AddSingleton<RecurringJobService>();
-            services.AddSingleton<IRecurringJobService, RecurringJobService>();
+            services.AddSingleton<IRecurringJobService>(sp => sp.GetRequiredService<RecurringJobService>());
 
             var section = configuration.GetSection("VirtoCommerce:Hangfire");
             var hangfireOptions = new HangfireOptions();
@@ -52,12 +52,15 @@ namespace VirtoCommerce.Platform.Hangfire.Extensions
             hangfireOptions.PostgreSqlStorageOptions.PrepareSchemaIfNecessary = false;
             hangfireOptions.MySqlStorageOptions.PrepareSchemaIfNecessary = false;
 
-            // Apply the engine-agnostic retry count (VirtoCommerce:BackgroundJobs:MaxRetryAttempts, default 3) so
-            // Hangfire matches the documented setting and RabbitMQ behavior, rather than the legacy Hangfire-only
-            // AutomaticRetryCount.
+            // Retry count: prefer the engine-agnostic VirtoCommerce:BackgroundJobs:MaxRetryAttempts when it is
+            // explicitly configured (unifies Hangfire with the RabbitMQ engine); otherwise fall back to the legacy
+            // Hangfire-only AutomaticRetryCount, so existing deployments that tuned it keep working and the default
+            // stays 1 rather than silently becoming 3.
             var backgroundJobsOptions = new BackgroundJobsOptions();
             configuration.GetSection("VirtoCommerce:BackgroundJobs").Bind(backgroundJobsOptions);
-            GlobalJobFilters.Filters.Add(new AutomaticRetryAttribute { Attempts = backgroundJobsOptions.MaxRetryAttempts });
+            var maxRetryConfigured = configuration["VirtoCommerce:BackgroundJobs:MaxRetryAttempts"] is not null;
+            var retryAttempts = maxRetryConfigured ? backgroundJobsOptions.MaxRetryAttempts : hangfireOptions.AutomaticRetryCount;
+            GlobalJobFilters.Filters.Add(new AutomaticRetryAttribute { Attempts = retryAttempts });
 
             if (hangfireOptions.JobStorageType == HangfireJobStorageType.SqlServer ||
                 hangfireOptions.JobStorageType == HangfireJobStorageType.Database)

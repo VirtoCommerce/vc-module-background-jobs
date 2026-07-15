@@ -15,6 +15,7 @@ using VirtoCommerce.BackgroundJobs.Core.Services;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
 using VirtoCommerce.BackgroundJobs.Data.Recurring;
 using VirtoCommerce.BackgroundJobs.Hangfire;
+using VirtoCommerce.BackgroundJobs.InMemory.Extensions;
 using VirtoCommerce.BackgroundJobs.RabbitMQ.Extensions;
 using VirtoCommerce.Platform.Core.Common;
 using VirtoCommerce.Platform.Core.Jobs;
@@ -157,6 +158,12 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
                 "Background jobs: RabbitMQ engine registered as the active IJobEngine{Legacy}.",
                 options.EnableLegacyHangfire ? " (Hangfire also bootstrapped for legacy modules)" : string.Empty);
         }
+        else if (IsInMemory(options))
+        {
+            services.AddInMemoryJobEngine();
+
+            Logger.LogInformation("Background jobs: in-memory engine registered as the active IJobEngine (local/testing; non-durable, single-process).");
+        }
         else
         {
             Logger.LogInformation(
@@ -172,6 +179,12 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
             .AddCheck<BackgroundJobsHealthCheck>(
                 "Background jobs",
                 failureStatus: HealthStatus.Unhealthy,
+                tags: ["BackgroundJobs"])
+            // Degraded (not failed) when a queue-backed engine runs on the in-memory store — safe single-instance,
+            // unsafe multi-instance; surfaces the risk without breaking a single-instance deployment's /health.
+            .AddCheck<SharedStoreHealthCheck>(
+                "Background jobs store",
+                failureStatus: HealthStatus.Degraded,
                 tags: ["BackgroundJobs"]);
     }
 
@@ -191,9 +204,9 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
             Logger.LogInformation("Background jobs: Hangfire-native recurring scheduler registered.");
         }
-        else if (IsRabbitMq(options))
+        else if (IsRabbitMq(options) || IsInMemory(options))
         {
-            // RabbitMQ has no native recurring scheduler — reuse the in-process cron scheduler.
+            // RabbitMQ / in-memory have no native recurring scheduler — reuse the in-process cron scheduler.
             services.AddInProcessRecurringScheduler();
 
             Logger.LogInformation("Background jobs: in-process recurring scheduler registered.");
@@ -222,4 +235,7 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
     private static bool IsRabbitMq(BackgroundJobsOptions options) =>
         !string.IsNullOrEmpty(options.Provider) && options.Provider.Equals(BackgroundJobsProviders.RabbitMq, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsInMemory(BackgroundJobsOptions options) =>
+        !string.IsNullOrEmpty(options.Provider) && options.Provider.Equals(BackgroundJobsProviders.InMemory, StringComparison.OrdinalIgnoreCase);
 }

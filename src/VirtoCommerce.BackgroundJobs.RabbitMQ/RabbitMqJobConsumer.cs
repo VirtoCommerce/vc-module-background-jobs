@@ -42,6 +42,13 @@ public sealed class RabbitMqJobConsumer : BackgroundService
     // concurrently (PrefetchCount > 1) don't use the channel at the same time.
     private readonly SemaphoreSlim _channelLock = new(1, 1);
 
+    // The consumer channel also publishes the retry / dead-letter copies. Enable publisher confirms (matching the
+    // producer's publish channel) so BasicPublishAsync awaits broker durability before we ack the original delivery —
+    // otherwise a connection/channel drop between the republish and the ack silently loses the retry/DLQ copy.
+    private static readonly CreateChannelOptions _channelOptions = new(
+        publisherConfirmationsEnabled: true,
+        publisherConfirmationTrackingEnabled: true);
+
     private IChannel? _channel;
 
     public RabbitMqJobConsumer(
@@ -106,7 +113,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
         // Build the channel locally and publish it to the field only after full setup succeeds; on partial failure
         // dispose it so we never leak a half-initialized channel.
-        var channel = await _connectionProvider.CreateChannelAsync(cancellationToken: cancellationToken);
+        var channel = await _connectionProvider.CreateChannelAsync(_channelOptions, cancellationToken);
         try
         {
             await channel.BasicQosAsync(prefetchSize: 0, prefetchCount: _rabbitMqOptions.EffectivePrefetchCount(), global: false, cancellationToken);
@@ -147,14 +154,14 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             return;
         }
 
-        _logger.LogInformation("RabbitMQ delivery received: tag {DeliveryTag}, routingKey '{RoutingKey}', messageId {MessageId}, {Bytes} bytes",
+        _logger.LogDebug("RabbitMQ delivery received: tag {DeliveryTag}, routingKey '{RoutingKey}', messageId {MessageId}, {Bytes} bytes",
             eventArgs.DeliveryTag, eventArgs.RoutingKey, eventArgs.BasicProperties.MessageId, eventArgs.Body.Length);
 
         var json = Encoding.UTF8.GetString(eventArgs.Body.Span);
         JobEnvelope? envelope;
         try
         {
-            envelope = JsonConvert.DeserializeObject<JobEnvelope>(json);
+            envelope = JsonConvert.DeserializeObject<JobEnvelope>(json, JobJsonSettings.Default);
         }
         catch (Exception ex)
         {
@@ -176,13 +183,13 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         {
             var context = JobExecutionContextFactory.Create(_pushNotificationManager, envelope, jobId);
 
-            _logger.LogInformation("Dispatching job {JobId} ({JobType})", jobId, envelope.JobType);
+            _logger.LogDebug("Dispatching job {JobId} ({JobType})", jobId, envelope.JobType);
 
             await _dispatcher.Dispatch(envelope, context, CancellationToken.None);
             dispatched = true;
 
             await RunChannelOpAsync(async () => await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false));
-            _logger.LogInformation("Completed and acked job {JobId} ({JobType})", jobId, envelope.JobType);
+            _logger.LogDebug("Completed and acked job {JobId} ({JobType})", jobId, envelope.JobType);
         }
         catch (Exception ex) when (!dispatched)
         {
@@ -250,8 +257,8 @@ public sealed class RabbitMqJobConsumer : BackgroundService
                 jobId, envelope.JobType, envelope.Attempt, maxAttempts);
 
             var retry = envelope with { Attempt = envelope.Attempt + 1 };
-            var queue = string.IsNullOrEmpty(retry.Queue) ? "default" : retry.Queue!;
-            var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(retry));
+            var workQueue = string.IsNullOrEmpty(retry.Queue) ? _jobsOptions.DefaultQueue : retry.Queue!;
+            var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(retry, JobJsonSettings.Default));
             var properties = new BasicProperties
             {
                 MessageId = jobId,
@@ -259,8 +266,38 @@ public sealed class RabbitMqJobConsumer : BackgroundService
                 ContentType = "application/json",
             };
 
-            await RunChannelOpAsync(async () => await channel.BasicPublishAsync(exchange: string.Empty, routingKey: queue,
-                mandatory: false, basicProperties: properties, body: body));
+            var delaySeconds = Math.Max(0, _rabbitMqOptions.RetryDelaySeconds);
+            if (delaySeconds == 0)
+            {
+                // Immediate retry: re-publish straight to the work queue.
+                await RunChannelOpAsync(async () => await channel.BasicPublishAsync(exchange: string.Empty, routingKey: workQueue,
+                    mandatory: false, basicProperties: properties, body: body));
+            }
+            else
+            {
+                // Delayed retry (backoff): park the message in a per-queue TTL "delay" queue that dead-letters back to
+                // the work queue when the TTL expires — a fixed delay without the consumer sleeping, so a burst of
+                // poison messages can't hot-loop. The delay is encoded in the queue name so changing RetryDelaySeconds
+                // creates a new delay queue instead of failing an incompatible redeclare of the existing one.
+                var delayQueue = $"{workQueue}.retry.{delaySeconds}s";
+                await RunChannelOpAsync(async () =>
+                {
+                    await channel.QueueDeclareAsync(
+                        queue: delayQueue,
+                        durable: true,
+                        exclusive: false,
+                        autoDelete: false,
+                        arguments: new Dictionary<string, object?>
+                        {
+                            ["x-message-ttl"] = delaySeconds * 1000,
+                            ["x-dead-letter-exchange"] = string.Empty,
+                            ["x-dead-letter-routing-key"] = workQueue,
+                        });
+
+                    await channel.BasicPublishAsync(exchange: string.Empty, routingKey: delayQueue,
+                        mandatory: false, basicProperties: properties, body: body);
+                });
+            }
         }
         else if (_rabbitMqOptions.UseDeadLetterQueue)
         {
@@ -278,7 +315,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
     private async Task PublishToDeadLetterAsync(IChannel channel, JobEnvelope envelope, string jobId, Exception ex)
     {
-        var workQueue = string.IsNullOrEmpty(envelope.Queue) ? "default" : envelope.Queue!;
+        var workQueue = string.IsNullOrEmpty(envelope.Queue) ? _jobsOptions.DefaultQueue : envelope.Queue!;
         var deadLetterQueue = workQueue + _rabbitMqOptions.DeadLetterQueueSuffix;
 
         // Application-level dead-lettering: declare a durable DLQ and publish the envelope to it via the default
@@ -297,7 +334,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             },
         };
 
-        var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(envelope));
+        var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(envelope, JobJsonSettings.Default));
 
         await RunChannelOpAsync(async () =>
         {

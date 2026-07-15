@@ -36,10 +36,27 @@ public sealed class RecurringJobsApplier : BackgroundService, IEventHandler<Obje
         // engine registered one — every declared recurring job is then skipped with an actionable warning.
         IRecurringJobScheduler? scheduler = null)
     {
-        _registrations = registrations.ToList();
         _scheduler = scheduler;
         _serviceProvider = serviceProvider;
         _logger = logger;
+
+        // Reject duplicate recurring-job ids: two registrations sharing an id would non-deterministically run one
+        // under the other's schedule/payload. Keep the first per id and log an error naming the duplicates so the
+        // misconfiguration is visible rather than silent.
+        _registrations = registrations
+            .GroupBy(x => x.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                if (group.Count() > 1)
+                {
+                    _logger.LogError(
+                        "Duplicate recurring-job id '{JobId}' registered {Count} times; only the first is applied. Give each AddRecurringJob a unique id.",
+                        group.Key, group.Count());
+                }
+
+                return group.First();
+            })
+            .ToList();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

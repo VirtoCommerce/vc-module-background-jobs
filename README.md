@@ -46,7 +46,7 @@ sections (`VirtoCommerce:Hangfire`, `VirtoCommerce:RabbitMQ`), so the existing H
 ```jsonc
 "VirtoCommerce": {
   "BackgroundJobs": {
-    "Provider": "Hangfire",     // Hangfire | RabbitMQ  (the ACTIVE engine behind IBackgroundJob / map-reduce / platform recurring)
+    "Provider": "Hangfire",     // Hangfire | RabbitMQ | InMemory  (the ACTIVE engine behind IBackgroundJob / map-reduce / platform recurring)
     "Mode": "Both",              // Producer | Worker | Both
     "EnableLegacyHangfire": true, // keep Hangfire initialized for legacy direct-Hangfire modules even under another engine (see below)
     "DefaultQueue": "default",
@@ -77,7 +77,13 @@ headers) for inspection or replay — or dropped if `UseDeadLetterQueue` is `fal
 `GET api/platform/jobs/{id}` treats every id as unknown (reported as a completed job, so status pollers stop rather
 than hang) and job deletion is unsupported — observe jobs via progress notifications instead.
 
-**Recurring jobs** work on **either** engine. A recurring job is an ordinary `IBackgroundJobHandler<TPayload>` plus a
+When `Provider` is `InMemory`, jobs run **in-process** with no SQL, broker or Redis — the enqueue dispatches the job
+on a background task (retrying up to `MaxRetryAttempts`) and keeps per-job state for status/delete. It is meant for
+**local development and testing only**: it is non-durable (jobs are lost on restart) and single-process (`Mode` is not
+honored and it cannot scale across instances). Pair it with `BackgroundJobs:EnableLegacyHangfire = false` for a
+truly infra-free run. It is certified by the same engine conformance suite as Hangfire and RabbitMQ.
+
+**Recurring jobs** work on **any** engine. A recurring job is an ordinary `IBackgroundJobHandler<TPayload>` plus a
 schedule declared with `AddRecurringJob` (see Usage). On Hangfire they use Hangfire's native recurring scheduler
 (persisted, shown in the dashboard); on RabbitMQ (or any non-Hangfire engine) an in-process cron scheduler fires
 each occurrence and enqueues the payload, with fleet-safe exactly-once firing via a distributed lock + a shared

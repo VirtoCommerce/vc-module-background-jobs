@@ -62,7 +62,7 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
 
         var queue = string.IsNullOrEmpty(envelope.Queue) ? "default" : envelope.Queue!;
         var jobId = Guid.NewGuid().ToString("N");
-        var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(envelope));
+        var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(envelope, JobJsonSettings.Default));
 
         var properties = new BasicProperties
         {
@@ -145,7 +145,7 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
 
                 var jobId = Guid.NewGuid().ToString("N");
                 ids.Add(jobId);
-                var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(envelope));
+                var body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(envelope, JobJsonSettings.Default));
                 var properties = new BasicProperties { MessageId = jobId, Persistent = true, ContentType = "application/json" };
 
                 // Issue the publish but defer awaiting its confirmation — collect them so confirms pipeline.

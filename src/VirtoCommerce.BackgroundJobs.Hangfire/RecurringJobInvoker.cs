@@ -35,7 +35,17 @@ public sealed class RecurringJobInvoker : IRecurringJobInvoker
 
     public async Task Run(string recurringJobId)
     {
-        var registration = _registrations.FirstOrDefault(x => string.Equals(x.Id, recurringJobId, StringComparison.OrdinalIgnoreCase));
+        var matches = _registrations
+            .Where(x => string.Equals(x.Id, recurringJobId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (matches.Count > 1)
+        {
+            _logger.LogError(
+                "Recurring job '{JobId}' has {Count} registrations sharing the same id; running the first. Ids must be unique.",
+                recurringJobId, matches.Count);
+        }
+
+        var registration = matches.FirstOrDefault();
         if (registration is null)
         {
             // This recurring job is ours (Hangfire scheduled it to call us) but its declaration is gone — a renamed

@@ -14,7 +14,12 @@ namespace VirtoCommerce.BackgroundJobs.Data.Recurring;
 /// <see cref="IRecurringJobScheduler"/> plus its hosted timer, backed by a shared occurrence-marker store
 /// (<see cref="RedisRecurringJobStateStore"/> when Redis is configured, otherwise
 /// <see cref="InMemoryRecurringJobStateStore"/>). A custom engine module can call this from its
-/// <c>IPlatformStartup.ConfigureServices</c> to get fleet-safe cron recurring without reimplementing it.
+/// <c>IPlatformStartup.ConfigureServices</c> to get cron recurring without reimplementing it.
+/// <para>
+/// Fleet-safe <b>only when Redis is configured</b>; the in-memory fallback is per-process and safe for a single
+/// instance only. The "Background jobs store" health check reports Degraded if a queue-backed engine falls back to
+/// in-memory (see <c>SharedStoreHealthCheck</c>).
+/// </para>
 /// </summary>
 public static class RecurringSchedulerServiceCollectionExtensions
 {

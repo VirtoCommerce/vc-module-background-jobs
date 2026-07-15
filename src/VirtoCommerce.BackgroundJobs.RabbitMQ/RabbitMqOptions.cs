@@ -74,6 +74,14 @@ public class RabbitMqOptions
     /// <summary>Suffix appended to the work queue name to form its dead-letter queue (default <c>.dlq</c>).</summary>
     public string DeadLetterQueueSuffix { get; set; } = ".dlq";
 
+    /// <summary>
+    /// Fixed delay before a failed job is retried, in seconds (default 5). The retry is parked in a per-queue TTL
+    /// "delay" queue (<c>{queue}.retry.{n}s</c>) that dead-letters back to the work queue when it expires, so a burst
+    /// of poison messages backs off instead of hot-looping. Set 0 to retry immediately (re-publish straight to the
+    /// work queue).
+    /// </summary>
+    public int RetryDelaySeconds { get; set; } = 5;
+
     /// <summary>Target concurrent handlers per CPU used when <see cref="PrefetchCount"/> auto-scales (i.e. is
     /// &lt;= 0). Default 10 suits IO-bound jobs; use ~1–2 for CPU-bound work.</summary>
     public int ConcurrencyPerCore { get; set; } = 10;

@@ -115,8 +115,12 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
             var task = (Task)mapMethod.Invoke(handler, [item, context, cancellationToken])!;
             await task;
 
-            var value = task.GetType().GetProperty("Result")!.GetValue(task)!;
-            var (_, resultJson) = _serializer.Serialize(value);
+            var value = task.GetType().GetProperty("Result")!.GetValue(task);
+
+            // A map handler may legitimately return null; record it as a successful null result rather than passing
+            // null to Serialize (which would surface as a confusing NRE-shaped failure that faults the whole batch
+            // under the default FailFast policy).
+            var resultJson = value is null ? "null" : _serializer.Serialize(value).PayloadJson;
 
             return new MapResultRecord { Index = envelope.Index, Succeeded = true, ResultJson = resultJson };
         }
