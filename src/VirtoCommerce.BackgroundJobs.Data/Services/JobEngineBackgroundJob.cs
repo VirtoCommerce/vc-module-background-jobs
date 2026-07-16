@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -5,13 +6,15 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
+using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs.Core.Notifications;
+using VirtoCommerce.BackgroundJobs.Core.Services;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 using VirtoCommerce.Platform.Core.Security;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs.Data.Services;
 
 /// <summary>
 /// Engine-agnostic implementation of the developer-facing <see cref="IBackgroundJob"/> facade. Validates the
@@ -28,9 +31,20 @@ public sealed class JobEngineBackgroundJob(
 {
     private readonly BackgroundJobsOptions _options = options.Value;
 
-    public async Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null,
+    public Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null,
         CancellationToken cancellationToken = default)
         where THandler : class
+        => EnqueueCore(typeof(THandler), payload, options, cancellationToken);
+
+    public Task<string> Enqueue(Type handlerType, object payload, EnqueueOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(handlerType);
+        return EnqueueCore(handlerType, payload, options, cancellationToken);
+    }
+
+    private async Task<string> EnqueueCore(Type handlerType, object payload, EnqueueOptions? options,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(payload);
 
@@ -41,7 +55,7 @@ public sealed class JobEngineBackgroundJob(
 
         // Validate the handler actually handles this payload, and record both the payload contract type (JobType, so
         // the worker knows which Execute to call) and the concrete handler type to resolve.
-        var payloadContractType = ResolveHandlerPayloadType(typeof(THandler), payload.GetType());
+        var payloadContractType = ResolveHandlerPayloadType(handlerType, payload.GetType());
 
         var (payloadType, payloadJson) = serializer.Serialize(payload);
         var userName = userNameResolver.GetCurrentUserName();
@@ -78,7 +92,7 @@ public sealed class JobEngineBackgroundJob(
         var envelope = new JobEnvelope
         {
             JobType = payloadContractType.AssemblyQualifiedName!,
-            HandlerType = typeof(THandler).AssemblyQualifiedName!,
+            HandlerType = handlerType.AssemblyQualifiedName!,
             PayloadType = payloadType,
             PayloadJson = payloadJson,
             Queue = options?.Queue ?? _options.DefaultQueue,

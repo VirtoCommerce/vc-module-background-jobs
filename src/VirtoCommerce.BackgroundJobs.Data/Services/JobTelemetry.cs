@@ -1,8 +1,9 @@
+#nullable enable
 using System;
 using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.DataContracts;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs.Data.Services;
 
 /// <summary>
 /// Emits engine-agnostic job telemetry to Application Insights from the shared dispatch path, so Hangfire and

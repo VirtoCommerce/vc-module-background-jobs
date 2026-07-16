@@ -15,9 +15,12 @@ public static class MapReduceCoreServiceCollectionExtensions
     public static IServiceCollection AddMapReduceCore(this IServiceCollection services)
     {
         services.TryAddScoped<IMapReduceJob, MapReduceJob>();
-        services.AddBackgroundJob<FanOutCoordinator, MapFanOutEnvelope>();
-        services.AddBackgroundJob<MapCoordinator, MapTaskEnvelope>();
-        services.AddBackgroundJob<ReduceCoordinator, ReduceTaskEnvelope>();
+        // Internal orchestration handlers: triggerable: false so they're never runnable on demand by name with a
+        // caller-crafted envelope (which could corrupt a batch's state or fire a spurious reduce). Map/reduce work is
+        // started through IMapReduceJob.Enqueue, not by triggering a coordinator directly.
+        services.AddBackgroundJob<FanOutCoordinator, MapFanOutEnvelope>(triggerable: false);
+        services.AddBackgroundJob<MapCoordinator, MapTaskEnvelope>(triggerable: false);
+        services.AddBackgroundJob<ReduceCoordinator, ReduceTaskEnvelope>(triggerable: false);
         return services;
     }
 }

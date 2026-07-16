@@ -1,7 +1,9 @@
+#nullable enable
 using System;
 using Newtonsoft.Json;
+using VirtoCommerce.BackgroundJobs.Core.Services;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs.Data.Services;
 
 /// <summary>
 /// Newtonsoft.Json implementation of <see cref="IJobPayloadSerializer"/>, using the module's shared

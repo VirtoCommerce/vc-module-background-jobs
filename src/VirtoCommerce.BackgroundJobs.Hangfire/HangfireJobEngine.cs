@@ -57,5 +57,5 @@ public sealed class HangfireJobEngine(IBackgroundJobClient client) : IJobEngine
     }
 
     public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default)
-        => Task.FromResult(BackgroundJob.Delete(jobId));
+        => Task.FromResult(global::Hangfire.BackgroundJob.Delete(jobId));
 }

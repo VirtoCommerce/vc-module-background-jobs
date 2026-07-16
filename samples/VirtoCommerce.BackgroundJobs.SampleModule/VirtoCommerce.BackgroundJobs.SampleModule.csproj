@@ -16,7 +16,7 @@
     dependency on the engine module; the runtime dependency on the engine is declared in module.manifest.
   -->
   <ItemGroup>
-    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1044.0-alpha.13351-vcst-5245" />
+    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1044.0-alpha.13358-vcst-5245" />
   </ItemGroup>
 
 </Project>

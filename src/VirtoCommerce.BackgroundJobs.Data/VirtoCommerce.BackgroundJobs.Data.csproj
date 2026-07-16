@@ -12,8 +12,10 @@
     <NoWarn>1591;NU5048;NU1608</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1044.0-alpha.13351-vcst-5245" />
+    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1044.0-alpha.13358-vcst-5245" />
     <PackageReference Include="StackExchange.Redis" Version="3.0.0" />
+    <!-- TelemetryClient type only (used by JobTelemetry); resolved optionally at runtime so installs without the AI module are unaffected. -->
+    <PackageReference Include="Microsoft.ApplicationInsights" Version="2.23.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Core\VirtoCommerce.BackgroundJobs.Core.csproj" />

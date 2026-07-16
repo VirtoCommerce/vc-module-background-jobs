@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using VirtoCommerce.BackgroundJobs.Core.MapReduce;
 using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
@@ -68,6 +69,9 @@ public class MapReduceTests
 
         public Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null, CancellationToken ct = default)
             where THandler : class
+            => Enqueue(typeof(THandler), payload, options, ct);
+
+        public Task<string> Enqueue(Type handlerType, object payload, EnqueueOptions? options = null, CancellationToken ct = default)
         {
             Enqueued.Add(payload);
             return Task.FromResult(Guid.NewGuid().ToString("N"));
@@ -80,8 +84,11 @@ public class MapReduceTests
     {
         public Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null, CancellationToken ct = default)
             where THandler : class
+            => Enqueue(typeof(THandler), payload, options, ct);
+
+        public Task<string> Enqueue(Type handlerType, object payload, EnqueueOptions? options = null, CancellationToken ct = default)
         {
-            if (typeof(THandler) == typeof(ReduceCoordinator))
+            if (handlerType == typeof(ReduceCoordinator))
             {
                 throw new InvalidOperationException("reduce enqueue failed");
             }
@@ -97,6 +104,9 @@ public class MapReduceTests
 
         public Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null, CancellationToken ct = default)
             where THandler : class
+            => Enqueue(typeof(THandler), payload, options, ct);
+
+        public Task<string> Enqueue(Type handlerType, object payload, EnqueueOptions? options = null, CancellationToken ct = default)
         {
             if (++_calls == throwOnCall)
             {

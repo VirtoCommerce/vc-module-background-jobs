@@ -128,21 +128,10 @@ public sealed class RecurringJobsApplier : BackgroundService, IEventHandler<Obje
 
     private async Task ApplyAsync(RecurringJobRegistration registration, ISettingsManager settingsManager, CancellationToken cancellationToken)
     {
-        bool enabled;
-        string? cron;
-
-        if (registration.EnablerSetting is not null && registration.CronSetting is not null)
-        {
-            enabled = await settingsManager.GetValueAsync<bool>(registration.EnablerSetting);
-            cron = await settingsManager.GetValueAsync<string>(registration.CronSetting);
-        }
-        else
-        {
-            // Fixed-cron schedule: honor the registration's Enabled flag so a job disabled by configuration is
-            // removed from engine storage (not left scheduled from a previous run when it was enabled).
-            enabled = registration.Enabled;
-            cron = registration.CronExpression;
-        }
+        // Resolve the effective schedule via the shared resolver (a setting-driven job reads its enabler + cron from
+        // settings; a fixed-cron job uses its own Enabled flag + CronExpression) so the applier and the admin read
+        // model stay in agreement.
+        var (enabled, cron) = await RecurringScheduleResolver.ResolveAsync(registration, settingsManager);
 
         // Both callers (ExecuteAsync / Handle) return early when _scheduler is null, so it is non-null here.
         if (enabled && !string.IsNullOrWhiteSpace(cron))

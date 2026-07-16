@@ -4,8 +4,8 @@ namespace VirtoCommerce.BackgroundJobs.Core.Services;
 
 /// <summary>
 /// Shared Newtonsoft settings for background-job serialization — used for both the job <b>payload</b>
-/// (<see cref="JsonJobPayloadSerializer"/>) and the transport <b>envelope</b> (the RabbitMQ engine/consumer), so the
-/// two never diverge. Tuned for durable server-to-server messages: reference loops are ignored rather than throwing,
+/// (the <c>JsonJobPayloadSerializer</c> in the Data layer) and the transport <b>envelope</b> (the RabbitMQ
+/// engine/consumer), so the two never diverge. Tuned for durable server-to-server messages: reference loops are ignored rather than throwing,
 /// and nulls are preserved so a round-tripped value is structurally identical.
 /// <para>
 /// NOTE: these are the module's own settings, <b>not</b> the platform's MVC/GraphQL JSON configuration. A payload

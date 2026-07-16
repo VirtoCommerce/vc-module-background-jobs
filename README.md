@@ -35,6 +35,14 @@ platform Hangfire assembly keep working once this module is installed.
   working; the Hangfire storage, dashboard, queues, retry and recurring jobs are unchanged.
 * **Extensible by partners** — override a handler via DI (last registration wins) and extend a payload via
   `AbstractTypeFactory`, using the same tools partners already use across Virto.
+* **Static enqueue for migration** — a Hangfire-style `BackgroundJob.Enqueue<THandler>(payload)` static entry point
+  (in `VirtoCommerce.Platform.Core`) so code moving off `Hangfire.BackgroundJob.Enqueue` doesn't have to inject
+  `IBackgroundJob`; new code should still prefer the injected facade.
+* **Admin & integration REST API** — list registered handlers and recurring schedules for troubleshooting, and
+  trigger a registered job by name, each under the module's own permission.
+* **Application Insights telemetry** — every job on every engine emits pre-aggregated duration/queue-latency metrics
+  and a `JobCompleted` drill-down event from the shared dispatch path; inert unless the platform's AI module is
+  installed (see [Telemetry](#telemetry-application-insights)).
 * **Graceful when absent** — if no engine module is installed, the platform boots and surfaces an actionable
   "install via the Virto Commerce CLI" message instead of silently dropping work.
 
@@ -123,6 +131,8 @@ startup. These are ops decisions, not admin-UI toggles.
 | Permission | Description |
 |---|---|
 | `platform:background:jobs:manage` | View the Hangfire dashboard (`/hangfire`) and the jobs status API. |
+| `background-jobs:read` | List registered handlers and recurring schedules via the admin API. |
+| `background-jobs:execute` | Trigger a registered background job by name via the admin API. |
 
 ## Architecture
 
@@ -149,25 +159,51 @@ JobEngineBackgroundJob  ── builds JobEnvelope (serializes payload) ──►
 * **Progress** is engine-independent: handlers call `context.Progress.Report(...)`, surfaced to the admin
   notification UI over SignalR.
 
+## Telemetry (Application Insights)
+
+Every job — on **every** engine — emits telemetry from the shared dispatch path (`DefaultJobDispatcher`), so Hangfire,
+RabbitMQ and In-Memory are measured identically. It is **opt-in by presence**: `JobTelemetry` takes an optional
+`TelemetryClient`, so when the platform's **Application Insights** module isn't installed it resolves to `null` and
+every call is a no-op — no behavior, no cost. (The AI package is a compile-time type reference on
+`VirtoCommerce.BackgroundJobs.Data`; nothing is sent unless AI is configured.)
+
+**Pre-aggregated metrics** (`customMetrics`), dimensioned by the low-cardinality `engine` / `handler` / `outcome`
+(`success` \| `canceled` \| `failure`) — sampling-immune and safe for the per-series cap:
+
+| Metric | Meaning |
+|---|---|
+| `VirtoCommerce.BackgroundJobs/jobs/execution.duration.ms` | Handler run time. |
+| `VirtoCommerce.BackgroundJobs/jobs/queue.latency.ms` | Enqueue → dispatch delay (omitted when the enqueue-time header is absent, e.g. a redelivered legacy message). |
+
+**Drill-down event** (`customEvents`): `JobCompleted` — properties `engine`, `handler`, `outcome`, `runId`; metrics
+`executionMs`, `queueLatencyMs`. The high-cardinality `runId` is carried on the event (subject to sampling) rather
+than on the metric dimensions, so per-run analysis stays possible without blowing the metric series cap.
+
+Ready-made Kusto queries (throughput, p95 duration, queue latency, failure rate — sliced by engine/handler) live in
+[`docs/benchmark-kql.md`](docs/benchmark-kql.md).
+
 ## Components
 
 ### Projects
 
 | Project | Layer | Purpose |
 |---|---|---|
-| `VirtoCommerce.BackgroundJobs.Core` | Core | Engine-internal contracts (`IJobEngine`, `IJobDispatcher`, `JobEnvelope`, options) and engine-agnostic implementations (facade, dispatcher, progress, serializer). Published as a NuGet so custom engines can reference the port. |
+| `VirtoCommerce.BackgroundJobs.Core` | Core | **Contracts, models, options and reusable helpers only** — `IJobEngine`, `IJobDispatcher`, `IJobPayloadSerializer`, `IBackgroundJobsAdminQuery`, `IJobEnvelopeRunner`, `JobEnvelope`/models, progress, `JobExecutionContextFactory`, `JobJsonSettings`, `RecurringScheduleResolver`, plus the map/reduce + recurring orchestration. Published as a NuGet so client and custom-engine projects reference the port without the service implementations. |
 | `VirtoCommerce.BackgroundJobs.Hangfire` | Engine | Hangfire implementation of `IJobEngine`; reuses the platform's former Hangfire storage/dashboard. Published as a NuGet. |
 | `VirtoCommerce.Platform.Hangfire.Shim` | Compat | Produces a type-forwarding `VirtoCommerce.Platform.Hangfire.dll` for binary compatibility with existing modules. |
 | `VirtoCommerce.BackgroundJobs.RabbitMQ` | Engine | RabbitMQ implementation of `IJobEngine` + the in-process consumer (`RabbitMqJobConsumer`). Published as a NuGet. |
 | `VirtoCommerce.BackgroundJobs.Web` | Web | Module host: `PlatformStartup` (engine/mode selection), `JobsController`, settings & permissions. |
-| `VirtoCommerce.BackgroundJobs.Data` | Data | Module persistence (EF Core) + the reusable in-process recurring scheduler (`AddInProcessRecurringScheduler`) and its Redis/in-memory occurrence-marker stores. Published as a NuGet. |
+| `VirtoCommerce.BackgroundJobs.Data` | Data | The concrete engine-agnostic **service implementations** (`JobEngineBackgroundJob` facade, `DefaultJobDispatcher`, `JsonJobPayloadSerializer`, `JobTelemetry`, `JobEnvelopeRunner`, `BackgroundJobsAdminQuery`) + the reusable in-process recurring scheduler (`AddInProcessRecurringScheduler`) and the Redis/in-memory occurrence-marker & map/reduce batch stores. Published as a NuGet. |
 
 ### Key Services
 
 | Service | Interface | Responsibility |
 |---|---|---|
-| Enqueue facade | `IBackgroundJob` | Engine-agnostic, handler-explicit enqueue (`Enqueue<THandler>(payload)`). |
+| Enqueue facade | `IBackgroundJob` | Engine-agnostic, handler-explicit enqueue (`Enqueue<THandler>(payload)`; also a non-generic `Enqueue(Type, payload)` for name/type-addressed triggering). |
+| Static enqueue | `BackgroundJob` (static) | Hangfire-style `BackgroundJob.Enqueue<THandler>(payload)` migration helper; opens a scope and delegates to the scoped `IBackgroundJob`. |
 | Job handler | `IBackgroundJobHandler<TPayload>` | Your job logic; resolved from DI, overridable. |
+| Admin read model | `IBackgroundJobsAdminQuery` | Lists registered handlers + recurring schedules (effective cron, last/next run) for the admin API. |
+| Envelope runner | `IJobEnvelopeRunner` | Runs a pushed `JobEnvelope` in-process (build context → dispatch); reused by push engines (Google Cloud Tasks). |
 | Map/reduce facade | `IMapReduceJob` | Fan-out → aggregate jobs (`Enqueue<TMap, TReduce>(items, state)`); contracts ship in `VirtoCommerce.Platform.Core`. |
 | Engine port | `IJobEngine` | The active engine (Hangfire/RabbitMQ). One per instance. |
 | Dispatcher | `IJobDispatcher` | Shared execution path: deserialize → resolve handler → run. |
@@ -180,7 +216,10 @@ JobEngineBackgroundJob  ── builds JobEnvelope (serializes payload) ──►
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `api/platform/jobs/{id}` | Get the status of a background job (engine-agnostic). |
+| GET | `api/platform/jobs/{id}` | Get the status of a background job (engine-agnostic). Requires `background_jobs:manage`. |
+| GET | `api/background-jobs/registered` | List registered handlers (name, handler type, payload type). Requires `background-jobs:read`. |
+| GET | `api/background-jobs/recurring` | List recurring jobs with effective cron, enabled, last/next run. Requires `background-jobs:read`. |
+| POST | `api/background-jobs/enqueue` | Trigger a registered job by name — body `{ name, payload, options? }` → engine job id. Requires `background-jobs:execute`. |
 
 ## Usage
 
@@ -245,6 +284,50 @@ default queue. Pass `EnqueueOptions` only when you need one of these behaviors:
 **Retries** are configured globally, not per enqueue: `VirtoCommerce:BackgroundJobs:MaxRetryAttempts` governs how many
 times a failed job is retried before being dead-lettered/dropped (RabbitMQ); Hangfire uses its own retry filter.
 (`EnqueueOptions.MaxRetryAttempts` is reserved for a future per-job override and is not yet honored.)
+
+### Static enqueue (Hangfire migration)
+
+Code migrating off the static `Hangfire.BackgroundJob.Enqueue(...)` API can enqueue **without injecting**
+`IBackgroundJob`, via the static `BackgroundJob` facade in `VirtoCommerce.Platform.Core`:
+
+```csharp
+using VirtoCommerce.Platform.Core.Jobs;
+
+await BackgroundJob.Enqueue<SendOrderEmailJob>(payload);
+await BackgroundJob.Enqueue<SendOrderEmailJob>(payload, new EnqueueOptions { ReportProgress = true });
+```
+
+Each call opens a short-lived DI scope and delegates to the scoped `IBackgroundJob` (the current user still flows in
+via `IHttpContextAccessor`), so behavior matches the injected facade. It is a **migration aid** — prefer injecting
+`IBackgroundJob` in new code (explicit dependency, easily testable). If the BackgroundJobs module isn't installed the
+call throws an actionable error.
+
+### Admin & integration API
+
+Engine-agnostic REST endpoints for troubleshooting and integration, each under the module's own permission:
+
+| Method | Endpoint | Permission | Description |
+|---|---|---|---|
+| GET | `api/background-jobs/registered` | `background-jobs:read` | Registered handlers: name, handler type, payload type. |
+| GET | `api/background-jobs/recurring` | `background-jobs:read` | Recurring jobs: effective cron, enabled, time zone, handler/payload, last & next run. |
+| POST | `api/background-jobs/enqueue` | `background-jobs:execute` | Trigger a registered job **by name**. |
+
+`POST api/background-jobs/enqueue` lets integration middleware start a job without a compile-time reference to it.
+Only **registered** handlers are triggerable — addressed by the friendly `name` from the `registered` list, never a
+raw type — and the payload JSON is bound to the handler's payload type:
+
+```jsonc
+POST /api/background-jobs/enqueue
+{
+  "name": "SendOrderEmailJob",        // the registered handler name (defaults to the handler's type name)
+  "payload": { "orderId": "123", "customerEmail": "a@b.com" },
+  "options": { "reportProgress": true } // optional EnqueueOptions
+}
+// → "a1b2c3d4"   (engine job id; poll via GET api/platform/jobs/{id})
+```
+
+An unknown name returns **404**; a payload that doesn't match the handler returns **400**. The addressable name
+defaults to the handler's type name; pass `AddBackgroundJob<THandler, TPayload>(name: "my-name")` to set a custom one.
 
 ### Extending jobs (partner modules)
 
@@ -483,9 +566,9 @@ packages.
 | Concern | What to do |
 |---|---|
 | Engine port (**required**) | Implement `IJobEngine` — `ProviderName`, `Enqueue(JobEnvelope, EnqueueOptions, ct)`, `GetStatus(jobId, ct)`, `Delete(jobId, ct)`. |
-| Processing host | An `IHostedService` (like `RabbitMqJobConsumer`) that consumes/receives and calls `IJobDispatcher.Dispatch(envelope, context, ct)`. Register it only when active **and** `Mode != Producer`. A push engine instead exposes an inbound callback controller. |
+| Processing host | An `IHostedService` (like `RabbitMqJobConsumer`) that consumes/receives and calls `IJobDispatcher.Dispatch(envelope, context, ct)`. Register it only when active **and** `Mode != Producer`. A **push** engine instead exposes an inbound callback controller that runs the received envelope via `IJobEnvelopeRunner.Run(envelope, jobId, ct)` (build context → dispatch). |
 | Recurring | Either call `services.AddInProcessRecurringScheduler()` (reuses the Cronos + distributed-lock + occurrence-marker scheduler, enqueues via `IBackgroundJob`), **or** implement `IRecurringJobScheduler` natively. |
-| Reuse — do **not** reimplement | `IBackgroundJob`, `IJobDispatcher`, `IJobPayloadSerializer`, `JobEnvelope`, `JobExecutionContext`, progress, `RecurringJobsApplier`, `IRecurringJobStateStore` + its Redis/in-memory impls. The host module registers these once. |
+| Reuse — do **not** reimplement | `IBackgroundJob`, `IJobDispatcher`, `IJobEnvelopeRunner`, `IJobPayloadSerializer`, `JobEnvelope`, `JobExecutionContext`, progress, `RecurringJobsApplier`, `IRecurringJobStateStore` + its Redis/in-memory impls. The host module registers these once. |
 
 ### Recipe
 
@@ -524,7 +607,7 @@ engine is registered, Degraded on a provider/engine mismatch) — so a missing o
 A complete, buildable **push-based** engine — Google Cloud Tasks, which POSTs to an HTTP callback instead of running a
 consumer — lives in [`samples/VirtoCommerce.BackgroundJobs.GoogleCloudTasks`](samples/VirtoCommerce.BackgroundJobs.GoogleCloudTasks/README.md).
 It confirms the contracts don't assume a pull/consumer model: a push engine adds an inbound callback controller and
-reuses `IJobDispatcher` — no new platform contract needed.
+reuses the shared `IJobEnvelopeRunner` (over `IJobDispatcher`) — no new platform contract needed.
 
 ### Certify your engine (conformance kit)
 

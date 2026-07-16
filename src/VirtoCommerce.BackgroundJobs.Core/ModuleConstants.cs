@@ -12,6 +12,9 @@ public static class ModuleConstants
             public const string Update = "background-jobs:update";
             public const string Delete = "background-jobs:delete";
 
+            /// <summary>Trigger a registered background job on demand via the admin/integration REST API.</summary>
+            public const string Execute = "background-jobs:execute";
+
             public static string[] AllPermissions { get; } =
             [
                 Access,
@@ -19,6 +22,7 @@ public static class ModuleConstants
                 Read,
                 Update,
                 Delete,
+                Execute,
             ];
         }
     }

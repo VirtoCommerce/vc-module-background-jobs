@@ -9,15 +9,15 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using VirtoCommerce.BackgroundJobs.Core;
-using VirtoCommerce.BackgroundJobs.Web.Infrastructure.HealthChecks;
 using VirtoCommerce.BackgroundJobs.Core.Recurring;
 using VirtoCommerce.BackgroundJobs.Core.Services;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
 using VirtoCommerce.BackgroundJobs.Data.Recurring;
+using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.BackgroundJobs.Hangfire;
 using VirtoCommerce.BackgroundJobs.InMemory.Extensions;
 using VirtoCommerce.BackgroundJobs.RabbitMQ.Extensions;
-using VirtoCommerce.Platform.Core.Common;
+using VirtoCommerce.BackgroundJobs.Web.Infrastructure.HealthChecks;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Modularity;
 using VirtoCommerce.Platform.Hangfire.Extensions;
@@ -116,6 +116,8 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
         // platform's Application Insights module is installed (then jobs/* metrics + JobCompleted events flow to AI).
         services.AddSingleton<JobTelemetry>();
         services.AddSingleton<IJobDispatcher, DefaultJobDispatcher>();
+        // Shared "run a pushed envelope in-process" path (build context + dispatch), reused by push engines (GCT).
+        services.AddSingleton<IJobEnvelopeRunner, JobEnvelopeRunner>();
         // One facade instance behind both the single-job and bulk producer contracts.
         services.AddScoped<JobEngineBackgroundJob>();
         services.AddScoped<IBackgroundJob>(sp => sp.GetRequiredService<JobEngineBackgroundJob>());
@@ -128,6 +130,9 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
         // Map/reduce orchestration (facade + coordinators + batch store) — engine-agnostic, rides the active engine.
         services.AddMapReduce();
+
+        // Admin read model for the troubleshooting API (list registered handlers + recurring schedules). Engine-agnostic.
+        services.AddScoped<Core.Admin.IBackgroundJobsAdminQuery, Data.Admin.BackgroundJobsAdminQuery>();
 
         // Bootstrap Hangfire INFRASTRUCTURE (storage/DI, IBackgroundJobClient/IRecurringJobManager, and the legacy
         // VirtoCommerce.Platform.Hangfire.IRecurringJobService + executor) whenever Hangfire is the active engine OR
@@ -218,9 +223,7 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
     public void Configure(IApplicationBuilder app, IConfiguration config)
     {
-        // Intentionally empty: Hangfire storage schema creation + dashboard wiring must run AFTER the platform
-        // database is migrated. That happens in Module.PostInitialize (UseHangfire), inside the platform's
-        // synchronized critical section.
+        Platform.Core.Jobs.BackgroundJob.Initialize(app.ApplicationServices);
     }
 
     private static BackgroundJobsOptions GetOptions(IConfiguration config)

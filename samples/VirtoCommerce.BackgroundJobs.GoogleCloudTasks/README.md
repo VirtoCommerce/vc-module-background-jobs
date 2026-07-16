@@ -17,7 +17,7 @@ Producer (any instance)                Google Cloud Tasks                 Callba
     → GoogleCloudTasksJobEngine
         → CreateTask (HTTP target)  ──►  queue (retries, backoff)  ──►  POST /api/.../callback
                                                                           → validate OIDC token
-                                                                          → IJobDispatcher.Dispatch(envelope)
+                                                                          → IJobEnvelopeRunner.Run(envelope)
                                                                           → 200 ack  /  5xx retry
 ```
 
@@ -27,7 +27,8 @@ Producer (any instance)                Google Cloud Tasks                 Callba
   implement `IExpressionJobEngine`.
 - **`GoogleCloudTasksCallbackController`** — the processing host (a push engine has no `IHostedService` consumer).
   Anonymous to the platform, authenticated by the Cloud Tasks OIDC token; on success it runs the shared
-  `IJobDispatcher` and returns 200, on handler failure 5xx so Cloud Tasks retries per the queue config.
+  `IJobEnvelopeRunner` (build context → dispatch) and returns 200, on handler failure 5xx so Cloud Tasks retries per
+  the queue config.
 - **Recurring** — reuses the host module's in-process cron scheduler via `AddInProcessRecurringScheduler()` (a cron
   tick enqueues a Cloud Task per occurrence, fleet-safe via the shared occurrence marker).
 - **`PlatformStartup`** — self-activates only when `VirtoCommerce:BackgroundJobs:Provider` is `GoogleCloudTasks`, so
@@ -77,7 +78,7 @@ key file. No credential path is configured in code on purpose — ADC is the rec
   out-of-repo module would consume them as the published **NuGet packages** and declare the runtime dependency in
   `module.manifest` (`<dependency id="VirtoCommerce.BackgroundJobs" .. />`).
 - It implements only `IJobEngine` and adds an inbound callback controller; everything else (`IBackgroundJob`,
-  `IJobDispatcher`, serializer, progress, `RecurringJobsApplier`, the recurring state store) is reused from the host
-  module. **No new platform/Core contract was required** to support a push engine.
-- A future nicety would be a shared push-callback endpoint in the host module that any push engine reuses; out of
-  scope here.
+  `IJobEnvelopeRunner`/`IJobDispatcher`, serializer, progress, `RecurringJobsApplier`, the recurring state store) is
+  reused from the host module. **No new platform/Core contract was required** to support a push engine.
+- The callback runs a received envelope through the host module's shared `IJobEnvelopeRunner` (build context →
+  dispatch), so any push engine reuses one execution path instead of re-implementing it.

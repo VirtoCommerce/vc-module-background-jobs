@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Diagnostics;
 using System.Globalization;
@@ -7,11 +8,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
+using VirtoCommerce.BackgroundJobs.Core.Services;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Security;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs.Data.Services;
 
 /// <summary>
 /// Default shared execution path: deserialize the payload, resolve the registered

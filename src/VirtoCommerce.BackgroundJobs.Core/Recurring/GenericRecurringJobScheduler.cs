@@ -245,11 +245,8 @@ public sealed class GenericRecurringJobScheduler : BackgroundService, IRecurring
         }
     }
 
-    private static CronExpression ParseCron(string cron)
-    {
-        var fields = cron.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return CronExpression.Parse(cron, fields.Length >= 6 ? CronFormat.IncludeSeconds : CronFormat.Standard);
-    }
+    // Delegates to the shared resolver so cron parsing (seconds-awareness) stays identical to the admin read model.
+    private static CronExpression ParseCron(string cron) => RecurringScheduleResolver.ParseCron(cron);
 
     private void SignalWake()
     {

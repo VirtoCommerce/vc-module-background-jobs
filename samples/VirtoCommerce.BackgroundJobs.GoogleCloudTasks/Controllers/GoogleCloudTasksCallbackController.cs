@@ -9,15 +9,13 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs.Core.Services;
-using VirtoCommerce.Platform.Core.Jobs;
-using VirtoCommerce.Platform.Core.PushNotifications;
 
 namespace VirtoCommerce.BackgroundJobs.GoogleCloudTasks.Controllers;
 
 /// <summary>
 /// Push endpoint Cloud Tasks POSTs to. This is the GCT engine's processing host (a push engine has no in-process
 /// consumer). It is anonymous to the platform — the request carries no admin session — and is instead authenticated
-/// by the Cloud Tasks OIDC token. On success it runs the shared <see cref="IJobDispatcher"/> and returns 200 so
+/// by the Cloud Tasks OIDC token. On success it runs the shared <see cref="IJobEnvelopeRunner"/> and returns 200 so
 /// Cloud Tasks acks; on handler failure it returns 5xx so Cloud Tasks retries per the queue's retry config.
 /// Handlers must be idempotent (at-least-once delivery).
 /// </summary>
@@ -28,20 +26,17 @@ public sealed class GoogleCloudTasksCallbackController : ControllerBase
     // Header Cloud Tasks sets with the full task resource name; used as the job id for the execution context.
     private const string TaskNameHeader = "X-CloudTasks-TaskName";
 
-    private readonly IJobDispatcher _dispatcher;
+    private readonly IJobEnvelopeRunner _runner;
     private readonly IGoogleCloudTasksTokenValidator _tokenValidator;
-    private readonly IPushNotificationManager _pushNotificationManager;
     private readonly ILogger<GoogleCloudTasksCallbackController> _logger;
 
     public GoogleCloudTasksCallbackController(
-        IJobDispatcher dispatcher,
+        IJobEnvelopeRunner runner,
         IGoogleCloudTasksTokenValidator tokenValidator,
-        IPushNotificationManager pushNotificationManager,
         ILogger<GoogleCloudTasksCallbackController> logger)
     {
-        _dispatcher = dispatcher;
+        _runner = runner;
         _tokenValidator = tokenValidator;
-        _pushNotificationManager = pushNotificationManager;
         _logger = logger;
     }
 
@@ -83,11 +78,9 @@ public sealed class GoogleCloudTasksCallbackController : ControllerBase
 
         try
         {
-            var context = JobExecutionContextFactory.Create(_pushNotificationManager, envelope, jobId);
-
             _logger.LogInformation("Dispatching Cloud Tasks job {JobId} ({JobType})", jobId, envelope.JobType);
 
-            await _dispatcher.Dispatch(envelope, context, cancellationToken);
+            await _runner.Run(envelope, jobId, cancellationToken);
 
             return Ok();
         }
