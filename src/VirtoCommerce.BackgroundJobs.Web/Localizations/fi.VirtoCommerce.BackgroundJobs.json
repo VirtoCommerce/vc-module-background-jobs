@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "background-jobs:access": "Avaa BackgroundJobs-valikko",
+    "background-jobs:create": "Luo BackgroundJobs-tietoja",
+    "background-jobs:read": "Näytä BackgroundJobs-tiedot",
+    "background-jobs:update": "Päivitä BackgroundJobs-tietoja",
+    "background-jobs:delete": "Poista BackgroundJobs-tietoja",
+    "background-jobs:execute": "Käynnistä rekisteröity taustatyö pyynnöstä"
+  }
+}

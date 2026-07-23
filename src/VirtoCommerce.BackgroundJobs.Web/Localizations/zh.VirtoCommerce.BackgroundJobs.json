@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "background-jobs:access": "打开 BackgroundJobs 菜单",
+    "background-jobs:create": "创建 BackgroundJobs 相关数据",
+    "background-jobs:read": "查看 BackgroundJobs 相关数据",
+    "background-jobs:update": "更新 BackgroundJobs 相关数据",
+    "background-jobs:delete": "删除 BackgroundJobs 相关数据",
+    "background-jobs:execute": "按需触发已注册的后台作业"
+  }
+}

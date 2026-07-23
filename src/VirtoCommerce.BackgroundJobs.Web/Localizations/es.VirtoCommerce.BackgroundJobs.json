@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "background-jobs:access": "Abrir el menú BackgroundJobs",
+    "background-jobs:create": "Crear datos relacionados con BackgroundJobs",
+    "background-jobs:read": "Ver datos relacionados con BackgroundJobs",
+    "background-jobs:update": "Actualizar datos relacionados con BackgroundJobs",
+    "background-jobs:delete": "Eliminar datos relacionados con BackgroundJobs",
+    "background-jobs:execute": "Ejecutar bajo demanda un trabajo en segundo plano registrado"
+  }
+}
