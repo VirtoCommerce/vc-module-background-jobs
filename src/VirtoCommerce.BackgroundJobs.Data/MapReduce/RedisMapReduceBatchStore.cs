@@ -118,9 +118,14 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
         await db.KeyDeleteAsync([MetaKey(batchId), ResultsKey(batchId), ReduceKey(batchId), ItemsKey(batchId), FanOutProgressKey(batchId)]);
     }
 
-    private static string MetaKey(string batchId) => $"vc:mapreduce:{batchId}:meta";
-    private static string ResultsKey(string batchId) => $"vc:mapreduce:{batchId}:results";
-    private static string ReduceKey(string batchId) => $"vc:mapreduce:{batchId}:reduce";
-    private static string ItemsKey(string batchId) => $"vc:mapreduce:{batchId}:items";
-    private static string FanOutProgressKey(string batchId) => $"vc:mapreduce:{batchId}:fanoutprogress";
+    // The batch id is wrapped in a Redis hash tag "{...}" so every key for one batch maps to the SAME cluster slot.
+    // Redis Cluster requires all keys of a multi-key command to be in a single slot; without the tag the five keys
+    // scatter across slots and CompleteAsync's multi-key KeyDelete fails with a CROSSSLOT error. (On a single node the
+    // tag is inert.)
+    private static string Key(string batchId, string suffix) => $"vc:mapreduce:{{{batchId}}}:{suffix}";
+    private static string MetaKey(string batchId) => Key(batchId, "meta");
+    private static string ResultsKey(string batchId) => Key(batchId, "results");
+    private static string ReduceKey(string batchId) => Key(batchId, "reduce");
+    private static string ItemsKey(string batchId) => Key(batchId, "items");
+    private static string FanOutProgressKey(string batchId) => Key(batchId, "fanoutprogress");
 }
