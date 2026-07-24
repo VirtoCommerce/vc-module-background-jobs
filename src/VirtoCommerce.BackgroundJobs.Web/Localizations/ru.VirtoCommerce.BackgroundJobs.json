@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "background-jobs:access": "Открыть меню BackgroundJobs",
+    "background-jobs:create": "Создание данных BackgroundJobs",
+    "background-jobs:read": "Просмотр данных BackgroundJobs",
+    "background-jobs:update": "Изменение данных BackgroundJobs",
+    "background-jobs:delete": "Удаление данных BackgroundJobs",
+    "background-jobs:execute": "Запуск зарегистрированной фоновой задачи по требованию"
+  }
+}

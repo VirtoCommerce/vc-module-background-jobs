@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "BackgroundJobs": {
+      "Sample": {
+        "EnableHeartbeat": {
+          "title": "Ativar tarefa de heartbeat",
+          "description": "Quando ativado, o módulo de exemplo executa uma tarefa em segundo plano de heartbeat recorrente conforme a programação abaixo."
+        },
+        "HeartbeatCron": {
+          "title": "Agendamento do heartbeat",
+          "description": "Expressão cron que controla com que frequência a tarefa de heartbeat é executada. Escolha uma predefinição ou digite a sua; um resumo em linguagem simples é exibido enquanto você edita."
+        }
+      }
+    }
+  }
+}

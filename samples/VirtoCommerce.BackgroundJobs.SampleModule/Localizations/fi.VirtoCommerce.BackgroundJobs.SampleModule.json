@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "BackgroundJobs": {
+      "Sample": {
+        "EnableHeartbeat": {
+          "title": "Ota heartbeat-työ käyttöön",
+          "description": "Kun tämä on käytössä, esimerkkimoduuli suorittaa toistuvan heartbeat-taustatyön alla olevan aikataulun mukaan."
+        },
+        "HeartbeatCron": {
+          "title": "Heartbeat-aikataulu",
+          "description": "Cron-lauseke, joka määrittää, kuinka usein heartbeat-työ suoritetaan. Valitse esiasetus tai kirjoita oma; muokatessasi näytetään selkokielinen yhteenveto."
+        }
+      }
+    }
+  }
+}

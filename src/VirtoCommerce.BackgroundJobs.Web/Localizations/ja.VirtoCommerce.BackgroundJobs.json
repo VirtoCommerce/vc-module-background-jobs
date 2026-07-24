@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "background-jobs:access": "BackgroundJobs メニューを開く",
+    "background-jobs:create": "BackgroundJobs 関連データを作成する",
+    "background-jobs:read": "BackgroundJobs 関連データを表示する",
+    "background-jobs:update": "BackgroundJobs 関連データを更新する",
+    "background-jobs:delete": "BackgroundJobs 関連データを削除する",
+    "background-jobs:execute": "登録済みのバックグラウンドジョブをオンデマンドで実行する"
+  }
+}

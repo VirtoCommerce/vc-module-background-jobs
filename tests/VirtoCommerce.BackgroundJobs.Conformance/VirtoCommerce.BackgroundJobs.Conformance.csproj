@@ -1,0 +1,33 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <SonarQubeTestProject>false</SonarQubeTestProject>
+    <!-- Packable: a custom engine repo references this kit and subclasses the conformance fixtures to certify its engine. -->
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <NoWarn>1591;NU5048;NU1608</NoWarn>
+    <Description>Reusable xUnit conformance suite for certifying a VirtoCommerce background-job engine (IJobEngine) against the background-job standard.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1050.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.10" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <!-- Library that DEFINES abstract test bases (not an executable test project): reference the extensibility core
+         (test attributes, fixtures, TestContext) + the assertion library, not the xunit.v3 meta-package. -->
+    <PackageReference Include="xunit.v3.extensibility.core" Version="3.2.2" />
+    <PackageReference Include="xunit.v3.assert" Version="3.2.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\VirtoCommerce.BackgroundJobs.Core\VirtoCommerce.BackgroundJobs.Core.csproj" />
+    <ProjectReference Include="..\..\src\VirtoCommerce.BackgroundJobs.Data\VirtoCommerce.BackgroundJobs.Data.csproj" />
+  </ItemGroup>
+</Project>

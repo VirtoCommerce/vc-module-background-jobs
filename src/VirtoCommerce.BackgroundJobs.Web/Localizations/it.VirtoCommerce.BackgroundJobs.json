@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "background-jobs:access": "Apri il menu BackgroundJobs",
+    "background-jobs:create": "Crea dati relativi a BackgroundJobs",
+    "background-jobs:read": "Visualizza i dati relativi a BackgroundJobs",
+    "background-jobs:update": "Aggiorna i dati relativi a BackgroundJobs",
+    "background-jobs:delete": "Elimina i dati relativi a BackgroundJobs",
+    "background-jobs:execute": "Avvia su richiesta un processo in background registrato"
+  }
+}

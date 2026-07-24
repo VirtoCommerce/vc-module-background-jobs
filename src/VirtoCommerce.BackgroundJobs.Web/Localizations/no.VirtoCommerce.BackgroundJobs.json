@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "background-jobs:access": "Åpne BackgroundJobs-menyen",
+    "background-jobs:create": "Opprett BackgroundJobs-relaterte data",
+    "background-jobs:read": "Vis BackgroundJobs-relaterte data",
+    "background-jobs:update": "Oppdater BackgroundJobs-relaterte data",
+    "background-jobs:delete": "Slett BackgroundJobs-relaterte data",
+    "background-jobs:execute": "Kjør en registrert bakgrunnsjobb ved behov"
+  }
+}

@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hangfire vs RabbitMQ — Benchmark Test Plan — Virto Commerce</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-dark: #0B0E14;
+    --bg-darker: #060810;
+    --bg-card: #131825;
+    --bg-card-hover: #1A2032;
+    --border: #232938;
+    --text-primary: #E6EAF3;
+    --text-secondary: #9AA3B5;
+    --text-muted: #5E6675;
+    --accent: #FF6B2C; /* Virto orange */
+    --accent-soft: rgba(255, 107, 44, 0.12);
+    --accent-glow: rgba(255, 107, 44, 0.35);
+    --cyan: #4FD1FF;   /* RabbitMQ */
+    --green: #22C55E;
+    --amber: #FBBF24;  /* Hangfire */
+    --orange: #F97316;
+    --purple: #A78BFA;
+    --magenta: #F472B6;
+    --red: #F87171;
+}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: var(--bg-darker);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+}
+  code, .mono { font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace; }
+.stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+.slide {
+    position: absolute;
+    width: 1200px;
+    height: 720px;
+    background: var(--bg-dark);
+    border-radius: 24px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5), 0 0 0 1px var(--border);
+    padding: 56px 64px;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 200ms ease, visibility 0s 200ms;
+    overflow: hidden;
+    transform: scale(var(--fit-scale, 1));
+    transform-origin: center;
+}
+.slide.active { opacity: 1; visibility: visible; transition: opacity 240ms ease; }
+  /* ── Cover ── */
+.slide.cover {
+    padding: 0;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(255,107,44,0.18), transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(79,209,255,0.10), transparent 50%),
+      var(--bg-dark);
+}
+.cover-inner { height: 100%; padding: 80px 96px; display: flex; flex-direction: column; justify-content: space-between; }
+.cover-tag {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 8px 14px; background: var(--accent-soft);
+    border: 1px solid var(--accent); border-radius: 999px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--accent); width: fit-content;
+}
+.cover-tag .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
+.cover-title { font-size: 68px; font-weight: 800; line-height: 1.05; letter-spacing: -0.025em; margin-top: 32px; text-wrap: balance; }
+.cover-title .accent {
+    background: linear-gradient(135deg, var(--accent) 0%, #FFB37A 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.cover-subtitle { font-size: 23px; color: var(--text-secondary); font-weight: 400; max-width: 840px; margin-top: 24px; line-height: 1.4; }
+.cover-meta { display: flex; gap: 36px; align-items: flex-end; justify-content: space-between; color: var(--text-muted); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 500; }
+.cover-chips { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 36px; }
+.chip { padding: 10px 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 999px; font-size: 14px; color: var(--text-primary); font-weight: 500; }
+.chip strong { color: var(--accent); margin-right: 6px; }
+  /* ── Section header ── */
+.slide.section { background: radial-gradient(circle at 70% 50%, rgba(255,107,44,0.12), transparent 60%), var(--bg-dark); }
+.section-num { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--accent); letter-spacing: 0.18em; font-weight: 600; }
+.section-title { font-size: 60px; font-weight: 800; margin-top: 16px; line-height: 1.05; letter-spacing: -0.02em; text-wrap: balance; }
+.section-blurb { font-size: 21px; color: var(--text-secondary); margin-top: 28px; max-width: 840px; line-height: 1.5; }
+  /* ── Content slide ── */
+.breadcrumb { font-size: 12px; color: var(--accent); font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 14px; }
+  h1.slide-title { font-size: 40px; font-weight: 700; line-height: 1.15; letter-spacing: -0.015em; margin-bottom: 12px; text-wrap: balance; }
+  h1.slide-title .accent {
+    background: linear-gradient(135deg, var(--accent) 0%, #FFB37A 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.slide-lead { font-size: 17px; color: var(--text-secondary); line-height: 1.5; max-width: 1010px; margin-bottom: 24px; }
+.slide-body { font-size: 16px; line-height: 1.55; color: var(--text-primary); }
+.slide-body p + p { margin-top: 14px; }
+.slide-body strong { color: var(--text-primary); font-weight: 600; }
+.slide-body code { font-size: 13.5px; background: var(--bg-card); padding: 2px 8px; border-radius: 5px; border: 1px solid var(--border); color: var(--cyan); }
+.slide-body ul { padding-left: 22px; margin-top: 8px; }
+.slide-body li { margin-bottom: 7px; color: var(--text-secondary); }
+.slide-body li strong { color: var(--text-primary); }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
+.card h3 { font-size: 17px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary); display: flex; align-items: center; gap: 10px; }
+.card h3 .icon-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
+.card h3 .icon-dot.cyan { background: var(--cyan); box-shadow: 0 0 10px rgba(79,209,255,0.4); }
+.card h3 .icon-dot.amber { background: var(--amber); box-shadow: 0 0 10px rgba(251,191,36,0.4); }
+.card p { font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+.card.muted { background: rgba(255,255,255,0.02); }
+  table.compare { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 14px; }
+  table.compare th, table.compare td { padding: 9px 13px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.compare th { color: var(--text-muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare td.code { font-family: 'JetBrains Mono', monospace; color: var(--cyan); font-size: 12.5px; }
+  table.compare td strong { color: var(--text-primary); }
+  table.compare td.num { font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.pill.green { background: rgba(34,197,94,0.15); color: var(--green); }
+.pill.amber { background: rgba(251,191,36,0.15); color: var(--amber); }
+.pill.cyan { background: rgba(79,209,255,0.15); color: var(--cyan); }
+.pill.purple { background: rgba(167,139,250,0.15); color: var(--purple); }
+.pill.orange { background: rgba(249,115,22,0.15); color: var(--orange); }
+.pill.red { background: rgba(248,113,113,0.15); color: var(--red); }
+.pill.tbd { background: rgba(94,102,117,0.18); color: var(--text-muted); }
+  pre.snippet {
+    background: var(--bg-darker); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 20px; font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    color: var(--text-primary); line-height: 1.55; overflow-x: auto; margin-top: 12px;
+}
+  pre.snippet.sm { font-size: 11.5px; line-height: 1.5; padding: 14px 16px; }
+  pre.snippet .kw { color: var(--accent); }
+  pre.snippet .str { color: var(--green); }
+  pre.snippet .com { color: var(--text-muted); font-style: italic; }
+  pre.snippet .key { color: var(--cyan); }
+  pre.snippet .num { color: var(--amber); }
+  pre.snippet .type { color: var(--purple); }
+  /* ── SVG schema ── */
+.schema { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; display: flex; align-items: center; justify-content: center; }
+.schema svg { width: 100%; height: auto; max-height: 100%; }
+  text.lbl { fill: var(--text-primary); font-family: 'Inter', sans-serif; font-weight: 500; }
+  text.lbl-sm { fill: var(--text-secondary); font-family: 'Inter', sans-serif; font-size: 12px; }
+  text.mono-svg { font-family: 'JetBrains Mono', monospace; }
+  rect.box { fill: var(--bg-darker); stroke: var(--border); stroke-width: 1.5; }
+  rect.box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+  rect.box-cyan { fill: rgba(79,209,255,0.08); stroke: var(--cyan); stroke-width: 1.5; }
+  rect.box-amber { fill: rgba(251,191,36,0.08); stroke: var(--amber); stroke-width: 1.5; }
+  rect.box-purple { fill: rgba(167,139,250,0.08); stroke: var(--purple); stroke-width: 1.5; }
+  rect.box-green { fill: rgba(34,197,94,0.06); stroke: var(--green); stroke-width: 1.5; }
+  path.arrow, line.arrow { stroke: var(--text-muted); stroke-width: 1.5; fill: none; }
+  path.arrow-accent, line.arrow-accent { stroke: var(--accent); stroke-width: 2; fill: none; }
+  /* ── Stat / callout utilities ── */
+.stat-row { display: flex; gap: 18px; margin-top: 16px; }
+.stat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; flex: 1; }
+.stat .val { font-family: 'JetBrains Mono', monospace; font-size: 30px; font-weight: 700; color: var(--accent); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.stat .val.cyan { color: var(--cyan); }
+.stat .lab { font-size: 12.5px; color: var(--text-secondary); margin-top: 6px; line-height: 1.4; }
+.callout { display: flex; gap: 12px; align-items: flex-start; border-radius: 12px; padding: 14px 18px; margin-top: 16px; font-size: 14px; line-height: 1.5; }
+.callout .ci { flex-shrink: 0; font-family: 'JetBrains Mono', monospace; font-weight: 700; }
+.callout.warn { background: rgba(251,191,36,0.10); border: 1px solid rgba(251,191,36,0.4); color: var(--text-primary); }
+.callout.warn .ci { color: var(--amber); }
+.callout.info { background: rgba(79,209,255,0.08); border: 1px solid rgba(79,209,255,0.3); color: var(--text-secondary); }
+.callout.info .ci { color: var(--cyan); }
+.callout strong { color: var(--text-primary); }
+  /* ── Feature grid ── */
+.feat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 18px; }
+.feat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 16px; }
+.feat .fnum { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); font-weight: 600; }
+.feat h4 { font-size: 15px; font-weight: 600; margin: 8px 0 6px; color: var(--text-primary); }
+.feat p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; }
+  /* ── Problem / solution / features cards ── */
+.psf-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px 22px; height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.psf-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--psf-color, var(--accent)); opacity: 0.6; }
+.psf-card .psf-label { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--psf-color, var(--accent)); margin-bottom: 14px; }
+.psf-card h3 { font-size: 20px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; letter-spacing: -0.01em; }
+.psf-card ul { list-style: none; padding: 0; margin: 0; flex: 1; }
+.psf-card li { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px dashed var(--border); font-size: 13.5px; line-height: 1.5; color: var(--text-secondary); }
+.psf-card li:last-child { border-bottom: none; }
+.psf-card li::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--psf-color); margin-top: 7px; flex-shrink: 0; }
+.psf-card li strong { color: var(--text-primary); font-weight: 600; }
+.psf-card.problem { --psf-color: #F87171; }
+.psf-card.solution { --psf-color: var(--accent); }
+.psf-card.features { --psf-color: var(--cyan); }
+  /* ── Nav controls ── */
+.nav-bar {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 12px;
+    background: rgba(19,24,37,0.95); backdrop-filter: blur(14px);
+    border: 1px solid var(--border); border-radius: 999px; padding: 10px 16px;
+    z-index: 100; box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+}
+.nav-btn { background: transparent; border: none; color: var(--text-secondary); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 120ms; }
+.nav-btn:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.nav-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.nav-counter { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text-secondary); min-width: 60px; text-align: center; font-weight: 500; }
+.nav-counter .accent { color: var(--accent); }
+.toc-btn {
+    position: fixed; top: 24px; left: 24px; width: 44px; height: 44px;
+    background: rgba(19,24,37,0.95); backdrop-filter: blur(14px);
+    border: 1px solid var(--border); border-radius: 12px; color: var(--text-secondary);
+    cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 100; transition: all 120ms;
+}
+.toc-btn:hover { color: var(--text-primary); background: var(--bg-card-hover); }
+.toc-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toc-panel {
+    position: fixed; top: 0; left: 0; width: 380px; height: 100%;
+    background: rgba(11,14,20,0.97); backdrop-filter: blur(20px);
+    border-right: 1px solid var(--border); transform: translateX(-100%);
+    transition: transform 280ms cubic-bezier(0.16,1,0.3,1); z-index: 200; display: flex; flex-direction: column;
+}
+.toc-panel.open { transform: translateX(0); }
+.toc-header { padding: 28px 28px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.toc-header h2 { font-size: 14px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
+.toc-close { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 20px; line-height: 1; }
+.toc-close:hover { color: var(--text-primary); }
+.toc-list { flex: 1; overflow-y: auto; padding: 12px 0; }
+.toc-list::-webkit-scrollbar { width: 6px; }
+.toc-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.toc-section-label { padding: 18px 28px 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
+.toc-item { display: flex; align-items: center; gap: 14px; padding: 10px 28px; cursor: pointer; transition: background 120ms; font-size: 14px; color: var(--text-secondary); }
+.toc-item:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.toc-item.active { color: var(--accent); background: var(--accent-soft); border-left: 3px solid var(--accent); padding-left: 25px; }
+.toc-item .num { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); min-width: 22px; }
+.toc-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); opacity: 0; pointer-events: none; transition: opacity 240ms; z-index: 199; }
+.toc-overlay.open { opacity: 1; pointer-events: auto; }
+.kbd-hint { position: fixed; top: 24px; right: 24px; color: var(--text-muted); font-size: 12px; z-index: 100; }
+  kbd { display: inline-block; background: var(--bg-card); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: 2px 7px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-secondary); margin: 0 2px; }
+  /* ── CTA ── */
+.slide.cta { text-align: center; background: radial-gradient(circle at 50% 60%, rgba(255,107,44,0.15), transparent 50%), var(--bg-dark); display: flex; flex-direction: column; justify-content: center; align-items: center; }
+.cta-title { font-size: 72px; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 24px; text-wrap: balance; }
+.cta-title .accent { background: linear-gradient(135deg, var(--accent) 0%, #FFB37A 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.cta-links { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; max-width: 920px; margin-top: 24px; }
+.cta-link { padding: 14px 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; color: var(--text-primary); font-weight: 500; font-size: 15px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<button class="toc-btn" id="tocBtn" aria-label="Toggle table of contents">
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
+</button>
+<div class="kbd-hint"><kbd>←</kbd><kbd>→</kbd> navigate · <kbd>T</kbd> contents · <kbd>F</kbd> fullscreen</div>
+
+<div class="toc-overlay" id="tocOverlay"></div>
+<aside class="toc-panel" id="tocPanel">
+  <div class="toc-header"><h2>Contents</h2><button class="toc-close" id="tocClose" aria-label="Close">✕</button></div>
+  <div class="toc-list" id="tocList"></div>
+</aside>
+
+<div class="stage" id="stage">
+
+  <!-- 1. Cover -->
+  <section class="slide cover active" data-section="Overview" data-title="Cover">
+    <div class="cover-inner">
+      <div>
+        <span class="cover-tag"><span class="dot"></span> Background Processing Hub · Test Plan</span>
+        <h1 class="cover-title">Hangfire vs RabbitMQ<br><span class="accent">CPU · Memory · Performance</span></h1>
+        <p class="cover-subtitle">An apples-to-apples benchmark of the two background-job engines on Virto Cloud — with Redis &amp; RabbitMQ memory sizing and a KEDA autoscaling design for the worker tier.</p>
+        <div class="cover-chips">
+          <span class="chip"><strong>2</strong> engines, one image</span>
+          <span class="chip"><strong>App Insights</strong> measurement</span>
+          <span class="chip"><strong>NBomber</strong> load</span>
+          <span class="chip"><strong>KEDA</strong> scale-from-zero</span>
+        </div>
+      </div>
+      <div class="cover-meta">
+        <span>Virto Commerce · Platform</span>
+        <span>2026-07-12 · local (1 / 2 / 16-core) + cloud B1 rounds complete</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Why -->
+  <section class="slide" data-section="Overview" data-title="Why this benchmark">
+    <div class="breadcrumb">Overview</div>
+    <h1 class="slide-title">Why we're running this</h1>
+    <p class="slide-lead">Two engines now ship behind one contract; we need to know which to run where, how much Redis &amp; RabbitMQ memory to provision, and how the worker tier scales — with numbers, not opinions.</p>
+    <div class="grid-3">
+      <div class="psf-card problem">
+        <span class="psf-label">The gap</span>
+        <h3>No numbers yet</h3>
+        <ul>
+          <li>Zero job metrics today — only logs, a health check, and the engine dashboards.</li>
+          <li>Engine choice (Hangfire vs RabbitMQ) is a config switch with <strong>no measured trade-off</strong>.</li>
+          <li>No sizing basis for Redis / RabbitMQ; no autoscaling story for workers.</li>
+        </ul>
+      </div>
+      <div class="psf-card solution">
+        <span class="psf-label">The goal</span>
+        <h3>Decide with data</h3>
+        <ul>
+          <li>Throughput, latency, <strong>CPU &amp; memory per 1k jobs</strong> for each engine.</li>
+          <li>Memory-sizing formulas for <strong>Redis</strong> and <strong>RabbitMQ</strong>.</li>
+          <li>KEDA scale-from-zero design + Pull-vs-Push trade-offs, quantified.</li>
+        </ul>
+      </div>
+      <div class="psf-card features">
+        <span class="psf-label">The method</span>
+        <h3>One fair test</h3>
+        <ul>
+          <li>Instrument the <strong>shared dispatch path</strong> once → engine-agnostic numbers.</li>
+          <li>Fixed, tunable workloads in the sample module; engine is the only variable.</li>
+          <li>Measure via the existing <strong>Application Insights</strong> module.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Topology -->
+  <section class="slide" data-section="Architecture" data-title="Deployment topology">
+    <div class="breadcrumb">Architecture</div>
+    <h1 class="slide-title">Virto Commerce on <span class="accent">Virto Cloud</span></h1>
+    <p class="slide-lead">One container image, three roles. Two <strong>Producer</strong> tiers — the storefront <strong>Backend for Frontend</strong> and the <strong>Backend for Admin</strong> — scale on CPU/memory (HPA) and enqueue to RabbitMQ. A dedicated <strong>Backend for Jobs</strong> worker tier consumes the queue and scales on queue depth via <strong>KEDA (0→N)</strong>.</p>
+    <div class="schema">
+      <svg viewBox="0 0 1080 410" xmlns="http://www.w3.org/2000/svg">
+        <!-- Clients -->
+        <rect class="box" x="14" y="44" width="148" height="66" rx="10"/>
+        <text class="lbl" x="88" y="72" text-anchor="middle" font-size="15">Frontend</text>
+        <text class="lbl-sm" x="88" y="90" text-anchor="middle" font-size="11">vc-frontend (Vue 3)</text>
+        <rect class="box" x="14" y="164" width="148" height="66" rx="10"/>
+        <text class="lbl" x="88" y="192" text-anchor="middle" font-size="15">Admin UI</text>
+        <text class="lbl-sm" x="88" y="210" text-anchor="middle" font-size="11">AngularJS SPA</text>
+
+        <!-- Line 1 — Backend for Frontend (Producer) -->
+        <rect class="box-accent" x="200" y="36" width="220" height="82" rx="10"/>
+        <text class="lbl" x="310" y="64" text-anchor="middle" font-size="15">Backend for Frontend</text>
+        <text class="lbl-sm" x="310" y="82" text-anchor="middle">Mode=Producer</text>
+        <text class="lbl-sm" x="310" y="100" text-anchor="middle" font-size="11" fill="#FF6B2C">scaled by CPU / Memory (HPA)</text>
+
+        <!-- Line 2 — Backend for Admin (Producer) -->
+        <rect class="box-accent" x="200" y="156" width="220" height="82" rx="10"/>
+        <text class="lbl" x="310" y="184" text-anchor="middle" font-size="15">Backend for Admin</text>
+        <text class="lbl-sm" x="310" y="202" text-anchor="middle">Mode=Producer</text>
+        <text class="lbl-sm" x="310" y="220" text-anchor="middle" font-size="11" fill="#FF6B2C">scaled by CPU / Memory (HPA)</text>
+
+        <!-- Line 3 — Backend for Jobs (Worker) -->
+        <rect class="box-green" x="212" y="308" width="220" height="98" rx="10" opacity="0.35"/>
+        <rect class="box-green" x="200" y="300" width="220" height="98" rx="10"/>
+        <text class="lbl" x="310" y="330" text-anchor="middle" font-size="15">Backend for Jobs</text>
+        <text class="lbl-sm" x="310" y="348" text-anchor="middle">Mode=Worker</text>
+        <text class="lbl-sm" x="310" y="366" text-anchor="middle" font-size="11">consume → dispatch → handler</text>
+        <text class="mono-svg" x="310" y="390" text-anchor="middle" font-size="12" fill="#22C55E">KEDA · 0 .. N · queue depth</text>
+
+        <!-- RabbitMQ -->
+        <rect class="box-cyan" x="505" y="96" width="158" height="72" rx="10"/>
+        <text class="lbl" x="584" y="127" text-anchor="middle" font-size="15">RabbitMQ</text>
+        <text class="lbl-sm" x="584" y="145" text-anchor="middle" font-size="11">durable queue · .dlq</text>
+        <!-- Redis -->
+        <rect class="box-purple" x="505" y="300" width="158" height="72" rx="10"/>
+        <text class="lbl" x="584" y="331" text-anchor="middle" font-size="15">Redis</text>
+        <text class="lbl-sm" x="584" y="349" text-anchor="middle" font-size="11">map/reduce state</text>
+
+        <!-- arrows: clients -> producers -->
+        <line class="arrow" x1="162" y1="77" x2="196" y2="77" marker-end="url(#ah)"/>
+        <line class="arrow" x1="162" y1="197" x2="196" y2="197" marker-end="url(#ah)"/>
+        <!-- producers -> RabbitMQ (enqueue) -->
+        <path class="arrow-accent" d="M420 92 L501 122" marker-end="url(#ah)"/>
+        <path class="arrow-accent" d="M420 186 L501 146" marker-end="url(#ah)"/>
+        <text class="lbl-sm" x="470" y="108" text-anchor="middle" font-size="10">enqueue</text>
+        <!-- RabbitMQ -> worker (consume, line 3) -->
+        <path class="arrow" d="M558 168 L402 312" marker-end="url(#ah)"/>
+        <text class="lbl-sm" x="505" y="252" text-anchor="middle" font-size="10">consume</text>
+        <!-- worker <-> Redis (map/reduce state) -->
+        <path class="arrow" d="M422 350 L501 336" marker-end="url(#ah)" stroke-dasharray="4 3"/>
+        <defs>
+          <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#5E6675"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <div class="callout info"><span class="ci">roles</span><span>Producers (<strong>Frontend</strong> &amp; <strong>Admin</strong> backends) scale on <strong>CPU/memory (HPA)</strong> — they only enqueue, so they stay responsive. Only the <strong>Backend for Jobs</strong> worker scales on <strong>queue depth (KEDA 0→N)</strong>, so idle job capacity costs nothing. <em>Hangfire variant:</em> no broker — producers enqueue into SQL and the worker polls it (HPA on CPU only; no scale-to-zero).</span></div>
+  </section>
+
+  <!-- 4. Two engines -->
+  <section class="slide" data-section="Architecture" data-title="The two engines">
+    <div class="breadcrumb">Architecture</div>
+    <h1 class="slide-title">Two engines, one contract</h1>
+    <div class="grid-2">
+      <div class="card">
+        <h3><span class="icon-dot amber"></span> Hangfire</h3>
+        <table class="compare">
+          <tr><td>Storage</td><td><strong>SQL Server</strong> (shared platform DB)</td></tr>
+          <tr><td>Scaling</td><td>Workers poll SQL · HPA on CPU</td></tr>
+          <tr><td>Scale-to-zero</td><td><span class="pill red">no</span></td></tr>
+          <tr><td>Throughput knob</td><td class="code">WorkerCount</td></tr>
+          <tr><td>Delivery</td><td>at-least-once · dashboard + retries</td></tr>
+          <tr><td>Ops</td><td>one dependency (DB), built-in dashboard</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3><span class="icon-dot cyan"></span> RabbitMQ + Redis</h3>
+        <table class="compare">
+          <tr><td>Storage</td><td><strong>Broker</strong> queue + <strong>Redis</strong> (map/reduce)</td></tr>
+          <tr><td>Scaling</td><td>KEDA on queue depth · scale-from-zero</td></tr>
+          <tr><td>Scale-to-zero</td><td><span class="pill green">yes</span></td></tr>
+          <tr><td>Throughput knobs</td><td class="code">PrefetchCount · DispatchConcurrency</td></tr>
+          <tr><td>Delivery</td><td>at-least-once · DLQ on retry exhaustion</td></tr>
+          <tr><td>Ops</td><td>broker + Redis to run &amp; size</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="callout info"><span class="ci">shared</span><span>Both engines run the identical <code>DefaultJobDispatcher</code> execution path and the same handler contracts — so we instrument once and the comparison is fair by construction.</span></div>
+  </section>
+
+  <!-- 5. Pull vs Push -->
+  <section class="slide" data-section="Architecture" data-title="Pull vs Push">
+    <div class="breadcrumb">Architecture · consumption model</div>
+    <h1 class="slide-title">Pull vs Push — <span class="accent">two worker models</span></h1>
+    <p class="slide-lead">Same RabbitMQ worker image; the difference is <strong>who decides how many workers run</strong>. Hangfire is Pull-only, so Pull is also the like-for-like baseline.</p>
+    <table class="compare">
+      <thead><tr><th style="width:22%">Scenario</th><th style="width:30%">Pull — always-on</th><th style="width:30%">Push — KEDA 0→N</th><th style="width:18%">Metric</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Idle cost</strong></td><td>N replicas burn CPU/RAM at rest</td><td>0 replicas → ~zero</td><td>idle cost/hr</td></tr>
+        <tr><td><strong>Cold start</strong></td><td>warm → ~queue latency only</td><td>KEDA poll + schedule + warmup + connect</td><td>activation p50/p95</td></tr>
+        <tr><td><strong>Burst of K</strong></td><td>fixed N drains at fixed rate</td><td>ramps toward <span class="mono">maxReplicas</span></td><td>drain time · ramp curve</td></tr>
+        <tr><td><strong>Sustained X/s</strong></td><td>right-sized N</td><td>KEDA holds a stable N</td><td>throughput · p95 · CPU/1k</td></tr>
+        <tr><td><strong>Scale-down</strong></td><td>n/a</td><td>drain mid-scale-down</td><td>0 lost · dedup verified</td></tr>
+      </tbody>
+    </table>
+    <div class="callout info"><span class="ci">local vs cloud</span><span>Pull steady-state + knob tuning are approximable <strong>locally</strong>. Push cold-start, replica ramp, and scale-to-zero are <strong>cloud-only</strong> (need K8s + KEDA).</span></div>
+  </section>
+
+  <!-- 6. Measurement -->
+  <section class="slide" data-section="Measurement" data-title="How we measure">
+    <div class="breadcrumb">Measurement</div>
+    <h1 class="slide-title">Measured through Application Insights</h1>
+    <p class="slide-lead">Reuse the existing <code>VirtoCommerce.ApplicationInsights</code> module. CPU, memory, and dependency latency come for free; we add only the custom job telemetry — emitted once from the shared dispatcher.</p>
+    <div class="grid-2">
+      <div class="card">
+        <h3><span class="icon-dot"></span> Free from the AI module</h3>
+        <div class="slide-body"><ul>
+          <li><strong>performanceCounters</strong> — % CPU, private/available memory, threads</li>
+          <li><strong>dependencies</strong> — SQL, Redis, HTTP call latency per operation</li>
+          <li><strong>Live Metrics</strong> stream during a run</li>
+          <li>In AKS: <strong>Container Insights</strong> → per-pod CPU/mem + replica count</li>
+        </ul></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon-dot cyan"></span> Custom job telemetry we add</h3>
+        <pre class="snippet sm"><span class="com">// DefaultJobDispatcher (shared by both engines)</span>
+telemetry.<span class="key">GetMetric</span>(<span class="str">"jobs/execution.duration.ms"</span>,
+    <span class="str">"engine"</span>,<span class="str">"handler"</span>,<span class="str">"outcome"</span>,<span class="str">"runId"</span>);
+<span class="com">// + queue.latency.ms  (enqueue → dispatch)</span>
+<span class="com">// + jobs/count, jobs/inflight</span>
+<span class="com">// + mapreduce/reduce.duration.ms</span></pre>
+        <p style="margin-top:10px">Optional <code>TelemetryClient</code> — null when AI isn't configured, so zero production impact.</p>
+      </div>
+    </div>
+    <div class="callout info"><span class="ci">correlate</span><span>Every load run stamps a <code>vc-run-id</code> header → filter throughput/latency percentiles per run and per <code>engine</code> in Kusto / Metrics Explorer.</span></div>
+  </section>
+
+  <!-- 7. What we capture -->
+  <section class="slide" data-section="Measurement" data-title="What we capture">
+    <div class="breadcrumb">Measurement</div>
+    <h1 class="slide-title">What every run captures</h1>
+    <div class="grid-2">
+      <div class="card">
+        <h3><span class="icon-dot"></span> Per-run signals</h3>
+        <div class="slide-body"><ul>
+          <li><strong>Throughput</strong> — jobs/s</li>
+          <li><strong>Latency</strong> — p50 / p95 / p99 (queue · exec · end-to-end)</li>
+          <li><strong>CPU</strong> — per pod &amp; per 1k jobs</li>
+          <li><strong>Memory</strong> — working set, GC gen0/1/2, LOH</li>
+          <li><strong>Redis</strong> — used_memory + key count</li>
+          <li><strong>RabbitMQ</strong> — queue depth, broker memory, publish/ack rates</li>
+          <li><strong>SQL</strong> — CPU/waits (Hangfire), via AI dependencies</li>
+          <li><strong>Replicas</strong> over time · DLQ depth · error rate</li>
+        </ul></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon-dot cyan"></span> Comparison dimensions</h3>
+        <div class="slide-body"><ul>
+          <li>Throughput · latency · <strong>CPU per 1k jobs</strong></li>
+          <li>Memory footprint (app + broker + Redis)</li>
+          <li>External deps: SQL vs broker + Redis</li>
+          <li>Scale-to-zero: RabbitMQ+KEDA <span class="pill green">yes</span> / Hangfire <span class="pill red">no</span></li>
+          <li>Backpressure: broker watermark vs DB polling</li>
+          <li>Delivery: both at-least-once</li>
+          <li>Observability / ops complexity</li>
+          <li><strong>Cost per million jobs</strong></li>
+        </ul></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. Redis sizing -->
+  <section class="slide" data-section="Sizing & Scaling" data-title="Redis memory sizing">
+    <div class="breadcrumb">Sizing &amp; Scaling</div>
+    <h1 class="slide-title">Redis sizing — map/reduce only</h1>
+    <p class="slide-lead">Redis holds only map/reduce batch state (items list + results hash + meta + checkpoint), 7-day TTL. Footprint scales linearly with batch size and per-item JSON, stored ~twice (input + result).</p>
+    <pre class="snippet"><span class="com"># per active batch</span>
+mem ≈ (<span class="key">Total</span> × itemJSON) + (<span class="key">Total</span> × resultJSON) + meta + checkpoint   <span class="com"># ×1.5–2 overhead</span></pre>
+    <div class="stat-row">
+      <div class="stat"><div class="val">100k</div><div class="lab">items in a batch</div></div>
+      <div class="stat"><div class="val">0.5 + 0.3<span style="font-size:16px"> KB</span></div><div class="lab">item + result JSON each</div></div>
+      <div class="stat"><div class="val">~120–160<span style="font-size:16px"> MB</span></div><div class="lab">per concurrent batch (with overhead)</div></div>
+    </div>
+    <div class="callout warn"><span class="ci">must</span><span><strong>Set <code>maxmemory-policy noeviction</code></strong> on the jobs Redis — evicting a batch's items/results mid-run corrupts the reduce (data loss). Size for <strong>peak concurrent + abandoned</strong> batches (7-day TTL), alert at 80%, and isolate from the platform cache/backplane (dedicated instance or DB index).</span></div>
+  </section>
+
+  <!-- 9. RabbitMQ sizing -->
+  <section class="slide" data-section="Sizing & Scaling" data-title="RabbitMQ memory sizing">
+    <div class="breadcrumb">Sizing &amp; Scaling</div>
+    <h1 class="slide-title">RabbitMQ sizing — backlog drives memory</h1>
+    <p class="slide-lead">Broker memory = runtime baseline + queued messages + connections. Persistent classic-queue messages stay in memory until paged; the memory watermark blocks publishers to protect the node.</p>
+    <pre class="snippet"><span class="com"># broker memory</span>
+mem ≈ <span class="num">~120 MB</span> baseline + (ready+unacked) × (body + <span class="num">~300 B</span>) + connections
+<span class="com"># publishers blocked when broker RAM &gt; vm_memory_high_watermark (default 0.4 × limit)</span></pre>
+    <div class="stat-row">
+      <div class="stat"><div class="val cyan">500k</div><div class="lab">peak backlog messages</div></div>
+      <div class="stat"><div class="val cyan">~2 KB</div><div class="lab">avg message body</div></div>
+      <div class="stat"><div class="val cyan">≥ 2.5<span style="font-size:16px"> GB</span></div><div class="lab">broker RAM at 0.4 watermark</div></div>
+    </div>
+    <div class="callout warn"><span class="ci">scale-up</span><span>For large backlogs, move to <strong>quorum / lazy queues</strong> (page to disk, bound memory) — the engine declares classic durable queues today. Set <code>disk_free_limit</code>; budget for <code>.dlq</code> depth.</span></div>
+  </section>
+
+  <!-- 10. KEDA -->
+  <section class="slide" data-section="Sizing & Scaling" data-title="KEDA autoscaling">
+    <div class="breadcrumb">Sizing &amp; Scaling</div>
+    <h1 class="slide-title">KEDA — scale the worker tier on queue depth</h1>
+    <div class="grid-2" style="align-items:start">
+      <pre class="snippet sm"><span class="key">apiVersion</span>: keda.sh/v1alpha1
+<span class="key">kind</span>: ScaledObject
+<span class="key">spec</span>:
+  <span class="key">scaleTargetRef</span>: { name: vc-jobs-worker }
+  <span class="key">pollingInterval</span>: <span class="num">15</span>
+  <span class="key">cooldownPeriod</span>: <span class="num">300</span>
+  <span class="key">minReplicaCount</span>: <span class="num">0</span>      <span class="com"># scale-to-zero</span>
+  <span class="key">maxReplicaCount</span>: <span class="num">50</span>
+  <span class="key">triggers</span>:
+    - <span class="key">type</span>: rabbitmq
+      <span class="key">metadata</span>:
+        queueName: default
+        mode: QueueLength
+        value: <span class="str">"20"</span>          <span class="com"># msgs per replica</span>
+        activationValue: <span class="str">"5"</span></pre>
+      <div class="slide-body">
+        <p><strong>Tune <code>value</code> to worker capacity.</strong> Each replica drains ≈ <span class="mono">DispatchConcurrency / avg-job-seconds</span> jobs/s; set the per-replica target to the backlog you tolerate before adding a pod.</p>
+        <p style="margin-top:12px"><strong>Scale-down safety:</strong> at-least-once + idempotent handlers; a graceful <code>terminationGracePeriodSeconds</code> to finish in-flight acks; unacked messages requeue on disconnect (honor the cancellation token). Keep <code>PrefetchCount</code> modest so few messages requeue.</p>
+        <p style="margin-top:12px">Hangfire has no queue-depth trigger → <strong>HPA on CPU</strong>, no scale-to-zero.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. Payload & result -->
+  <section class="slide" data-section="Sizing & Scaling" data-title="Payload & result rules">
+    <div class="breadcrumb">Sizing &amp; Scaling · recommendations</div>
+    <h1 class="slide-title">Payload &amp; result recommendations</h1>
+    <div class="grid-3">
+      <div class="card">
+        <h3><span class="icon-dot"></span> Payloads = references</h3>
+        <p>The message body is the payload JSON; map/reduce stores each item's JSON in Redis <em>and</em> its result — ~2× amplification. Keep items small (&lt; ~4–32 KB; avoid &gt; 128 KB). Large inputs → blob/DB, pass a key.</p>
+      </div>
+      <div class="card">
+        <h3><span class="icon-dot cyan"></span> Results stay tiny</h3>
+        <p>There's no result path back to the producer — map results flow only to the reducer. The reducer <strong>persists the outcome to DB/blob</strong> + optional notification; keep per-item results to counts/refs/errors.</p>
+      </div>
+      <div class="card">
+        <h3><span class="icon-dot amber"></span> Correctness</h3>
+        <p>At-least-once everywhere: handlers <strong>idempotent</strong>; <code>UniqueKey</code> for dedup; <code>MaxRetryAttempts</code> + DLQ for poison messages. RabbitMQ keeps no status ledger — use progress + metrics.</p>
+      </div>
+    </div>
+    <div class="callout info"><span class="ci">rule</span><span>Small messages + externalized big data keeps broker &amp; Redis memory predictable and keeps the sizing formulas on the previous slides honest.</span></div>
+  </section>
+
+  <!-- 12. Workload profiles -->
+  <section class="slide" data-section="Test Plan" data-title="Workload profiles">
+    <div class="breadcrumb">Test Plan</div>
+    <h1 class="slide-title">Seven workload profiles</h1>
+    <p class="slide-lead">Fixed workload, engine is the only variable, warm up first. Driven by NBomber against the Producer; workload shape set by the sample module's tunable benchmark handler.</p>
+    <table class="compare">
+      <thead><tr><th style="width:8%">#</th><th style="width:44%">Profile</th><th>What it isolates</th></tr></thead>
+      <tbody>
+        <tr><td class="code">P1</td><td><strong>Fire-and-forget burst</strong> — 10k tiny jobs</td><td>enqueue throughput + drain time</td></tr>
+        <tr><td class="code">P2</td><td><strong>Sustained throughput</strong> — X/s for N min</td><td>steady-state CPU / mem / latency</td></tr>
+        <tr><td class="code">P3</td><td><strong>IO-bound</strong> — delay 50–500 ms, high concurrency</td><td>prefetch/dispatch vs WorkerCount</td></tr>
+        <tr><td class="code">P4</td><td><strong>CPU-bound</strong> — hash loop</td><td>threadpool / GC / CPU per job</td></tr>
+        <tr><td class="code">P5</td><td><strong>Map/reduce fan-out</strong> — width 100–5000</td><td>fan-out + Redis growth + reduce latency</td></tr>
+        <tr><td class="code">P6</td><td><strong>Large payload</strong> — sweep size</td><td>broker/Redis memory &amp; latency vs size</td></tr>
+        <tr><td class="code">P7</td><td><strong>Scale test</strong> <span class="pill cyan">cloud</span> — KEDA 0→N</td><td>activation latency · drain · cost</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 13. Local vs Cloud -->
+  <section class="slide" data-section="Test Plan" data-title="Local vs Cloud">
+    <div class="breadcrumb">Test Plan</div>
+    <h1 class="slide-title">What runs local vs cloud</h1>
+    <div class="grid-2">
+      <div class="card">
+        <h3><span class="icon-dot"></span> Local — dev environment</h3>
+        <p style="color:var(--text-muted);margin-bottom:10px">Manually-run RabbitMQ + Redis (as the conformance tests already do). For relative comparison &amp; formula validation.</p>
+        <div class="slide-body"><ul>
+          <li>Relative throughput / latency at fixed concurrency</li>
+          <li>Per-process CPU / memory</li>
+          <li>Redis &amp; RabbitMQ memory growth vs payload / width</li>
+          <li>Tuning <code>PrefetchCount</code> / <code>DispatchConcurrency</code> vs <code>WorkerCount</code></li>
+          <li>Dispatch-overhead microbench</li>
+        </ul></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon-dot cyan"></span> Cloud — Virto Cloud (AKS + KEDA)</h3>
+        <p style="color:var(--text-muted);margin-bottom:10px">Real managed RabbitMQ / Redis / SQL, node limits, autoscaling. The only place absolute numbers are meaningful.</p>
+        <div class="slide-body"><ul>
+          <li>Horizontal worker-scaling throughput</li>
+          <li><strong>KEDA scale 0→N latency</strong> + scale-to-zero</li>
+          <li>Producer / worker split from one image</li>
+          <li>End-to-end under realistic network; DLQ / failover under load</li>
+          <li><strong>Cost per million jobs</strong></li>
+        </ul></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14. Comparison matrix -->
+  <section class="slide" data-section="Test Plan" data-title="Comparison matrix">
+    <div class="breadcrumb">Test Plan · the deliverable</div>
+    <h1 class="slide-title">The scorecard <span class="accent">(local 16-core round)</span></h1>
+    <p class="slide-lead">First local round, 16-core box, <code>Mode=Both</code>, RabbitMQ dispatch=20. Relative signals — loads were concurrency-bound, not CPU-bound; absolute + autoscaling numbers come from the cloud round.</p>
+    <table class="compare">
+      <thead><tr><th style="width:34%">Dimension</th><th>Hangfire (SQL)</th><th>RabbitMQ + Redis</th></tr></thead>
+      <tbody>
+        <tr><td>Drain throughput (map/reduce 2000, clean)</td><td>220 jobs/s</td><td><strong>495 jobs/s</strong> <span class="pill green">2.2× · pf=64</span></td></tr>
+        <tr><td><strong>CPU per 1k jobs</strong> (sustained)</td><td>~6.9 core-s</td><td><strong>~2.3 core-s</strong> <span class="pill green">3× leaner</span></td></tr>
+        <tr><td>Working-set peak</td><td>438 MB</td><td>374 MB</td></tr>
+        <tr><td>Alloc under 64KB payload</td><td>961 MB/s · 563 GC2</td><td>287 MB/s · 87 GC2</td></tr>
+        <tr><td>Bulk enqueue (10k)</td><td>32.2 s</td><td>17.5 s → <strong>~0.5 s</strong> <span class="pill green">batch 30×</span></td></tr>
+        <tr><td>External dependencies</td><td>SQL Server</td><td>RabbitMQ + Redis</td></tr>
+        <tr><td>Scale-to-zero</td><td><span class="pill red">no</span></td><td><span class="pill green">yes (KEDA)</span></td></tr>
+        <tr><td>Cloud B1 (1 vCPU) head-to-head</td><td colspan="2">next slide — RabbitMQ <strong>5.5× drain</strong>, <strong>0.3% vs 62%</strong> fail at 200/s</td></tr>
+        <tr><td>Multi-pod scale / KEDA / cost per 1M</td><td colspan="2"><span class="pill tbd">cloud scale round</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 14b. Cloud B1 results -->
+  <section class="slide" data-section="Test Plan" data-title="Cloud B1 results">
+    <div class="breadcrumb">Test Plan · cloud round (B1, vcst-dev)</div>
+    <h1 class="slide-title">Cloud proof — <span class="accent">RabbitMQ vs Hangfire on 1 vCPU</span></h1>
+    <p class="slide-lead">Same Azure App Service <strong>B1 (1 vCPU / 1.75 GB)</strong>, same workload, engine switched; server-side read from Application Insights. The gap is far wider than local: Hangfire pays <strong>remote Azure SQL</strong> latency on every job, while RabbitMQ just publishes to the broker.</p>
+    <table class="compare">
+      <thead><tr><th style="width:40%">Metric (B1, 1 vCPU)</th><th>Hangfire (SQL)</th><th>RabbitMQ + Redis</th></tr></thead>
+      <tbody>
+        <tr><td>Map/reduce drain (2000, IO 50ms)</td><td>24 jobs/s</td><td><strong>131 jobs/s</strong> <span class="pill green">5.5×</span></td></tr>
+        <tr><td>Sustained 200/s — failures</td><td><span class="pill red">62%</span> (503 + timeout)</td><td><strong>0.3%</strong> <span class="pill green">68 / 24k</span></td></tr>
+        <tr><td>Sustained 200/s — p95 latency</td><td>101 s</td><td><strong>~0.7 s</strong></td></tr>
+        <tr><td>CPU (map/reduce peak)</td><td>34%</td><td>7.6%</td></tr>
+        <tr><td>Memory peak</td><td>489–784 MB</td><td>289–325 MB</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn"><span class="ci">why</span><span>On B1 Hangfire is <strong>never CPU-bound</strong> — it saturates at the <strong>enqueue→remote-SQL</strong> path (~125/s accepted), rejecting the rest as 503/timeout at the App Service layer. RabbitMQ's enqueue is a cheap broker publish, so a 1-vCPU pod absorbs 200/s at ~1% CPU. <em>(cpu / largepayload parity pending a longer token.)</em></span></div>
+  </section>
+
+  <!-- 15. What we add -->
+  <section class="slide" data-section="Test Plan" data-title="What we build">
+    <div class="breadcrumb">Test Plan · harness</div>
+    <h1 class="slide-title">What we add to make it testable</h1>
+    <div class="feat-grid">
+      <div class="feat"><div class="fnum">01</div><h4>Shared telemetry</h4><p>Instrument <code>DefaultJobDispatcher</code> once → engine-agnostic metrics to App Insights.</p></div>
+      <div class="feat"><div class="fnum">02</div><h4>Tunable workload</h4><p>Sample <code>BenchmarkJob</code>: async, with knobs for delay, CPU, payload/result size, fail rate — idempotent.</p></div>
+      <div class="feat"><div class="fnum">03</div><h4>Load endpoints</h4><p><code>/benchmark/fire</code> &amp; <code>/benchmark/mapreduce</code> stamp a <code>runId</code> so a whole run is one filter.</p></div>
+      <div class="feat"><div class="fnum">04</div><h4>NBomber project</h4><p>The 7 profiles as repeatable scenarios; HTML/CSV export; a CI smoke variant.</p></div>
+    </div>
+    <div class="callout info"><span class="ci">best practice</span><span>Async handlers (never blocking sleeps), fixed workloads, warmup, completion by signal not timer, deterministic seeds — so the engine is the only thing that varies between runs.</span></div>
+  </section>
+
+  <!-- 16. Sequence / next -->
+  <section class="slide" data-section="Delivery" data-title="Sequence & owners">
+    <div class="breadcrumb">Delivery</div>
+    <h1 class="slide-title">How we get there</h1>
+    <table class="compare">
+      <thead><tr><th style="width:10%">Step</th><th style="width:52%">Work</th><th>Where</th></tr></thead>
+      <tbody>
+        <tr><td class="code">1</td><td>This deck — align the team on scope &amp; method</td><td>—</td></tr>
+        <tr><td class="code">2</td><td>Shared dispatcher telemetry + <code>vc-run-id</code> (App Insights)</td><td>module Core</td></tr>
+        <tr><td class="code">3</td><td>Tunable benchmark workload + load endpoints</td><td>sample module</td></tr>
+        <tr><td class="code">4</td><td>NBomber scenarios (P1–P6) + CI smoke</td><td>tests</td></tr>
+        <tr><td class="code">5</td><td>K8s producer/worker + KEDA + Hangfire HPA</td><td>deploy/k8s</td></tr>
+        <tr><td class="code">6</td><td>Run local (relative) → cloud (absolute + KEDA)</td><td>Virto Cloud</td></tr>
+        <tr><td class="code">7</td><td>Fill the scorecard + KQL workbook → back into this deck</td><td>docs</td></tr>
+      </tbody>
+    </table>
+    <div class="callout info"><span class="ci">note</span><span>No engine internals change; the comparison rides the existing shared path and existing knobs. Telemetry is inert when App Insights isn't configured.</span></div>
+  </section>
+
+  <!-- 17. CTA -->
+  <section class="slide cta" data-section="Delivery" data-title="Close">
+    <div>
+      <h1 class="cta-title">One workload.<br><span class="accent">Two engines. Real numbers.</span></h1>
+      <p style="font-size:20px; color:var(--text-secondary); max-width:820px; margin:0 auto;">Instrument the shared path, drive fixed workloads with NBomber, read CPU/memory/throughput in Application Insights — then size Redis &amp; RabbitMQ and prove KEDA scale-from-zero on Virto Cloud.</p>
+      <div class="cta-links">
+        <span class="cta-link">Measure · App Insights + Container Insights</span>
+        <span class="cta-link">Size · Redis noeviction · RabbitMQ watermark</span>
+        <span class="cta-link">Scale · KEDA 0→N vs Hangfire HPA</span>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<nav class="nav-bar">
+  <button class="nav-btn" id="prevBtn" aria-label="Previous slide"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4 L6 9 L11 14"/></svg></button>
+  <div class="nav-counter"><span class="accent" id="curNum">1</span> / <span id="totNum">17</span></div>
+  <button class="nav-btn" id="nextBtn" aria-label="Next slide"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4 L12 9 L7 14"/></svg></button>
+</nav>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  let current = 0;
+
+  function fitStage() {
+    const scale = Math.min(window.innerWidth / 1240, window.innerHeight / 760);
+    slides.forEach(s => s.style.setProperty('--fit-scale', scale));
+  }
+  window.addEventListener('resize', fitStage);
+  fitStage();
+
+  function show(i) {
+    current = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach((s, idx) => s.classList.toggle('active', idx === current));
+    document.getElementById('curNum').textContent = current + 1;
+    document.getElementById('prevBtn').disabled = current === 0;
+    document.getElementById('nextBtn').disabled = current === slides.length - 1;
+    updateTocActive();
+  }
+  document.getElementById('totNum').textContent = slides.length;
+  document.getElementById('prevBtn').onclick = () => show(current - 1);
+  document.getElementById('nextBtn').onclick = () => show(current + 1);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ') { show(current + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { show(current - 1); }
+    else if (e.key === 't' || e.key === 'T') { toggleToc(); }
+    else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+    else if (e.key === 'Escape') { closeToc(); }
+  });
+
+  const tocList = document.getElementById('tocList');
+  const tocPanel = document.getElementById('tocPanel');
+  const tocOverlay = document.getElementById('tocOverlay');
+  let lastSection = '';
+  slides.forEach((s, idx) => {
+    const section = s.dataset.section || '';
+    const title = s.dataset.title || ('Slide ' + (idx + 1));
+    if (section !== lastSection) {
+      const lbl = document.createElement('div');
+      lbl.className = 'toc-section-label';
+      lbl.textContent = section;
+      tocList.appendChild(lbl);
+      lastSection = section;
+    }
+    const item = document.createElement('div');
+    item.className = 'toc-item';
+    item.dataset.idx = idx;
+    item.innerHTML = '<span class="num">' + String(idx + 1).padStart(2, '0') + '</span><span>' + title + '</span>';
+    item.onclick = () => { show(idx); closeToc(); };
+    tocList.appendChild(item);
+  });
+  function updateTocActive() {
+    document.querySelectorAll('.toc-item').forEach(it => it.classList.toggle('active', +it.dataset.idx === current));
+  }
+  function toggleToc() { tocPanel.classList.toggle('open'); tocOverlay.classList.toggle('open'); }
+  function closeToc() { tocPanel.classList.remove('open'); tocOverlay.classList.remove('open'); }
+  document.getElementById('tocBtn').onclick = toggleToc;
+  document.getElementById('tocClose').onclick = closeToc;
+  tocOverlay.onclick = closeToc;
+
+  show(0);
+</script>
+</body>
+</html>

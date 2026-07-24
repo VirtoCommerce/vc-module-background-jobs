@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "BackgroundJobs": {
+      "Sample": {
+        "EnableHeartbeat": {
+          "title": "Włącz zadanie heartbeat",
+          "description": "Po włączeniu moduł przykładowy uruchamia cykliczne zadanie w tle heartbeat zgodnie z poniższym harmonogramem."
+        },
+        "HeartbeatCron": {
+          "title": "Harmonogram heartbeat",
+          "description": "Wyrażenie cron określające, jak często uruchamiane jest zadanie heartbeat. Wybierz szablon lub wpisz własne; podczas edycji wyświetlane jest zrozumiałe podsumowanie."
+        }
+      }
+    }
+  }
+}

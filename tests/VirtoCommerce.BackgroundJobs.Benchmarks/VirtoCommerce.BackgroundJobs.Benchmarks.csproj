@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Manual load-test harness (NBomber) that drives the sample module's benchmark endpoints against a running Producer,
+    so Hangfire and RabbitMQ can be compared under identical workloads. NOT part of the module solution / CI build —
+    run it explicitly (see README). Requires a running platform + a bearer token (env: VC_BENCH_BASEURL, VC_BENCH_TOKEN).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NBomber" Version="5.8.2" />
+  </ItemGroup>
+
+</Project>

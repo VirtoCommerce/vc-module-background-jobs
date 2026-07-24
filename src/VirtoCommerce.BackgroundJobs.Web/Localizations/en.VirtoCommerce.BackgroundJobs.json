@@ -11,7 +11,8 @@
     "background-jobs:create": "Create BackgroundJobs related data",
     "background-jobs:read": "View BackgroundJobs related data",
     "background-jobs:update": "Update BackgroundJobs related data",
-    "background-jobs:delete": "Delete BackgroundJobs related data"
+    "background-jobs:delete": "Delete BackgroundJobs related data",
+    "background-jobs:execute": "Trigger a registered background job on demand"
   },
   "settings": {
     "BackgroundJobs": {

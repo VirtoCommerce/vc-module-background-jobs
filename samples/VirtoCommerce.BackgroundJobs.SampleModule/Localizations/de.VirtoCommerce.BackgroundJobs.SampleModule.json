@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "BackgroundJobs": {
+      "Sample": {
+        "EnableHeartbeat": {
+          "title": "Heartbeat-Job aktivieren",
+          "description": "Wenn aktiviert, führt das Beispielmodul einen wiederkehrenden Heartbeat-Hintergrundjob nach dem unten angegebenen Zeitplan aus."
+        },
+        "HeartbeatCron": {
+          "title": "Heartbeat-Zeitplan",
+          "description": "Cron-Ausdruck, der festlegt, wie oft der Heartbeat-Job ausgeführt wird. Wählen Sie eine Vorlage oder geben Sie einen eigenen Ausdruck ein; während der Eingabe wird eine verständliche Zusammenfassung angezeigt."
+        }
+      }
+    }
+  }
+}

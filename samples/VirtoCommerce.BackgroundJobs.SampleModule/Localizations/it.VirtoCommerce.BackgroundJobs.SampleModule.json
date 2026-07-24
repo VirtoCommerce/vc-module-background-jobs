@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "BackgroundJobs": {
+      "Sample": {
+        "EnableHeartbeat": {
+          "title": "Abilita processo heartbeat",
+          "description": "Se abilitato, il modulo di esempio esegue un processo in background heartbeat ricorrente secondo la pianificazione seguente."
+        },
+        "HeartbeatCron": {
+          "title": "Pianificazione heartbeat",
+          "description": "Espressione cron che controlla la frequenza di esecuzione del processo heartbeat. Scegli una preimpostazione o digita la tua; durante la modifica viene mostrato un riepilogo in linguaggio semplice."
+        }
+      }
+    }
+  }
+}

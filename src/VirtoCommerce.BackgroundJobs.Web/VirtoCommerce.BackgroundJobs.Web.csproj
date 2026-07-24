@@ -20,9 +20,10 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Core\VirtoCommerce.BackgroundJobs.Core.csproj" />
+    <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Hangfire\VirtoCommerce.BackgroundJobs.Hangfire.csproj" />
+    <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.RabbitMQ\VirtoCommerce.BackgroundJobs.RabbitMQ.csproj" />
+    <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.InMemory\VirtoCommerce.BackgroundJobs.InMemory.csproj" />
+    <ProjectReference Include="..\VirtoCommerce.Platform.Hangfire.Shim\VirtoCommerce.Platform.Hangfire.Shim.csproj" />
     <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Data\VirtoCommerce.BackgroundJobs.Data.csproj" />
-    <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Data.MySql\VirtoCommerce.BackgroundJobs.Data.MySql.csproj" />
-    <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Data.PostgreSql\VirtoCommerce.BackgroundJobs.Data.PostgreSql.csproj" />
-    <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Data.SqlServer\VirtoCommerce.BackgroundJobs.Data.SqlServer.csproj" />
   </ItemGroup>
 </Project>

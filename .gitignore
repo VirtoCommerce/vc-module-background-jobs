@@ -9,6 +9,9 @@
 *.userosscache
 *.sln.docstates
 
+# Local-only NuGet config for linking against a locally-built platform feed (machine-specific paths)
+nuget.config
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
@@ -338,3 +341,7 @@ ASALocalRun/
 dist/
 **/Properties/launchSettings.json
 /.serena
+
+# Exclude Visual Studio test run settings
+*.runsettings
+/tests/VirtoCommerce.BackgroundJobs.Benchmarks/reports

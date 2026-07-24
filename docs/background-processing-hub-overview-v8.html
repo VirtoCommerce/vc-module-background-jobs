@@ -1,0 +1,1460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Background Processing Hub — Virto Commerce</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-dark: #0B0E14;
+    --bg-darker: #060810;
+    --bg-card: #131825;
+    --bg-card-hover: #1A2032;
+    --border: #232938;
+    --text-primary: #E6EAF3;
+    --text-secondary: #9AA3B5;
+    --text-muted: #5E6675;
+    --accent: #FF6B2C; /* Virto orange */
+    --accent-soft: rgba(255, 107, 44, 0.12);
+    --accent-glow: rgba(255, 107, 44, 0.35);
+    --cyan: #4FD1FF;
+    --green: #22C55E;
+    --amber: #FBBF24;
+    --orange: #F97316;
+    --purple: #A78BFA;
+    --magenta: #F472B6;
+    --red: #F87171;
+}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: var(--bg-darker);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+}
+  code, .mono { font-family: 'JetBrains Mono', monospace; }
+.stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+.slide {
+    position: absolute;
+    width: 1200px;
+    height: 720px;
+    background: var(--bg-dark);
+    border-radius: 24px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5), 0 0 0 1px var(--border);
+    padding: 56px 64px;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 200ms ease, visibility 0s 200ms;
+    overflow: hidden;
+    transform: scale(var(--fit-scale, 1));
+    transform-origin: center;
+}
+.slide.active { opacity: 1; visibility: visible; transition: opacity 240ms ease; }
+  /* ── Cover slide ── */
+.slide.cover {
+    padding: 0;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(255,107,44,0.18), transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(79,209,255,0.10), transparent 50%),
+      var(--bg-dark);
+}
+.cover-inner { height: 100%; padding: 80px 96px; display: flex; flex-direction: column; justify-content: space-between; }
+.cover-tag {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 8px 14px; background: var(--accent-soft);
+    border: 1px solid var(--accent); border-radius: 999px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--accent); width: fit-content;
+}
+.cover-tag .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
+.cover-title { font-size: 72px; font-weight: 800; line-height: 1.05; letter-spacing: -0.025em; margin-top: 32px; }
+.cover-title .accent {
+    background: linear-gradient(135deg, var(--accent) 0%, #FFB37A 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.cover-subtitle { font-size: 24px; color: var(--text-secondary); font-weight: 400; max-width: 820px; margin-top: 24px; line-height: 1.4; }
+.cover-meta { display: flex; gap: 36px; align-items: flex-end; justify-content: space-between; color: var(--text-muted); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 500; }
+.cover-chips { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 36px; }
+.chip { padding: 10px 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 999px; font-size: 14px; color: var(--text-primary); font-weight: 500; }
+.chip strong { color: var(--accent); margin-right: 6px; }
+  /* ── Section header ── */
+.slide.section { background: radial-gradient(circle at 70% 50%, rgba(255,107,44,0.12), transparent 60%), var(--bg-dark); }
+.section-num { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--accent); letter-spacing: 0.18em; font-weight: 600; }
+.section-title { font-size: 64px; font-weight: 800; margin-top: 16px; line-height: 1.05; letter-spacing: -0.02em; }
+.section-blurb { font-size: 22px; color: var(--text-secondary); margin-top: 28px; max-width: 820px; line-height: 1.5; }
+  /* ── Content slide ── */
+.breadcrumb { font-size: 12px; color: var(--accent); font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 14px; }
+  h1.slide-title { font-size: 44px; font-weight: 700; line-height: 1.15; letter-spacing: -0.015em; margin-bottom: 12px; }
+  h1.slide-title .accent {
+    background: linear-gradient(135deg, var(--accent) 0%, #FFB37A 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.slide-lead { font-size: 18px; color: var(--text-secondary); line-height: 1.5; max-width: 1000px; margin-bottom: 28px; }
+.slide-body { font-size: 16px; line-height: 1.55; color: var(--text-primary); }
+.slide-body p + p { margin-top: 14px; }
+.slide-body strong { color: var(--text-primary); font-weight: 600; }
+.slide-body code { font-size: 14px; background: var(--bg-card); padding: 2px 8px; border-radius: 5px; border: 1px solid var(--border); color: var(--cyan); }
+.slide-body ul { padding-left: 24px; margin-top: 8px; }
+.slide-body li { margin-bottom: 8px; color: var(--text-secondary); }
+.slide-body li strong { color: var(--text-primary); }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+.card h3 { font-size: 17px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary); display: flex; align-items: center; gap: 10px; }
+.card h3 .icon-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
+.card p { font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+.card.muted { background: rgba(255,255,255,0.02); }
+  table.compare { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 16px; }
+  table.compare th, table.compare td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+  table.compare th { color: var(--text-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare td.code { font-family: 'JetBrains Mono', monospace; color: var(--cyan); font-size: 13px; }
+  table.compare td strong { color: var(--text-primary); }
+.pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.pill.green { background: rgba(34,197,94,0.15); color: var(--green); }
+.pill.amber { background: rgba(251,191,36,0.15); color: var(--amber); }
+.pill.cyan { background: rgba(79,209,255,0.15); color: var(--cyan); }
+.pill.purple { background: rgba(167,139,250,0.15); color: var(--purple); }
+.pill.orange { background: rgba(249,115,22,0.15); color: var(--orange); }
+.pill.red { background: rgba(248,113,113,0.15); color: var(--red); }
+  pre.snippet {
+    background: var(--bg-darker); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 20px; font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    color: var(--text-primary); line-height: 1.55; overflow-x: auto; margin-top: 12px;
+}
+  pre.snippet.sm { font-size: 11.5px; line-height: 1.5; padding: 14px 16px; }
+  pre.snippet .kw { color: var(--accent); }
+  pre.snippet .str { color: var(--green); }
+  pre.snippet .com { color: var(--text-muted); font-style: italic; }
+  pre.snippet .key { color: var(--cyan); }
+  pre.snippet .num { color: var(--amber); }
+  pre.snippet .type { color: var(--purple); }
+  /* ── SVG schema ── */
+.schema { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; display: flex; align-items: center; justify-content: center; }
+.schema svg { width: 100%; height: auto; max-height: 100%; }
+  text.lbl { fill: var(--text-primary); font-family: 'Inter', sans-serif; font-weight: 500; }
+  text.lbl-sm { fill: var(--text-secondary); font-family: 'Inter', sans-serif; font-size: 12px; }
+  text.mono-svg { font-family: 'JetBrains Mono', monospace; }
+  rect.box { fill: var(--bg-darker); stroke: var(--border); stroke-width: 1.5; }
+  rect.box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+  rect.box-cyan { fill: rgba(79,209,255,0.08); stroke: var(--cyan); stroke-width: 1.5; }
+  rect.box-purple { fill: rgba(167,139,250,0.08); stroke: var(--purple); stroke-width: 1.5; }
+  rect.box-green { fill: rgba(34,197,94,0.06); stroke: var(--green); stroke-width: 1.5; }
+  path.arrow, line.arrow { stroke: var(--text-muted); stroke-width: 1.5; fill: none; }
+  path.arrow-accent, line.arrow-accent { stroke: var(--accent); stroke-width: 2; fill: none; }
+  /* ── Nav controls ── */
+.nav-bar {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 12px;
+    background: rgba(19,24,37,0.95); backdrop-filter: blur(14px);
+    border: 1px solid var(--border); border-radius: 999px; padding: 10px 16px;
+    z-index: 100; box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+}
+.nav-btn { background: transparent; border: none; color: var(--text-secondary); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 120ms; }
+.nav-btn:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.nav-counter { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text-secondary); min-width: 60px; text-align: center; font-weight: 500; }
+.nav-counter .accent { color: var(--accent); }
+.toc-btn {
+    position: fixed; top: 24px; left: 24px; width: 44px; height: 44px;
+    background: rgba(19,24,37,0.95); backdrop-filter: blur(14px);
+    border: 1px solid var(--border); border-radius: 12px; color: var(--text-secondary);
+    cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 100; transition: all 120ms;
+}
+.toc-btn:hover { color: var(--text-primary); background: var(--bg-card-hover); }
+  /* ── TOC panel ── */
+.toc-panel {
+    position: fixed; top: 0; left: 0; width: 380px; height: 100%;
+    background: rgba(11,14,20,0.97); backdrop-filter: blur(20px);
+    border-right: 1px solid var(--border); transform: translateX(-100%);
+    transition: transform 280ms cubic-bezier(0.16,1,0.3,1); z-index: 200; display: flex; flex-direction: column;
+}
+.toc-panel.open { transform: translateX(0); }
+.toc-header { padding: 28px 28px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.toc-header h2 { font-size: 14px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); }
+.toc-list { flex: 1; overflow-y: auto; padding: 12px 0; }
+.toc-list::-webkit-scrollbar { width: 6px; }
+.toc-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.toc-section-label { padding: 18px 28px 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
+.toc-item { display: flex; align-items: center; gap: 14px; padding: 10px 28px; cursor: pointer; transition: background 120ms; font-size: 14px; color: var(--text-secondary); }
+.toc-item:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.toc-item.active { color: var(--accent); background: var(--accent-soft); border-left: 3px solid var(--accent); padding-left: 25px; }
+.toc-item .num { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); min-width: 22px; }
+.toc-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); opacity: 0; pointer-events: none; transition: opacity 240ms; z-index: 199; }
+.toc-overlay.open { opacity: 1; pointer-events: auto; }
+  /* ── Hint ── */
+.kbd-hint { position: fixed; top: 24px; right: 24px; color: var(--text-muted); font-size: 12px; z-index: 100; }
+  kbd { display: inline-block; background: var(--bg-card); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: 2px 7px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-secondary); margin: 0 2px; }
+  /* ── Final CTA ── */
+.slide.cta { text-align: center; background: radial-gradient(circle at 50% 60%, rgba(255,107,44,0.15), transparent 50%), var(--bg-dark); display: flex; flex-direction: column; justify-content: center; align-items: center; }
+.cta-title { font-size: 80px; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 24px; }
+.cta-title .accent { background: linear-gradient(135deg, var(--accent) 0%, #FFB37A 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.cta-links { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; max-width: 920px; margin-top: 24px; }
+.cta-link { padding: 14px 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; color: var(--text-primary); font-weight: 500; font-size: 15px; text-decoration: none; transition: all 160ms; }
+.cta-link:hover { background: var(--bg-card-hover); border-color: var(--accent); color: var(--accent); }
+  /* ── Executive summary cards ── */
+.psf-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px 22px; height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.psf-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--psf-color, var(--accent)); opacity: 0.6; }
+.psf-card .psf-label { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--psf-color, var(--accent)); margin-bottom: 14px; }
+.psf-card .psf-label .psf-num { font-family: 'JetBrains Mono', monospace; background: var(--psf-color-bg); color: var(--psf-color); width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
+.psf-card h3 { font-size: 22px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; letter-spacing: -0.01em; }
+.psf-card ul { list-style: none; padding: 0; margin: 0; flex: 1; }
+.psf-card li { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px dashed var(--border); font-size: 13.5px; line-height: 1.5; color: var(--text-secondary); }
+.psf-card li:last-child { border-bottom: none; }
+.psf-card li::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--psf-color); margin-top: 7px; flex-shrink: 0; }
+.psf-card li strong { color: var(--text-primary); font-weight: 600; }
+.psf-card.problem { --psf-color: #F87171; --psf-color-bg: rgba(248,113,113,0.12); }
+.psf-card.solution { --psf-color: var(--accent); --psf-color-bg: var(--accent-soft); }
+.psf-card.features { --psf-color: var(--cyan); --psf-color-bg: rgba(79,209,255,0.12); }
+  /* ── Feature grid ── */
+.feat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 18px; }
+.feat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 16px; }
+.feat .fnum { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); font-weight: 600; }
+.feat h4 { font-size: 15px; font-weight: 600; margin: 8px 0 6px; color: var(--text-primary); }
+.feat p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; }
+.principle { display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-bottom: 1px dashed var(--border); }
+.principle:last-child { border-bottom: none; }
+.principle .pn { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--accent); font-weight: 700; min-width: 28px; }
+.principle .pt { font-size: 14.5px; color: var(--text-secondary); line-height: 1.5; }
+.principle .pt strong { color: var(--text-primary); font-weight: 600; }
+</style>
+</head>
+<body>
+<button class="toc-btn" id="tocBtn" aria-label="Toggle table of contents">
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+    <line x1="3" y1="6" x2="17" y2="6"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="14" x2="17" y2="14"/>
+  </svg>
+</button>
+<div class="kbd-hint"><kbd>←</kbd> <kbd>→</kbd> navigate · <kbd>T</kbd> contents · <kbd>F</kbd> fullscreen</div>
+<div class="toc-overlay" id="tocOverlay"></div>
+<aside class="toc-panel" id="tocPanel" aria-label="Table of contents">
+  <div class="toc-header">
+    <h2>Contents</h2>
+    <button class="nav-btn" id="tocClose" aria-label="Close">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>
+    </button>
+  </div>
+  <div class="toc-list" id="tocList"></div>
+</aside>
+
+<div class="stage" id="stage">
+
+  <!-- 1. COVER -->
+  <section class="slide cover" data-section="Intro" data-title="Cover">
+    <div class="cover-inner">
+      <div>
+        <div class="cover-tag"><span class="dot"></span>Implementation Overview · Shipped + Roadmap</div>
+        <h1 class="cover-title">Background<br>Processing <span class="accent">Hub</span></h1>
+        <p class="cover-subtitle">The Hangfire hard dependency is gone. The Platform is passive and provider-agnostic — engine-agnostic contracts now live in <strong>VirtoCommerce.Platform.Core</strong>, with Hangfire and RabbitMQ engines shipped and a Google Cloud Tasks push sample proving the model.</p>
+        <div class="cover-chips">
+          <span class="chip"><strong>One</strong> provider port</span>
+          <span class="chip"><strong>2 engines</strong> shipped</span>
+          <span class="chip"><strong>Pull + Push</strong> proven</span>
+          <span class="chip"><strong>Conformance</strong> TestKit</span>
+        </div>
+      </div>
+      <div class="cover-meta">
+        <div>Virto Commerce Platform · Background Processing Module</div>
+        <div>Audience: Platform &amp; Module Engineers</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. EXECUTIVE SUMMARY -->
+  <section class="slide" data-section="Intro" data-title="Executive summary">
+    <div class="breadcrumb">Overview</div>
+    <h1 class="slide-title">Executive <span class="accent">summary</span></h1>
+    <p class="slide-lead">The whole story in one slide. Skip ahead if this is enough.</p>
+    <div class="grid-3" style="margin-top: 18px; height: 430px;">
+      <div class="psf-card problem">
+        <div class="psf-label"><span class="psf-num">!</span>Problem</div>
+        <h3>Hangfire is welded in</h3>
+        <ul>
+          <li>Hangfire types leaked into Platform + modules</li>
+          <li>Duplicate <code>IBackgroundJobExecutor</code> wrappers</li>
+          <li>Pull-only — no scale-to-zero, idle cost</li>
+          <li>Progress coupled to <code>PerformContext</code></li>
+          <li>No single operational view for admins</li>
+        </ul>
+      </div>
+      <div class="psf-card solution">
+        <div class="psf-label"><span class="psf-num">✓</span>Shipped</div>
+        <h3>One contract, any engine</h3>
+        <ul>
+          <li>Contracts live in <code>Platform.Core</code></li>
+          <li>Engines behind one <code>IJobEngine</code> port</li>
+          <li>Messages, not delegates — push-capable</li>
+          <li>Engine chosen by configuration</li>
+          <li>Platform is now a passive orchestrator</li>
+        </ul>
+      </div>
+      <div class="psf-card features">
+        <div class="psf-label"><span class="psf-num">★</span>Features</div>
+        <h3>What shipped</h3>
+        <ul>
+          <li>Fire-and-forget · recurring · map/reduce</li>
+          <li>Handler-explicit <code>Enqueue&lt;THandler&gt;</code></li>
+          <li>Live progress over SignalR</li>
+          <li>Hangfire + RabbitMQ · GCT push sample</li>
+          <li>Conformance TestKit · <code>Cron</code> setting type</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 01: THE PROBLEM -->
+  <section class="slide section" data-section="Problem" data-title="Section: The problem" data-toc-divider="true">
+    <div class="section-num">SECTION 01</div>
+    <h2 class="section-title">Why move<br>off Hangfire?</h2>
+    <p class="section-blurb">The problem is not Hangfire. The problem is that it is the only option and its API has leaked across the Platform and every module.</p>
+  </section>
+
+  <!-- 3. WHERE HANGFIRE LEAKS -->
+  <section class="slide" data-section="Problem" data-title="Where Hangfire leaks">
+    <div class="breadcrumb">Problem · Coupling</div>
+    <h1 class="slide-title">Hangfire has <span class="accent">leaked everywhere</span></h1>
+    <p class="slide-lead">It is not isolated in one place. The same patterns — enqueue, recurring, cancellation, context, concurrency, retry, progress — were each reinvented against Hangfire's surface. A breaking change ripples through all of them.</p>
+    <div class="grid-2" style="margin-top: 4px;">
+      <div class="card">
+        <h3><span class="icon-dot" style="background:var(--red)"></span>Platform &amp; modules bound to Hangfire</h3>
+        <ul style="padding-left:18px; margin-top:8px; font-size:13.5px; color:var(--text-secondary); line-height:1.6;">
+          <li><strong style="color:var(--text-primary);">Platform</strong> — <code>IRecurringJobService</code> → Hangfire <code>IRecurringJobManager</code></li>
+          <li><strong style="color:var(--text-primary);">Import</strong> — <code>BackgroundJob.Enqueue</code>, <code>PerformContext</code>, <code>IJobCancellationToken</code></li>
+          <li><strong style="color:var(--text-primary);">Bulk Actions</strong> — a <em>duplicate</em> <code>IBackgroundJobExecutor</code></li>
+          <li><strong style="color:var(--text-primary);">Subscription</strong> — <code>[DisableConcurrentExecution]</code></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="icon-dot" style="background:var(--amber)"></span>The seven patterns to abstract</h3>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+          <span class="pill amber">Enqueue</span>
+          <span class="pill amber">Recurring / cron</span>
+          <span class="pill amber">Cancellation token</span>
+          <span class="pill amber">Per-job context</span>
+          <span class="pill amber">Concurrency guard</span>
+          <span class="pill amber">Automatic retry</span>
+          <span class="pill amber">Progress push</span>
+        </div>
+        <p style="margin-top:16px; font-size:13.5px;">These map almost 1:1 to the features we need. Abstract them once, and the engine behind them becomes a choice — not a constraint.</p>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top: 22px;">
+      <p style="font-size:14.5px;"><strong style="color:var(--accent);">The scaling problem.</strong> Hangfire is a <strong>pull model</strong>: workers must run the same code base and poll shared storage. No scale-to-zero, idle workers still cost, and the unit of scale is "another full Platform instance." For bursty work like a full catalog reindex this is slow and expensive.</p>
+    </div>
+  </section>
+
+  <!-- SECTION 02: THE SOLUTION -->
+  <section class="slide section" data-section="Solution" data-title="Section: The solution" data-toc-divider="true">
+    <div class="section-num">SECTION 02</div>
+    <h2 class="section-title">A passive Platform,<br>pluggable engines</h2>
+    <p class="section-blurb">Introduce a small Core abstraction the Platform and all modules depend on. Engines live in separate packages behind one port, chosen by configuration.</p>
+  </section>
+
+  <!-- 4. THE ONE DECISION -->
+  <section class="slide" data-section="Solution" data-title="The load-bearing decision">
+    <div class="breadcrumb">Solution · First Principle</div>
+    <h1 class="slide-title">Messages, <span class="accent">not delegates</span></h1>
+    <p class="slide-lead">This is the single most important design decision. Providers fall into two camps, and the contract must serve both without favouring either.</p>
+    <div class="grid-2" style="margin-top: 4px;">
+      <div class="card" style="border-color: rgba(79,209,255,0.4);">
+        <h3><span class="icon-dot" style="background:var(--cyan)"></span>Pull / worker model</h3>
+        <p style="margin-bottom:10px;">Hangfire · Quartz · Temporal workers</p>
+        <p>Platform writes a job to shared storage. Worker instances poll and run the <strong style="color:var(--text-primary);">same .NET code</strong> in-process. Scale = more instances.</p>
+      </div>
+      <div class="card" style="border-color: rgba(255,107,44,0.4);">
+        <h3><span class="icon-dot" style="background:var(--accent)"></span>Push / dispatch model</h3>
+        <p style="margin-bottom:10px;">Cloud Run · ACA Jobs · Lambda</p>
+        <p>Platform pushes an event to an external runtime that scales to zero. The job <strong style="color:var(--text-primary);">calls back into the Platform REST API</strong> to do the work.</p>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top: 22px; border-color: var(--accent);">
+      <p style="font-size:15px;"><strong style="color:var(--accent);">The decision.</strong> The payload that crosses the boundary must be a <strong>serializable message</strong>, never an <code>Expression&lt;Func&lt;T,Task&gt;&gt;</code>. The pull adapter turns it back into a method call; the push adapter turns it into an HTTP dispatch. If Core leaks expressions, we have rebuilt the Hangfire coupling under a new name.</p>
+    </div>
+  </section>
+
+  <!-- 5. ARCHITECTURE PRINCIPLES -->
+  <section class="slide" data-section="Solution" data-title="Architecture principles">
+    <div class="breadcrumb">Solution · Principles</div>
+    <h1 class="slide-title">Eight <span class="accent">principles</span></h1>
+    <p class="slide-lead">Everything in the design follows from these. They are the lens for reviewing every adapter we add later.</p>
+    <div class="grid-2" style="margin-top: 4px; gap: 36px;">
+      <div>
+        <div class="principle"><span class="pn">01</span><span class="pt"><strong>Platform is passive.</strong> It enqueues and orchestrates; engines execute. It must run as nothing but a callback target.</span></div>
+        <div class="principle"><span class="pn">02</span><span class="pt"><strong>Depend on contracts, not engines.</strong> No module references <code>Hangfire.*</code> or any provider type.</span></div>
+        <div class="principle"><span class="pn">03</span><span class="pt"><strong>Messages, not delegates.</strong> Work crosses every boundary as a serialized envelope.</span></div>
+        <div class="principle"><span class="pn">04</span><span class="pt"><strong>One port, many adapters.</strong> Hexagonal — same pattern as cache, search, storage providers.</span></div>
+      </div>
+      <div>
+        <div class="principle"><span class="pn">05</span><span class="pt"><strong>Idempotency is a default.</strong> Push is at-least-once; dedup keys and idempotent handlers are built in.</span></div>
+        <div class="principle"><span class="pn">06</span><span class="pt"><strong>Observe once, everywhere.</strong> One OpenTelemetry model across every engine and boundary.</span></div>
+        <div class="principle"><span class="pn">07</span><span class="pt"><strong>Claim-check large data.</strong> Store the blob, pass a reference — imports already work on file URLs.</span></div>
+        <div class="principle"><span class="pn">08</span><span class="pt"><strong>Backward compatible first.</strong> Ship with Hangfire as the only engine, zero behaviour change, then add engines.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 03: ARCHITECTURE -->
+  <section class="slide section" data-section="Architecture" data-title="Section: Architecture" data-toc-divider="true">
+    <div class="section-num">SECTION 03</div>
+    <h2 class="section-title">The architecture<br>at a glance</h2>
+    <p class="section-blurb">Three layers. Modules depend only on contracts. The Hub owns serialization, progress, telemetry, and the callback API. Providers are swappable adapters.</p>
+  </section>
+
+  <!-- 6. HIGH-LEVEL ARCHITECTURE -->
+  <section class="slide" data-section="Architecture" data-title="High-level architecture">
+    <div class="breadcrumb">Architecture · Layers</div>
+    <h1 class="slide-title">Modules · Hub · <span class="accent">Providers</span></h1>
+    <p class="slide-lead">Each layer has one job. Modules enqueue through contracts; the Hub serializes and dispatches; the chosen provider executes — in-process or via an external runtime.</p>
+    <div class="schema" style="height: 470px;">
+      <svg viewBox="0 0 1080 470" xmlns="http://www.w3.org/2000/svg">
+        <!-- Modules layer -->
+        <rect class="box-cyan" x="40" y="16" width="1000" height="74" rx="14"/>
+        <text class="lbl" x="64" y="46" font-size="17" font-weight="700">Calling modules</text>
+        <text class="lbl-sm" x="64" y="70">Import · Bulk Actions · Indexing · Subscription · custom — depend ONLY on IBackgroundJobClient / IRecurringJobManager</text>
+        <path class="arrow-accent" d="M 540 90 L 540 112" marker-end="url(#arr)"/>
+        <text class="lbl-sm" x="556" y="106">Core abstraction</text>
+        <!-- Hub layer -->
+        <rect class="box-accent" x="40" y="116" width="1000" height="150" rx="14"/>
+        <text class="lbl" x="64" y="144" font-size="17" font-weight="700">Virto Background Processing Hub (Core)</text>
+        <g transform="translate(64,158)"><rect class="box" x="0" y="0" width="220" height="42" rx="6"/><text class="lbl mono-svg" x="14" y="20" font-size="11">Job contracts</text><text class="lbl-sm" x="14" y="35" font-size="10">enqueue · schedule · cancel</text></g>
+        <g transform="translate(298,158)"><rect class="box" x="0" y="0" width="220" height="42" rx="6"/><text class="lbl mono-svg" x="14" y="20" font-size="11">Serializer + registry</text><text class="lbl-sm" x="14" y="35" font-size="10">JobType → handler</text></g>
+        <g transform="translate(532,158)"><rect class="box" x="0" y="0" width="220" height="42" rx="6"/><text class="lbl mono-svg" x="14" y="20" font-size="11">Progress + telemetry</text><text class="lbl-sm" x="14" y="35" font-size="10">SignalR · OpenTelemetry</text></g>
+        <g transform="translate(766,158)"><rect class="box" x="0" y="0" width="220" height="42" rx="6"/><text class="lbl mono-svg" x="14" y="20" font-size="11">Event→job binder</text><text class="lbl-sm" x="14" y="35" font-size="10">in-process bus bridge</text></g>
+        <g transform="translate(298,212)"><rect class="box" x="0" y="0" width="220" height="42" rx="6"/><text class="lbl mono-svg" x="14" y="20" font-size="11">Callback REST API</text><text class="lbl-sm" x="14" y="35" font-size="10">for push providers</text></g>
+        <g transform="translate(532,212)"><rect class="box" x="0" y="0" width="220" height="42" rx="6"/><text class="lbl mono-svg" x="14" y="20" font-size="11">IJobDispatcher</text><text class="lbl-sm" x="14" y="35" font-size="10">shared execution path</text></g>
+        <path class="arrow-accent" d="M 540 266 L 540 288" marker-end="url(#arr)"/>
+        <text class="lbl-sm" x="556" y="282">IJobEngine port — one contract, swappable adapters</text>
+        <!-- Providers layer -->
+        <g transform="translate(40,300)"><rect class="box-green" x="0" y="0" width="240" height="150" rx="14"/><text class="lbl" x="20" y="30" font-size="15" font-weight="700">Hangfire</text><text class="lbl-sm" x="20" y="54">In-process pull</text><text class="lbl-sm" x="20" y="74">Shared SQL / Redis</text><text class="lbl-sm" x="20" y="94">Native recurring</text><text class="lbl-sm" x="20" y="120" fill="var(--green)">Shipped · default</text></g>
+        <g transform="translate(294,300)"><rect class="box-green" x="0" y="0" width="240" height="150" rx="14"/><text class="lbl" x="20" y="30" font-size="15" font-weight="700">RabbitMQ</text><text class="lbl-sm" x="20" y="54">In-box broker</text><text class="lbl-sm" x="20" y="74">Durable · DLQ · retry</text><text class="lbl-sm" x="20" y="94">Pull now · push via KEDA</text><text class="lbl-sm" x="20" y="120" fill="var(--green)">Shipped</text></g>
+        <g transform="translate(548,300)"><rect class="box" x="0" y="0" width="240" height="150" rx="14" stroke="var(--accent)" fill="var(--accent-soft)"/><text class="lbl" x="20" y="30" font-size="15" font-weight="700">Google Cloud Tasks</text><text class="lbl-sm" x="20" y="54">Push → callback</text><text class="lbl-sm" x="20" y="74">OIDC-signed dispatch</text><text class="lbl-sm" x="20" y="94">Scale to zero</text><text class="lbl-sm" x="20" y="120" fill="var(--accent)">Push sample</text></g>
+        <g transform="translate(802,300)"><rect class="box" x="0" y="0" width="238" height="150" rx="14" stroke="var(--text-muted)"/><text class="lbl" x="20" y="30" font-size="15" font-weight="700">Cloud Run · ACA · Temporal</text><text class="lbl-sm" x="20" y="54">Push / durable workflows</text><text class="lbl-sm" x="20" y="74">Service Bus · Pub/Sub</text><text class="lbl-sm" x="20" y="94">Scale-to-zero · replay</text><text class="lbl-sm" x="20" y="120" fill="var(--text-muted)">Roadmap</text></g>
+        <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker></defs>
+      </svg>
+    </div>
+  </section>
+
+  <!-- 7. DATA FLOW: PULL VS PUSH -->
+  <section class="slide" data-section="Architecture" data-title="EnqueueAsync data flow">
+    <div class="breadcrumb">Architecture · Data Flow</div>
+    <h1 class="slide-title">One call, <span class="accent">two paths</span></h1>
+    <p class="slide-lead">The enqueue call is identical at the call site. It diverges only inside the provider adapter — and both paths converge on SignalR for admin progress.</p>
+    <div class="schema" style="height: 460px;">
+      <svg viewBox="0 0 1080 460" xmlns="http://www.w3.org/2000/svg">
+        <!-- top: module + hub -->
+        <rect class="box-cyan" x="400" y="14" width="280" height="44" rx="10"/><text class="lbl" x="540" y="41" font-size="14" text-anchor="middle" font-weight="600">Module · Enqueue&lt;THandler&gt;(payload)</text>
+        <line class="arrow-accent" x1="540" y1="58" x2="540" y2="78" marker-end="url(#a2)"/>
+        <rect class="box-accent" x="360" y="80" width="360" height="48" rx="10"/><text class="lbl" x="540" y="100" font-size="13" text-anchor="middle" font-weight="600">Hub: validate · serialize · set dedup key</text><text class="lbl-sm" x="540" y="118" text-anchor="middle" font-size="11">IJobEngine.Enqueue(envelope)</text>
+        <line class="arrow-accent" x1="540" y1="128" x2="540" y2="148" marker-end="url(#a2)"/>
+        <rect class="box-purple" x="400" y="150" width="280" height="40" rx="10"/><text class="lbl" x="540" y="174" font-size="13" text-anchor="middle" font-weight="600">Provider adapter (port)</text>
+        <!-- branch -->
+        <line class="arrow-accent" x1="470" y1="190" x2="280" y2="226" marker-end="url(#a2)"/><text class="lbl-sm" x="320" y="210" font-size="11">pull</text>
+        <line class="arrow-accent" x1="610" y1="190" x2="800" y2="226" marker-end="url(#a2)"/><text class="lbl-sm" x="760" y="210" font-size="11">push</text>
+        <!-- pull column -->
+        <rect class="box" x="40" y="228" width="420" height="40" rx="8" stroke="var(--cyan)"/><text class="lbl-sm" x="60" y="252" font-size="12">Hangfire writes envelope to shared DB · worker polls</text>
+        <line class="arrow" x1="250" y1="268" x2="250" y2="286" marker-end="url(#a3)"/>
+        <rect class="box" x="40" y="288" width="420" height="40" rx="8" stroke="var(--cyan)"/><text class="lbl-sm" x="60" y="312" font-size="12">Deserialize → resolve IBackgroundJob from DI</text>
+        <line class="arrow" x1="250" y1="328" x2="250" y2="346" marker-end="url(#a3)"/>
+        <rect class="box-green" x="40" y="348" width="420" height="40" rx="8"/><text class="lbl-sm" x="60" y="372" font-size="12" fill="var(--green)">ExecuteAsync runs in-process · reports IJobProgress</text>
+        <!-- push column -->
+        <rect class="box" x="620" y="228" width="420" height="40" rx="8" stroke="var(--accent)"/><text class="lbl-sm" x="640" y="252" font-size="12">Push event / HTTP dispatch (Pub/Sub · Service Bus)</text>
+        <line class="arrow" x1="830" y1="268" x2="830" y2="286" marker-end="url(#a3)"/>
+        <rect class="box" x="620" y="288" width="420" height="40" rx="8" stroke="var(--accent)"/><text class="lbl-sm" x="640" y="312" font-size="12">External job spins up (Cloud Run / ACA) · scale to zero</text>
+        <line class="arrow" x1="830" y1="328" x2="830" y2="346" marker-end="url(#a3)"/>
+        <rect class="box-green" x="620" y="348" width="420" height="40" rx="8"/><text class="lbl-sm" x="640" y="372" font-size="12" fill="var(--green)">Calls back Platform REST API · runs in-process · posts progress</text>
+        <!-- converge -->
+        <line class="arrow-accent" x1="250" y1="388" x2="490" y2="420" marker-end="url(#a2)"/>
+        <line class="arrow-accent" x1="830" y1="388" x2="590" y2="420" marker-end="url(#a2)"/>
+        <rect class="box-accent" x="390" y="420" width="300" height="34" rx="10"/><text class="lbl" x="540" y="442" font-size="13" text-anchor="middle" font-weight="600">Progress to admin via SignalR</text>
+        <defs>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker>
+          <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)"/></marker>
+        </defs>
+      </svg>
+    </div>
+  </section>
+
+  <!-- 8. THE PUSH ROUND-TRIP -->
+  <section class="slide" data-section="Architecture" data-title="The push round-trip">
+    <div class="breadcrumb">Architecture · Push Model</div>
+    <h1 class="slide-title">The external job holds <span class="accent">no business logic</span></h1>
+    <p class="slide-lead">In the push model the container is a generic, stable trigger. It relays the job to the Platform callback endpoint, where the real handler runs in-process. This is exactly why a fresh instance can be spun up purely to serve callbacks.</p>
+    <div class="schema" style="height: 300px;">
+      <svg viewBox="0 0 1080 280" xmlns="http://www.w3.org/2000/svg">
+        <g><rect class="box-accent" x="20" y="60" width="220" height="140" rx="14"/><text class="lbl" x="40" y="92" font-size="13" font-weight="700" fill="var(--accent)">1 · PLATFORM</text><text class="lbl" x="40" y="118" font-size="13" font-weight="600">Passive</text><text class="lbl-sm" x="40" y="142">Enqueue envelope to</text><text class="lbl-sm" x="40" y="160">queue / topic</text><text class="lbl-sm" x="40" y="184" fill="var(--text-muted)">+ callback URL, identity</text></g>
+        <line class="arrow-accent" x1="242" y1="130" x2="288" y2="130" marker-end="url(#aL)"/>
+        <g><rect class="box-cyan" x="290" y="60" width="220" height="140" rx="14"/><text class="lbl" x="310" y="92" font-size="13" font-weight="700" fill="var(--cyan)">2 · RUNTIME</text><text class="lbl" x="310" y="118" font-size="13" font-weight="600">Scales from zero</text><text class="lbl-sm" x="310" y="142">KEDA / Eventarc starts</text><text class="lbl-sm" x="310" y="160">a container on demand</text><text class="lbl-sm" x="310" y="184" fill="var(--text-muted)">Cloud Run · ACA Jobs</text></g>
+        <line class="arrow-accent" x1="512" y1="130" x2="558" y2="130" marker-end="url(#aL)"/>
+        <g><rect class="box-purple" x="560" y="60" width="220" height="140" rx="14"/><text class="lbl" x="580" y="92" font-size="13" font-weight="700" fill="var(--purple)">3 · CONTAINER</text><text class="lbl" x="580" y="118" font-size="13" font-weight="600">Generic relay</text><text class="lbl-sm" x="580" y="142">Zero business logic</text><text class="lbl-sm" x="580" y="160">POSTs job back to</text><text class="lbl-sm" x="580" y="184" fill="var(--text-muted)">the callback API</text></g>
+        <line class="arrow-accent" x1="782" y1="130" x2="828" y2="130" marker-end="url(#aL)"/>
+        <g><rect class="box-green" x="830" y="60" width="230" height="140" rx="14"/><text class="lbl" x="850" y="92" font-size="13" font-weight="700" fill="var(--green)">4 · PLATFORM</text><text class="lbl" x="850" y="118" font-size="13" font-weight="600">Runs the work</text><text class="lbl-sm" x="850" y="142">IJobDispatcher runs the</text><text class="lbl-sm" x="850" y="160">real handler in-process</text><text class="lbl-sm" x="850" y="184" fill="var(--green)">Idempotency enforced</text></g>
+        <path class="arrow" d="M 945 200 C 945 245, 130 245, 130 205" marker-end="url(#aL2)" stroke-dasharray="4 3"/>
+        <text class="lbl-sm" x="540" y="262" text-anchor="middle" fill="var(--text-muted)">5xx → provider retries · progress streamed back over SignalR</text>
+        <defs>
+          <marker id="aL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker>
+          <marker id="aL2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <div class="card muted" style="margin-top: 18px;">
+      <p style="font-size:14px;"><strong style="color:var(--accent);">Why this matters.</strong> The container image never changes when business jobs change — the same image serves every job type. Workers are separate from the web tier, so a bad job deploy doesn't recycle the storefront, and load scales independently.</p>
+    </div>
+  </section>
+
+  <!-- SECTION 04: PROVIDERS -->
+  <section class="slide section" data-section="Providers" data-title="Section: Providers" data-toc-divider="true">
+    <div class="section-num">SECTION 04</div>
+    <h2 class="section-title">Choosing<br>an engine</h2>
+    <p class="section-blurb">Six candidates, two camps. Ship Hangfire first, prove the abstraction with one push engine, keep Temporal optional.</p>
+  </section>
+
+  <!-- 9. PROVIDER COMPARISON -->
+  <section class="slide" data-section="Providers" data-title="Provider comparison">
+    <div class="breadcrumb">Providers · Comparison</div>
+    <h1 class="slide-title">The engine <span class="accent">decision map</span></h1>
+    <p class="slide-lead">Match the need to the engine. The provider-agnostic design means switching later is a configuration change, not a rewrite.</p>
+    <table class="compare">
+      <thead><tr><th>Need</th><th>Best fit</th><th>Why</th><th>Watch out for</th></tr></thead>
+      <tbody>
+        <tr><td>In-process, simple, scale by instance</td><td><strong>Hangfire</strong> <span class="pill green">default</span></td><td>Already shipped; jobs port with little change</td><td>No scale-to-zero; shared code base</td></tr>
+        <tr><td>Scale-to-zero, bursty batch</td><td><strong>Cloud Run / ACA Jobs</strong> <span class="pill orange">push</span></td><td>Pay-per-use; native fan-out; callback model</td><td>You own idempotency + callback API</td></tr>
+        <tr><td>In-box broker, durable queues, both models</td><td><strong>RabbitMQ</strong> <span class="pill green">default broker</span></td><td>Ships in Docker; durable, DLX, delayed plugin; pull or push</td><td>No native cron; scale-to-zero needs KEDA on K8s</td></tr>
+        <tr><td>Serverless event handlers</td><td><strong>Azure Functions</strong> (isolated)</td><td>Mature trigger bindings; cheap bursts</td><td>In-process model retires ~late 2026</td></tr>
+        <tr><td>Long, durable, multi-step workflows</td><td><strong>Temporal / Durable Fns</strong> <span class="pill purple">optional</span></td><td>Checkpoint + replay; strongest map/reduce</td><td>Operationally heavy; not the default</td></tr>
+        <tr><td>Cron-heavy, first-class concurrency</td><td><strong>Quartz.NET</strong></td><td>Best cron semantics; clustering</td><td>No built-in job-body storage</td></tr>
+        <tr><td>Async messaging behind event→job</td><td><strong>MassTransit / Dapr</strong></td><td>Typed messaging, sagas, broker-agnostic</td><td>Messaging only; broker / sidecar overhead</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 10. DEFAULT PUSH STACK -->
+  <section class="slide" data-section="Providers" data-title="Default in-the-box push stack">
+    <div class="breadcrumb">Providers · In-the-box Default</div>
+    <h1 class="slide-title">What ships in <span class="accent">Docker</span> by default</h1>
+    <p class="slide-lead">The question splits into two roles: the broker (what lives in the container) and the scaler (what gives scale-to-zero). Cloud Run / ACA fuse both — which is why they can't be the in-box default. They live outside Docker.</p>
+    <div class="grid-3" style="margin-top:4px;">
+      <div class="card">
+        <h3><span class="icon-dot" style="background:var(--accent)"></span>Broker · RabbitMQ</h3>
+        <p>Native ACK/NACK, retry, dead-letter queues. Durability that Redis pub/sub can't match for jobs. First-class Docker image; AMQP is a stable contract for a .NET worker.</p>
+      </div>
+      <div class="card">
+        <h3><span class="icon-dot" style="background:var(--cyan)"></span>Worker · MassTransit</h3>
+        <p>A .NET consumer container drains the queue and calls the dispatcher. Same code and broker across dev and prod — only the scaler wrapper changes.</p>
+      </div>
+      <div class="card">
+        <h3><span class="icon-dot" style="background:var(--purple)"></span>Scaler · KEDA</h3>
+        <p>Scale-from-zero on RabbitMQ queue length — <strong>on Kubernetes only</strong>. KEDA is a K8s operator, not a Compose component.</p>
+      </div>
+    </div>
+    <div class="grid-2" style="margin-top:18px;">
+      <div class="card muted">
+        <h3 style="font-size:15px;"><span class="icon-dot" style="background:var(--amber)"></span>Compose tier (dev / small prod)</h3>
+        <p style="font-size:13.5px;">RabbitMQ + N fixed worker replicas. No scale-to-zero — works out of the box, no Kubernetes.</p>
+      </div>
+      <div class="card muted">
+        <h3 style="font-size:15px;"><span class="icon-dot" style="background:var(--green)"></span>Kubernetes tier (the scaling story)</h3>
+        <p style="font-size:13.5px;">Same RabbitMQ + same image + KEDA ScaledObject → true scale-from-zero. Cloud brokers (Service Bus, Pub/Sub) swap in by config.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10b. RABBITMQ PROPOSAL -->
+  <section class="slide" data-section="Providers" data-title="RabbitMQ proposal">
+    <div class="breadcrumb">Providers · The Default Broker</div>
+    <h1 class="slide-title">Why <span class="accent">RabbitMQ</span> is the proposal</h1>
+    <p class="slide-lead">RabbitMQ sits between the two models: it is the broker that ships in the Docker image, and it can run pull (a hosted consumer drains it in-process) or push (KEDA spins up workers that call back). One broker, both deployment stories.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div>
+        <div class="card">
+          <h3><span class="icon-dot" style="background:var(--accent)"></span>What makes it the right default</h3>
+          <ul style="padding-left:18px; margin-top:8px; font-size:13.5px; color:var(--text-secondary); line-height:1.6;">
+            <li><strong style="color:var(--text-primary);">Durable queues + persistent messages</strong> — jobs survive a broker restart. The property Redis pub/sub can't give.</li>
+            <li><strong style="color:var(--text-primary);">Per-message ACK / NACK</strong> — at-least-once with explicit redelivery control.</li>
+            <li><strong style="color:var(--text-primary);">Dead-letter exchange</strong> — poison messages don't block the queue; they stay inspectable.</li>
+            <li><strong style="color:var(--text-primary);">Delayed-message plugin</strong> — native delayed jobs via <code>x-delay</code>.</li>
+            <li><strong style="color:var(--text-primary);">First-class Docker image</strong> — AMQP is a stable contract for a .NET worker.</li>
+          </ul>
+        </div>
+      </div>
+      <div>
+        <div class="schema" style="height:248px; padding:14px;">
+          <svg viewBox="0 0 520 240" xmlns="http://www.w3.org/2000/svg">
+            <rect class="box-accent" x="14" y="96" width="120" height="48" rx="10"/><text class="lbl" x="74" y="116" font-size="12" text-anchor="middle" font-weight="600">Enqueue</text><text class="lbl-sm" x="74" y="132" font-size="10" text-anchor="middle">publish</text>
+            <line class="arrow-accent" x1="134" y1="120" x2="168" y2="120" marker-end="url(#rq)"/>
+            <rect class="box" x="170" y="80" width="150" height="80" rx="10" stroke="var(--accent)"/><text class="lbl" x="245" y="106" font-size="12" text-anchor="middle" font-weight="600">RabbitMQ</text><text class="lbl-sm" x="245" y="124" font-size="10" text-anchor="middle">durable queue</text><text class="lbl-sm" x="245" y="140" font-size="10" text-anchor="middle" fill="var(--text-muted)">+ DLX · x-delay</text>
+            <line class="arrow-accent" x1="320" y1="104" x2="364" y2="74" marker-end="url(#rq)"/>
+            <line class="arrow-accent" x1="320" y1="136" x2="364" y2="166" marker-end="url(#rq)"/>
+            <rect class="box-cyan" x="366" y="44" width="140" height="54" rx="10"/><text class="lbl" x="436" y="66" font-size="11" text-anchor="middle" font-weight="600">Pull: consumer</text><text class="lbl-sm" x="436" y="82" font-size="9.5" text-anchor="middle">in-process · Compose</text>
+            <rect class="box-purple" x="366" y="142" width="140" height="54" rx="10"/><text class="lbl" x="436" y="164" font-size="11" text-anchor="middle" font-weight="600">Push: KEDA</text><text class="lbl-sm" x="436" y="180" font-size="9.5" text-anchor="middle">scale-from-zero · K8s</text>
+            <defs><marker id="rq" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker></defs>
+          </svg>
+        </div>
+        <div class="card muted" style="margin-top:14px;">
+          <p style="font-size:13px;"><strong style="color:var(--accent);">Pre-reqs:</strong> management plugin enabled (health + KEDA read queue depth) and <code>rabbitmq_delayed_message_exchange</code> for delays. Both ship as flags on the Docker image.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 04b: CLOUD & OPS -->
+  <section class="slide section" data-section="Cloud &amp; Ops" data-title="Section: Cloud &amp; Operations" data-toc-divider="true">
+    <div class="section-num">SECTION 04 · CLOUD</div>
+    <h2 class="section-title">Virto Cloud:<br>multi-tenant &amp; observable</h2>
+    <p class="section-blurb">How RabbitMQ + KEDA land in Virto Cloud for many clients at once — and what replaces the Hangfire dashboard for monitoring it.</p>
+  </section>
+
+  <!-- MULTI-TENANT TOPOLOGY -->
+  <section class="slide" data-section="Cloud &amp; Ops" data-title="Multi-tenant RabbitMQ + KEDA">
+    <div class="breadcrumb">Cloud &amp; Ops · Multi-Tenancy</div>
+    <h1 class="slide-title">One cluster, <span class="accent">isolated per tenant</span></h1>
+    <p class="slide-lead">A shared RabbitMQ cluster partitions tenants by <strong>vhost</strong> — each client gets its own queues, users, and permissions, fully isolated. KEDA watches each tenant's queue depth and scales that tenant's worker deployment independently, so one client's reindex never starves another's order processing.</p>
+    <div class="schema" style="height:320px;">
+      <svg viewBox="0 0 1080 300" xmlns="http://www.w3.org/2000/svg">
+        <!-- RabbitMQ cluster with vhosts -->
+        <rect class="box-accent" x="30" y="40" width="300" height="220" rx="14"/>
+        <text class="lbl" x="50" y="68" font-size="14" font-weight="700">RabbitMQ cluster (shared)</text>
+        <text class="lbl-sm" x="50" y="86" font-size="10">RabbitMQ Cluster Operator on K8s</text>
+        <rect class="box" x="50" y="100" width="260" height="42" rx="8" stroke="var(--cyan)"/><text class="lbl mono-svg" x="64" y="120" font-size="11" fill="var(--cyan)">vhost: /tenant-acme</text><text class="lbl-sm" x="64" y="135" font-size="9">queues · user · perms</text>
+        <rect class="box" x="50" y="150" width="260" height="42" rx="8" stroke="var(--purple)"/><text class="lbl mono-svg" x="64" y="170" font-size="11" fill="var(--purple)">vhost: /tenant-globex</text><text class="lbl-sm" x="64" y="185" font-size="9">queues · user · perms</text>
+        <rect class="box" x="50" y="200" width="260" height="42" rx="8" stroke="var(--green)"/><text class="lbl mono-svg" x="64" y="220" font-size="11" fill="var(--green)">vhost: /tenant-initech</text><text class="lbl-sm" x="64" y="235" font-size="9">queues · user · perms</text>
+        <!-- KEDA -->
+        <rect class="box-cyan" x="396" y="110" width="150" height="80" rx="12"/><text class="lbl" x="471" y="142" font-size="13" text-anchor="middle" font-weight="600">KEDA</text><text class="lbl-sm" x="471" y="160" font-size="9.5" text-anchor="middle">one ScaledObject</text><text class="lbl-sm" x="471" y="174" font-size="9.5" text-anchor="middle">per tenant vhost</text>
+        <line class="arrow" x1="330" y1="121" x2="394" y2="135" marker-end="url(#mt3)"/>
+        <line class="arrow" x1="330" y1="171" x2="394" y2="150" marker-end="url(#mt3)"/>
+        <line class="arrow" x1="330" y1="221" x2="394" y2="165" marker-end="url(#mt3)"/>
+        <text class="lbl-sm" x="362" y="108" font-size="8.5" text-anchor="middle" fill="var(--text-muted)">queue depth</text>
+        <!-- worker deployments per tenant -->
+        <line class="arrow-accent" x1="546" y1="135" x2="592" y2="80" marker-end="url(#mt2)"/>
+        <line class="arrow-accent" x1="546" y1="150" x2="592" y2="150" marker-end="url(#mt2)"/>
+        <line class="arrow-accent" x1="546" y1="165" x2="592" y2="220" marker-end="url(#mt2)"/>
+        <rect class="box" x="594" y="54" width="220" height="52" rx="10" stroke="var(--cyan)"/><text class="lbl-sm" x="704" y="76" text-anchor="middle" font-size="10.5">acme workers · 0→N pods</text><text class="lbl-sm" x="704" y="92" text-anchor="middle" font-size="9" fill="var(--text-muted)">namespace / resource quota</text>
+        <rect class="box" x="594" y="124" width="220" height="52" rx="10" stroke="var(--purple)"/><text class="lbl-sm" x="704" y="146" text-anchor="middle" font-size="10.5">globex workers · 0→N pods</text><text class="lbl-sm" x="704" y="162" text-anchor="middle" font-size="9" fill="var(--text-muted)">scales independently</text>
+        <rect class="box" x="594" y="194" width="220" height="52" rx="10" stroke="var(--green)"/><text class="lbl-sm" x="704" y="216" text-anchor="middle" font-size="10.5">initech workers · 0→N pods</text><text class="lbl-sm" x="704" y="232" text-anchor="middle" font-size="9" fill="var(--text-muted)">isolated blast radius</text>
+        <!-- platform callback -->
+        <line class="arrow" x1="814" y1="150" x2="860" y2="150" marker-end="url(#mt3)"/>
+        <rect class="box-green" x="862" y="120" width="190" height="60" rx="12"/><text class="lbl" x="957" y="144" font-size="11" text-anchor="middle" font-weight="600">Virto Platform</text><text class="lbl-sm" x="957" y="162" font-size="9" text-anchor="middle">tenant-scoped callback</text>
+        <defs>
+          <marker id="mt2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker>
+          <marker id="mt3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <div class="grid-3" style="margin-top:14px;">
+      <div class="card"><h3 style="font-size:14px;"><span class="icon-dot" style="background:var(--accent)"></span>Isolation by vhost</h3><p style="font-size:12.5px;">Per-tenant vhost + user + permissions. A noisy tenant can't read or flood another's queues.</p></div>
+      <div class="card"><h3 style="font-size:14px;"><span class="icon-dot" style="background:var(--cyan)"></span>Independent scaling</h3><p style="font-size:12.5px;">One <code>ScaledObject</code> per tenant; each worker pool scales 0→N on its own queue depth + resource quota.</p></div>
+      <div class="card"><h3 style="font-size:14px;"><span class="icon-dot" style="background:var(--green)"></span>Fair use &amp; cost</h3><p style="font-size:12.5px;">Per-tenant max replicas cap spend and stop one client monopolizing the cluster. GitOps-managed via Flux.</p></div>
+    </div>
+  </section>
+
+  <!-- KEDA & IJOBENGINE -->
+  <section class="slide" data-section="Cloud &amp; Ops" data-title="How KEDA changes IJobEngine">
+    <div class="breadcrumb">Cloud &amp; Ops · KEDA Impact</div>
+    <h1 class="slide-title">KEDA barely touches <span class="accent">IJobEngine</span></h1>
+    <p class="slide-lead">The surprising part: KEDA is a <strong>scaler, not a transport</strong> — it never sits in the message path. <code>Enqueue</code> is byte-for-byte identical with or without it. What KEDA changes is the <em>consumer's lifecycle</em> and the <em>deployment shape</em> — and it lives entirely in YAML, never in the engine.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div>
+        <table class="compare" style="margin-top:0;">
+          <thead><tr><th>Concern</th><th>Without</th><th>With KEDA</th></tr></thead>
+          <tbody>
+            <tr><td>Enqueue (publish)</td><td>—</td><td><span class="pill green">unchanged</span></td></tr>
+            <tr><td>Consumer loop</td><td>long-lived</td><td>SIGTERM-drain or batch-bounded</td></tr>
+            <tr><td>Scaling</td><td>N fixed workers</td><td>YAML decides 0→N</td></tr>
+            <tr><td>GetHealthAsync</td><td>process-based</td><td>queue depth via mgmt API</td></tr>
+            <tr><td>PrefetchCount</td><td>throughput knob</td><td>also a scaling-signal knob</td></tr>
+            <tr><td>KEDA in C#?</td><td>—</td><td><span class="pill cyan">never · pure YAML</span></td></tr>
+          </tbody>
+        </table>
+        <div class="card muted" style="margin-top:14px;">
+          <p style="font-size:12.5px;"><strong style="color:var(--accent);">The one real code change:</strong> harden shutdown. Under scale-to-zero the consumer is killed routinely, not just on deploys — a SIGTERM mid-job must NACK-and-requeue, never drop the message.</p>
+        </div>
+      </div>
+      <div>
+        <pre class="snippet sm"><span class="com"># Scaling policy = YAML, outside the engine.</span>
+<span class="com"># Version-controlled in the GitOps repo;</span>
+<span class="com"># change it without recompiling the app.</span>
+<span class="key">apiVersion</span>: keda.sh/v1alpha1
+<span class="key">kind</span>: <span class="type">ScaledObject</span>
+<span class="key">metadata</span>:
+  <span class="key">name</span>: indexing-worker-scaler
+<span class="key">spec</span>:
+  <span class="key">scaleTargetRef</span>:
+    <span class="key">name</span>: vc-background-worker   <span class="com"># the consumer</span>
+  <span class="key">minReplicaCount</span>: <span class="num">0</span>            <span class="com"># scale to zero</span>
+  <span class="key">maxReplicaCount</span>: <span class="num">50</span>
+  <span class="key">triggers</span>:
+    - <span class="key">type</span>: <span class="str">rabbitmq</span>
+      <span class="key">metadata</span>:
+        <span class="key">queueName</span>: indexing
+        <span class="key">mode</span>: QueueLength
+        <span class="key">value</span>: <span class="str">"10"</span>          <span class="com"># ~1 pod / 10 msgs</span>
+      <span class="key">authenticationRef</span>:
+        <span class="key">name</span>: rabbitmq-auth</pre>
+        <p style="font-size:12px; color:var(--text-muted); margin-top:10px; line-height:1.5;">Two flavours: <strong style="color:var(--text-secondary);">ScaledObject</strong> scales a long-running Deployment (consumer needs graceful drain); <strong style="color:var(--text-secondary);">ScaledJob</strong> runs a K8s Job per batch (consumer becomes "process N, then exit").</p>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top:14px;">
+      <p style="font-size:13px;"><strong style="color:var(--accent);">Why this matters.</strong> The engine stays a clean AMQP publisher; KEDA is a deployment concern layered on top. That separation is exactly what lets the <em>same</em> <code>RabbitMqJobEngine</code> run unmodified in Compose (fixed workers) and Kubernetes (KEDA-scaled 0→N) — only the consumer's shutdown handling and a YAML file differ.</p>
+    </div>
+  </section>
+
+  <!-- OBSERVABILITY STACK -->
+  <section class="slide" data-section="Cloud &amp; Ops" data-title="Monitoring · the Hangfire dashboard replacement">
+    <div class="breadcrumb">Cloud &amp; Ops · Observability</div>
+    <h1 class="slide-title">What replaces the <span class="accent">Hangfire dashboard</span></h1>
+    <p class="slide-lead">The Hangfire dashboard was one in-process UI. A provider-agnostic, multi-tenant system needs layered observability — a global ops view for the platform team and an application view inside Virto Commerce for tenant admins. Both read from the same engine-independent telemetry.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div>
+        <div class="card">
+          <h3><span class="icon-dot" style="background:var(--accent)"></span>Global level — platform / SRE</h3>
+          <ul style="padding-left:18px; margin-top:8px; font-size:13px; color:var(--text-secondary); line-height:1.55;">
+            <li><strong style="color:var(--text-primary);">Prometheus</strong> — scrapes the built-in <code>rabbitmq_prometheus</code> plugin (auto-enabled by the Cluster Operator) + KEDA + worker metrics.</li>
+            <li><strong style="color:var(--text-primary);">Grafana</strong> — queue depth, message/ack rates, consumer health, pod scaling per tenant vhost.</li>
+            <li><strong style="color:var(--text-primary);">Alertmanager</strong> — queue-backlog &amp; DLQ alerts → Slack / PagerDuty.</li>
+            <li><strong style="color:var(--text-primary);">Jaeger / Tempo</strong> — OpenTelemetry traces spanning enqueue → dispatch → execute → callback.</li>
+          </ul>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <h3><span class="icon-dot" style="background:var(--cyan)"></span>Application level — tenant admin</h3>
+          <ul style="padding-left:18px; margin-top:8px; font-size:13px; color:var(--text-secondary); line-height:1.55;">
+            <li><strong style="color:var(--text-primary);">Live progress</strong> <span class="pill green">reuse</span> — feeds the existing push-notification UI (progress bars in the admin) via <code>IJobProgress</code>.</li>
+            <li><strong style="color:var(--text-primary);">Jobs blade</strong> <span class="pill amber">new</span> — running / queued / failed list, retry &amp; cancel — a blade inside the existing admin.</li>
+            <li><strong style="color:var(--text-primary);">DLQ inspector</strong> <span class="pill amber">new</span> — view, replay, or discard dead-lettered jobs.</li>
+            <li><strong style="color:var(--text-primary);">Health API + trace links</strong> — <code>IBackgroundProcessingHealth</code>; jump from a failed job to its trace.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top:16px;">
+      <p style="font-size:13px;"><strong style="color:var(--accent);">One source, two audiences.</strong> Everything is built on <strong>OpenTelemetry</strong> emitted by the Hub — the same <code>job.duration</code>, <code>queue.lag</code>, <code>retry.count</code> metrics regardless of engine. Add to <strong>Virto Cloud</strong>: Prometheus, Grafana, Alertmanager, Jaeger/Tempo, the RabbitMQ Cluster Operator. Add to <strong>Virto Commerce</strong>: the Jobs admin blade, health API, and DLQ inspector. Switching engine later changes nothing the operator sees.</p>
+    </div>
+  </section>
+
+  <!-- 18b. APP-LEVEL UI: REUSE VS BUILD -->
+  <section class="slide" data-section="Cloud &amp; Ops" data-title="App-level UI · reuse or build?">
+    <div class="breadcrumb">Cloud &amp; Ops · Idea</div>
+    <h1 class="slide-title">Is the admin UI <span class="accent">custom, or reused?</span></h1>
+    <p class="slide-lead">Mostly reuse, partly build. The tenant-admin view is a <strong>new module inside the existing Virto Commerce admin</strong> — not a standalone application, and not fully off-the-shelf. Virto already ships the progress plumbing; what's missing is the queryable, historical jobs view that the ephemeral notification dropdown can't cover.</p>
+    <table class="compare" style="margin-top:4px;">
+      <thead><tr><th>Capability</th><th>Reuse or build</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Live progress for a running job</td><td><span class="pill green">reuse</span></td><td>Existing push-notification UI + SignalR — what import / index already use</td></tr>
+        <tr><td>Module shell · nav · auth · styling</td><td><span class="pill green">reuse</span></td><td>Standard blade framework — inherits everything for free</td></tr>
+        <tr><td>Jobs list · filter by state / queue</td><td><span class="pill amber">new blade</span></td><td>Notification dropdown is ephemeral &amp; user-scoped, not queryable</td></tr>
+        <tr><td>DLQ inspect &amp; replay</td><td><span class="pill amber">new blade</span></td><td>No dead-letter view exists today</td></tr>
+        <tr><td>Recurring schedule management</td><td><span class="pill amber">new blade</span></td><td>See schedules, last / next run, trigger-now</td></tr>
+        <tr><td>Queue depth · scaling · broker health</td><td><span class="pill cyan">not here</span></td><td>Grafana / Prometheus — platform team, not tenant admin</td></tr>
+      </tbody>
+    </table>
+    <div class="grid-2" style="margin-top:18px;">
+      <div class="card">
+        <h3><span class="icon-dot" style="background:var(--green)"></span>What we get for free</h3>
+        <p style="font-size:13px;">The push-notification component (progress bars, success/fail, details link) and the blade framework. Even the new screens are blades <em>inside</em> the admin you already ship — not a separate app.</p>
+      </div>
+      <div class="card">
+        <h3><span class="icon-dot" style="background:var(--accent)"></span>Keep the boundary clean</h3>
+        <p style="font-size:13px;">Tenant admin cares about <em>their</em> jobs — did my import finish, why did this fail, replay it. The SRE cares about <em>the cluster</em>. Two audiences, two surfaces; don't make the Jobs blade do infra monitoring.</p>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top:16px;">
+      <p style="font-size:12.5px;"><strong style="color:var(--accent);">To verify before committing:</strong> whether a newer platform / VC-Shell version already ships a jobs-list or operations-history screen we can extend — which would shrink the "new blade" column further.</p>
+    </div>
+  </section>
+
+  <!-- SECTION 05: CODE -->
+  <section class="slide section" data-section="Code" data-title="Section: Code" data-toc-divider="true">
+    <div class="section-num">SECTION 05</div>
+    <h2 class="section-title">The C#<br>developers write</h2>
+    <p class="section-blurb">Two audiences. Module authors write handlers and enqueue calls. Provider implementers write one adapter against the port.</p>
+  </section>
+
+  <!-- 11. MODULE DEVELOPER CODE -->
+  <section class="slide" data-section="Code" data-title="Module developer code">
+    <div class="breadcrumb">Code · Module Authors</div>
+    <h1 class="slide-title">Define a job, enqueue it — <span class="accent">extendable by default</span></h1>
+    <p class="slide-lead">The enqueue is <strong>handler-explicit</strong> — <code>Enqueue&lt;THandler&gt;(payload)</code> names the action at the call site, so it reads clearly in review and one payload can drive several handlers. The payload is an <code>AbstractTypeFactory</code> type (not a sealed record) so partners extend it without forking.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div>
+        <pre class="snippet sm"><span class="com">// Payload — overridable type, NOT a sealed record</span>
+<span class="kw">public class</span> <span class="type">SendOrderEmailPayload</span> : <span class="type">ValueObject</span>
+{
+  <span class="kw">public</span> <span class="type">string</span> OrderId { <span class="kw">get</span>; <span class="kw">set</span>; }
+  <span class="kw">public</span> <span class="type">string</span> CustomerEmail { <span class="kw">get</span>; <span class="kw">set</span>; }
+}
+
+<span class="com">// Handler — implements IBackgroundJobHandler&lt;TPayload&gt;</span>
+<span class="kw">public class</span> <span class="type">SendOrderEmailJob</span>(
+    <span class="type">IEmailSender</span> sender, <span class="type">IOrderService</span> orders)
+  : <span class="type">IBackgroundJobHandler</span>&lt;<span class="type">SendOrderEmailPayload</span>&gt;
+{
+  <span class="kw">public async</span> <span class="type">Task</span> Execute(
+      <span class="type">SendOrderEmailPayload</span> p,
+      <span class="type">IJobExecutionContext</span> ctx, <span class="type">CancellationToken</span> ct)
+  {
+    <span class="kw">var</span> order = <span class="kw">await</span> orders.GetByIdAsync(p.OrderId);
+    <span class="kw">await</span> sender.SendConfirmationAsync(
+        p.CustomerEmail, order, ct);
+  }
+}
+
+<span class="com">// Register — payload inferred from the handler</span>
+services.AddBackgroundJob&lt;<span class="type">SendOrderEmailJob</span>&gt;();</pre>
+      </div>
+      <div>
+        <pre class="snippet sm"><span class="com">// Enqueue — build payload via the factory so a</span>
+<span class="com">// partner's derived type flows through end-to-end</span>
+<span class="kw">var</span> p = <span class="type">AbstractTypeFactory</span>&lt;<span class="type">SendOrderEmailPayload</span>&gt;
+    .TryCreateInstance();
+p.OrderId = order.Id; p.CustomerEmail = order.Email;
+
+<span class="kw">await</span> jobs.Enqueue&lt;<span class="type">SendOrderEmailJob</span>&gt;(p);   <span class="com">// names the handler</span>
+
+<span class="com">// With options — queue · progress · dedup key</span>
+<span class="kw">await</span> jobs.Enqueue&lt;<span class="type">ReindexProductJob</span>&gt;(reindexPayload,
+  <span class="kw">new</span> <span class="type">EnqueueOptions</span>
+  {
+    Queue          = <span class="str">"indexing"</span>,
+    ReportProgress = <span class="kw">true</span>,
+    UniqueKey      = <span class="str">$"reindex:{productId}"</span>,  <span class="com">// engine-dependent</span>
+  });
+
+<span class="com">// One payload, several handlers — the enqueue</span>
+<span class="com">// names which one runs (a partner registers its own)</span>
+services.AddBackgroundJob&lt;<span class="type">AcmeSendOrderEmailJob</span>&gt;();
+<span class="kw">await</span> jobs.Enqueue&lt;<span class="type">AcmeSendOrderEmailJob</span>&gt;(p);
+
+<span class="com">// Extend the payload — AbstractTypeFactory, as ever</span>
+<span class="type">AbstractTypeFactory</span>&lt;<span class="type">SendOrderEmailPayload</span>&gt;
+  .OverrideType&lt;<span class="type">SendOrderEmailPayload</span>, <span class="type">AcmePayload</span>&gt;();</pre>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top:14px;">
+      <p style="font-size:13px;"><strong style="color:var(--accent);">Extendable from the start.</strong> Because the payload is created through <code>AbstractTypeFactory</code> and handlers resolve from DI, a partner extends the payload (<code>OverrideType</code>) and ships its own handler using the <em>same tools they already use across Virto</em> — no sealed types, no Hub fork. Recurring follows the same shape via <code>AddRecurringJob&lt;THandler, TPayload&gt;</code>; an event→job binder is on the roadmap.</p>
+    </div>
+  </section>
+
+  <!-- 12. PROVIDER PORT CODE -->
+  <section class="slide" data-section="Code" data-title="Provider port code">
+    <div class="breadcrumb">Code · Provider Implementers</div>
+    <h1 class="slide-title">One port, one <span class="accent">envelope</span></h1>
+    <p class="slide-lead">Every engine implements <code>IJobEngine</code>. Work crosses the boundary as a serialized envelope — a message, never a delegate. This is what makes push providers possible.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div>
+        <pre class="snippet sm"><span class="kw">public interface</span> <span class="type">IJobEngine</span>
+{
+  <span class="type">string</span> ProviderName { <span class="kw">get</span>; }
+
+  <span class="type">Task</span>&lt;<span class="type">string</span>&gt; Enqueue(
+      <span class="type">JobEnvelope</span> envelope, <span class="type">EnqueueOptions</span> options,
+      <span class="type">CancellationToken</span> ct = <span class="kw">default</span>);
+
+  <span class="type">Task</span>&lt;<span class="type">Job</span>?&gt; GetStatus(<span class="type">string</span> jobId, ...);
+  <span class="type">Task</span>&lt;<span class="type">bool</span>&gt; Delete(<span class="type">string</span> jobId, ...);
+}
+
+<span class="com">// Recurring is a separate, optional port:</span>
+<span class="kw">public interface</span> <span class="type">IRecurringJobScheduler</span>
+{
+  <span class="type">Task</span> AddOrUpdate(
+      <span class="type">RecurringJobRegistration</span> r, <span class="type">string</span> cron, ...);
+  <span class="type">Task</span> Remove(<span class="type">string</span> id, ...);
+}</pre>
+      </div>
+      <div>
+        <pre class="snippet sm"><span class="com">// The serialized unit of work — a message.</span>
+<span class="kw">public sealed class</span> <span class="type">JobEnvelope</span>
+{
+  <span class="kw">public</span> <span class="type">string</span> JobType { <span class="kw">get</span>; <span class="kw">set</span>; }     <span class="com">// payload contract</span>
+  <span class="kw">public</span> <span class="type">string</span> HandlerType { <span class="kw">get</span>; <span class="kw">set</span>; } <span class="com">// which handler</span>
+  <span class="kw">public</span> <span class="type">string</span> PayloadType { <span class="kw">get</span>; <span class="kw">set</span>; } <span class="com">// concrete type</span>
+  <span class="kw">public</span> <span class="type">string</span> PayloadJson { <span class="kw">get</span>; <span class="kw">set</span>; }
+
+  <span class="com">// at-least-once → collapse duplicates (engine-dependent)</span>
+  <span class="kw">public</span> <span class="type">string</span>? UniqueKey { <span class="kw">get</span>; <span class="kw">set</span>; }
+
+  <span class="com">// enqueuing user, restored on the worker</span>
+  <span class="kw">public</span> <span class="type">string</span>? UserName { <span class="kw">get</span>; <span class="kw">set</span>; }
+
+  <span class="kw">public</span> <span class="type">int</span> Attempt { <span class="kw">get</span>; <span class="kw">set</span>; } = <span class="num">1</span>;
+}</pre>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top:16px;">
+      <p style="font-size:13.5px;"><strong style="color:var(--accent);">Shared execution path.</strong> The Hub provides <code>IJobDispatcher.Dispatch(envelope, context, ct)</code> — deserialize the payload, open a per-job DI scope, resolve the <code>IBackgroundJobHandler&lt;&gt;</code> (by handler type), run it, and restore the enqueuing user. Pull engines call it inside the job method; push engines call it from the callback controller. A job runs identically no matter who dispatched it.</p>
+    </div>
+  </section>
+
+  <!-- 13. PUSH ADAPTER + CALLBACK -->
+  <section class="slide" data-section="Code" data-title="Push adapter and callback">
+    <div class="breadcrumb">Code · Push Round-Trip</div>
+    <h1 class="slide-title">Dispatch, then <span class="accent">call back</span></h1>
+    <p class="slide-lead">The ACA adapter enqueues to Service Bus; KEDA scales from zero. The generic container relays to the Platform callback, where the real work runs in-process under an idempotency guard.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div>
+        <pre class="snippet sm"><span class="com">// PUSH adapter — enqueue to Service Bus</span>
+<span class="kw">public async</span> <span class="type">Task</span>&lt;<span class="type">string</span>&gt; Enqueue(
+    <span class="type">JobEnvelope</span> env, <span class="type">EnqueueOptions</span> opt, ...)
+{
+  <span class="kw">var</span> jobId = <span class="type">Guid</span>.NewGuid().ToString(<span class="str">"N"</span>);
+  <span class="kw">await using var</span> sender =
+      bus.CreateSender(_opt.QueueName);
+
+  <span class="kw">var</span> dispatch = <span class="kw">new</span> <span class="type">AcaDispatch</span> {
+    JobId = jobId, Envelope = env,
+    CallbackUrl = <span class="str">$"{_opt.BaseUrl}/api/.../callback"</span> };
+
+  <span class="kw">var</span> msg = <span class="kw">new</span> <span class="type">ServiceBusMessage</span>(
+      <span class="type">JsonSerializer</span>.SerializeToUtf8Bytes(dispatch))
+    { MessageId = env.DeduplicationKey ?? jobId };
+
+  <span class="kw">await</span> sender.SendMessageAsync(msg, ct);
+  <span class="kw">return</span> jobId; <span class="com">// KEDA scales the job</span>
+}</pre>
+      </div>
+      <div>
+        <pre class="snippet sm"><span class="com">// Platform callback — the REAL work runs here</span>
+[<span class="type">HttpPost</span>(<span class="str">"callback"</span>)]
+<span class="kw">public async</span> <span class="type">Task</span>&lt;<span class="type">IActionResult</span>&gt; RunCallback(
+    <span class="type">JobCallbackRequest</span> req, <span class="type">CancellationToken</span> ct)
+{
+  <span class="kw">var</span> key = req.Envelope.DeduplicationKey ?? req.JobId;
+  <span class="kw">if</span> (!<span class="kw">await</span> dedup.TryBeginAsync(key, ct))
+    <span class="kw">return</span> Ok(<span class="com">/* already processed */</span>);
+
+  <span class="kw">try</span> {
+    <span class="kw">await</span> dispatcher.DispatchAsync(req.Envelope, ctx, ct);
+    <span class="kw">await</span> dedup.MarkCompletedAsync(key, ct);
+    <span class="kw">return</span> Ok();
+  } <span class="kw">catch</span> (<span class="type">Exception</span> ex) {
+    <span class="kw">await</span> dedup.ReleaseAsync(key, ct);
+    <span class="kw">return</span> StatusCode(<span class="num">500</span>); <span class="com">// provider retries</span>
+  }
+}</pre>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top:16px;">
+      <p style="font-size:13.5px;"><strong style="color:var(--accent);">Config-driven selection.</strong> <code>BackgroundProcessing:Provider = "Hangfire" | "CloudRun" | "AzureContainerApps"</code> picks the engine at startup — the same pattern as cache, search, and storage providers. Switching engines is an <code>appsettings.json</code> change, not a recompile.</p>
+    </div>
+  </section>
+
+  <!-- 13b. RECURRING JOBS — DEVELOPER CONFIG -->
+  <section class="slide" data-section="Code" data-title="Recurring jobs · configuration">
+    <div class="breadcrumb">Code · Recurring &amp; Scheduled</div>
+    <h1 class="slide-title">Recurring jobs, with a <span class="accent">validated Cron setting</span></h1>
+    <p class="slide-lead">A recurring job is a handler + a schedule, registered with <code>AddRecurringJob&lt;THandler, TPayload&gt;</code>. The cron can be fixed (<code>.WithCron</code>) or setting-driven (<code>.FromSettings</code>) — and setting-driven crons use the new <code>SettingValueType.Cron</code>, so a hand-written expression is validated on save and edited with presets + a live plain-English description.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div>
+        <pre class="snippet sm"><span class="com">// Fixed cron — handler-explicit, readable</span>
+services.AddRecurringJob&lt;<span class="type">ReindexCatalogJob</span>, <span class="type">ReindexPayload</span>&gt;(
+  () =&gt; <span class="kw">new</span> <span class="type">ReindexPayload</span> { CatalogId = id },
+  schedule =&gt; schedule
+    .WithId(<span class="str">"Catalog.Reindex"</span>)
+    .WithQueue(<span class="str">"indexing"</span>)
+    .WithCron(<span class="str">"0 */6 * * *"</span>)          <span class="com">// 5- or 6-field</span>
+    .WithTimeZone(<span class="str">"Europe/Berlin"</span>));
+
+<span class="com">// Setting-driven — enabler + cron from platform</span>
+<span class="com">// settings; re-applied live when either changes.</span>
+services.AddRecurringJob&lt;<span class="type">ProcessSubscriptionJob</span>,
+                         <span class="type">SubscriptionPayload</span>&gt;(
+  schedule =&gt; schedule
+    .WithId(<span class="str">"Subscription.ProcessJob"</span>)
+    .FromSettings(
+      Settings.EnableSubscriptionJob,   <span class="com">// Boolean</span>
+      Settings.CronSubscriptionJob));   <span class="com">// Cron</span></pre>
+      </div>
+      <div>
+        <pre class="snippet sm"><span class="com">// The cron lives in a Cron-typed SETTING:</span>
+<span class="kw">public static readonly</span> <span class="type">SettingDescriptor</span>
+  CronSubscriptionJob = <span class="kw">new</span>()
+{
+  Name         = <span class="str">"…CronSubscriptionJob"</span>,
+  ValueType    = <span class="type">SettingValueType</span>.Cron,  <span class="com">// ← new</span>
+  DefaultValue = <span class="str">"0 */6 * * *"</span>,
+};
+
+<span class="com">// On save the platform validates it (Cronos,</span>
+<span class="com">// 5/6-field) — a typo is REJECTED, never a</span>
+<span class="com">// silently-disabled job.</span>
+
+<span class="com">// In the admin UI the Cron editor shows:</span>
+<span class="com">//  • a preset picker (Every hour, Daily 07:00…)</span>
+<span class="com">//  • a live plain-English description (cronstrue):</span>
+<span class="com">//      "0 7 * * *"  →  "At 07:00, every day"</span></pre>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top:16px;">
+      <p style="font-size:13.5px;"><strong style="color:var(--accent);">Why a Cron setting type.</strong> It validates on save (a typo can't silently disable a job) and the admin edits it with a preset picker + live description instead of memorizing cron. On non-Hangfire engines the in-process scheduler fires each occurrence fleet-safe exactly-once (distributed lock + shared occurrence marker), bounded-retries a transient enqueue failure rather than dropping the tick, and runs under a <code>system:{jobId}</code> identity.</p>
+    </div>
+  </section>
+
+  <!-- 13b-2. RECURRING JOBS — OVERLAP PREVENTION -->
+  <section class="slide" data-section="Code" data-title="Recurring jobs · overlap prevention">
+    <div class="breadcrumb">Code · Overlap &amp; Engine Routing</div>
+    <h1 class="slide-title">Never run the same job <span class="accent">on top of itself</span></h1>
+    <p class="slide-lead">If a 6-hourly reindex takes 7 hours, the next tick must not launch a second run. The overlap policy is enforced by the Hub via a distributed lock keyed on the job id — so it holds across <em>every</em> worker instance, not just one process.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div>
+        <pre class="snippet sm"><span class="kw">public enum</span> <span class="type">OverlapPolicy</span>
+{
+  <span class="type">Allow</span>,    <span class="com">// concurrent runs permitted (default off)</span>
+  <span class="type">Skip</span>,     <span class="com">// tick fires while running → skip this tick</span>
+  <span class="type">Queue</span>,    <span class="com">// run sequentially after the current one</span>
+  <span class="type">Cancel</span>,   <span class="com">// cancel the in-flight run, start fresh</span>
+}
+
+<span class="com">// Enforced centrally before dispatch:</span>
+<span class="kw">await using var</span> lease = <span class="kw">await</span> _locks.TryAcquireAsync(
+    <span class="str">$"recurring:{jobId}"</span>, ttl: <span class="type">TimeSpan</span>.FromHours(<span class="num">2</span>));
+
+<span class="kw">if</span> (lease <span class="kw">is null</span>)                 <span class="com">// already running elsewhere</span>
+{
+  <span class="kw">if</span> (policy == <span class="type">OverlapPolicy</span>.Skip)
+      { _log.SkipOverlap(jobId); <span class="kw">return</span>; }
+  <span class="kw">if</span> (policy == <span class="type">OverlapPolicy</span>.Queue)
+      { <span class="kw">await</span> _scheduler.DeferAsync(jobId); <span class="kw">return</span>; }
+}
+<span class="kw">await</span> _dispatcher.DispatchAsync(envelope, ctx, ct);</pre>
+      </div>
+      <div>
+        <div class="card">
+          <h3><span class="icon-dot" style="background:var(--accent)"></span>Distributed, not per-process</h3>
+          <p style="font-size:13px;">The lock lives in the shared store (SQL / Redis), so overlap is prevented across the whole worker fleet — the case Hangfire's <code>[DisableConcurrentExecution]</code> only partly covered.</p>
+        </div>
+        <div class="card" style="margin-top:14px;">
+          <h3><span class="icon-dot" style="background:var(--cyan)"></span>Self-healing via TTL</h3>
+          <p style="font-size:13px;">The lease has a TTL. If a worker dies mid-run, the lock auto-expires — a stuck job can never block the schedule forever.</p>
+        </div>
+        <div class="card" style="margin-top:14px;">
+          <h3><span class="icon-dot" style="background:var(--purple)"></span>Misfire handling</h3>
+          <p style="font-size:13px;"><code>Misfire.RunOnceOnRecovery</code> coalesces missed ticks (downtime) into a single catch-up run instead of a thundering herd.</p>
+        </div>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top:16px;">
+      <p style="font-size:13.5px;"><strong style="color:var(--accent);">Where cron lives per engine.</strong> Hangfire → its recurring manager (+ Hub lock for true overlap safety). RabbitMQ → the Hub scheduler ticks and publishes. Cloud Run → Cloud Scheduler. ACA → a scheduled job trigger. Module code is identical across all of them.</p>
+    </div>
+  </section>
+
+  <!-- 13c. MAP/REDUCE CONCEPT -->
+  <section class="slide" data-section="Code" data-title="Map/Reduce concept">
+    <div class="breadcrumb">Code · Scaling Pattern</div>
+    <h1 class="slide-title">Map / Reduce for <span class="accent">enterprise fan-out</span></h1>
+    <p class="slide-lead">Full-catalog indexation today is one long job grinding through everything in sequence. Map/Reduce splits it into N independent partitions any worker can pick up in parallel, then a reduce step finalizes — e.g. a blue-green index swap.</p>
+    <div class="schema" style="height:300px;">
+      <svg viewBox="0 0 1080 280" xmlns="http://www.w3.org/2000/svg">
+        <!-- coordinator -->
+        <rect class="box-accent" x="40" y="116" width="160" height="56" rx="12"/><text class="lbl" x="120" y="140" font-size="13" text-anchor="middle" font-weight="600">Coordinator</text><text class="lbl-sm" x="120" y="158" font-size="10" text-anchor="middle">partitions the work</text>
+        <!-- fan out -->
+        <line class="arrow-accent" x1="200" y1="132" x2="280" y2="56" marker-end="url(#mr)"/>
+        <line class="arrow-accent" x1="200" y1="140" x2="280" y2="116" marker-end="url(#mr)"/>
+        <line class="arrow-accent" x1="200" y1="148" x2="280" y2="176" marker-end="url(#mr)"/>
+        <line class="arrow-accent" x1="200" y1="156" x2="280" y2="236" marker-end="url(#mr)"/>
+        <text class="lbl-sm" x="232" y="96" font-size="10" fill="var(--text-muted)">MAP</text>
+        <!-- map jobs -->
+        <rect class="box-cyan" x="282" y="32" width="220" height="44" rx="10"/><text class="lbl-sm" x="392" y="58" text-anchor="middle" font-size="11">Map partition 1 · products 0–10k</text>
+        <rect class="box-cyan" x="282" y="92" width="220" height="44" rx="10"/><text class="lbl-sm" x="392" y="118" text-anchor="middle" font-size="11">Map partition 2 · products 10–20k</text>
+        <rect class="box-cyan" x="282" y="152" width="220" height="44" rx="10"/><text class="lbl-sm" x="392" y="178" text-anchor="middle" font-size="11">Map partition 3 · products 20–30k</text>
+        <rect class="box-cyan" x="282" y="212" width="220" height="44" rx="10"/><text class="lbl-sm" x="392" y="238" text-anchor="middle" font-size="11">Map partition N · …</text>
+        <!-- any worker -->
+        <text class="lbl-sm" x="392" y="20" text-anchor="middle" font-size="10" fill="var(--green)">any worker / instance picks these up in parallel</text>
+        <!-- fan in -->
+        <line class="arrow-accent" x1="502" y1="54" x2="600" y2="130" marker-end="url(#mr)"/>
+        <line class="arrow-accent" x1="502" y1="114" x2="600" y2="136" marker-end="url(#mr)"/>
+        <line class="arrow-accent" x1="502" y1="174" x2="600" y2="142" marker-end="url(#mr)"/>
+        <line class="arrow-accent" x1="502" y1="234" x2="600" y2="148" marker-end="url(#mr)"/>
+        <text class="lbl-sm" x="556" y="96" font-size="10" fill="var(--text-muted)">REDUCE</text>
+        <!-- reduce -->
+        <rect class="box-purple" x="602" y="116" width="160" height="56" rx="12"/><text class="lbl" x="682" y="140" font-size="13" text-anchor="middle" font-weight="600">Reduce</text><text class="lbl-sm" x="682" y="158" font-size="10" text-anchor="middle">aggregate · finalize</text>
+        <line class="arrow-accent" x1="762" y1="144" x2="828" y2="144" marker-end="url(#mr)"/>
+        <rect class="box-green" x="830" y="116" width="210" height="56" rx="12"/><text class="lbl" x="935" y="140" font-size="13" text-anchor="middle" font-weight="600">Blue-green swap</text><text class="lbl-sm" x="935" y="158" font-size="10" text-anchor="middle">new index goes live</text>
+        <defs><marker id="mr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker></defs>
+      </svg>
+    </div>
+    <div class="grid-3" style="margin-top:18px;">
+      <div class="card"><h3 style="font-size:14px;"><span class="icon-dot" style="background:var(--cyan)"></span>On Hangfire</h3><p style="font-size:12.5px;">Batches + continuations — the reduce runs when all maps finish.</p></div>
+      <div class="card"><h3 style="font-size:14px;"><span class="icon-dot" style="background:var(--accent)"></span>On Cloud Run / ACA</h3><p style="font-size:12.5px;">A parallel job with task-count; a final reduce task.</p></div>
+      <div class="card"><h3 style="font-size:14px;"><span class="icon-dot" style="background:var(--purple)"></span>On Temporal</h3><p style="font-size:12.5px;">Native fan-out with checkpoint/replay if a worker dies mid-run.</p></div>
+    </div>
+  </section>
+
+  <!-- 13d. MAP/REDUCE CODE — RABBITMQ, 3 STEPS -->
+  <section class="slide" data-section="Code" data-title="Map/Reduce code · define · execute · reduce">
+    <div class="breadcrumb">Code · Map/Reduce on RabbitMQ</div>
+    <h1 class="slide-title">Two handlers, <span class="accent">one enqueue</span></h1>
+    <p class="slide-lead">The developer writes a <strong>map handler</strong> and a <strong>reduce handler</strong> and enqueues by naming them — the item/result/state types are derived from the handler interfaces. The Hub fans out one message per item, drains them in parallel across workers, and triggers the single reduce when all items settle. Contracts ship in <strong>Platform.Core</strong>; no direct RabbitMQ code.</p>
+    <div class="grid-3" style="margin-top:4px; gap:16px;">
+      <div>
+        <div style="font-size:12px; font-weight:700; color:var(--accent); letter-spacing:0.08em; margin-bottom:6px;">1 · MAP HANDLER</div>
+        <pre class="snippet sm" style="font-size:10.5px;"><span class="com">// One page of ids → a small result.</span>
+<span class="com">// Runs in parallel across all workers.</span>
+<span class="kw">public class</span> <span class="type">IndexPageHandler</span>(
+    <span class="type">IIndexingManager</span> indexer)
+  : <span class="type">IMapJobHandler</span>&lt;<span class="type">IndexPage</span>,
+                   <span class="type">IndexPageResult</span>&gt;
+{
+  <span class="kw">public async</span> <span class="type">Task</span>&lt;<span class="type">IndexPageResult</span>&gt; Map(
+      <span class="type">IndexPage</span> page,
+      <span class="type">IJobExecutionContext</span> ctx,
+      <span class="type">CancellationToken</span> ct)
+  {
+    <span class="kw">var</span> failed = <span class="kw">await</span> indexer
+      .IndexDocuments(page.DocumentType,
+                      page.DocumentIds, ct);
+    <span class="kw">return new</span> <span class="type">IndexPageResult</span>(
+      page.DocumentIds.Length - failed.Length,
+      failed);
+  }
+}</pre>
+      </div>
+      <div>
+        <div style="font-size:12px; font-weight:700; color:var(--cyan); letter-spacing:0.08em; margin-bottom:6px;">2 · REDUCE HANDLER</div>
+        <pre class="snippet sm" style="font-size:10.5px;"><span class="com">// Runs ONCE, after every page reaches</span>
+<span class="com">// a terminal state — gets each page's</span>
+<span class="com">// MapResult&lt;T&gt; plus the shared state.</span>
+<span class="kw">public class</span> <span class="type">IndexSummaryReducer</span>
+  : <span class="type">IReduceJobHandler</span>&lt;<span class="type">IndexSummary</span>,
+                      <span class="type">IndexPageResult</span>&gt;
+{
+  <span class="kw">public</span> <span class="type">Task</span> Reduce(
+      <span class="type">IndexSummary</span> state,
+      <span class="type">IReadOnlyCollection</span>&lt;
+        <span class="type">MapResult</span>&lt;<span class="type">IndexPageResult</span>&gt;&gt; results,
+      <span class="type">IJobExecutionContext</span> ctx,
+      <span class="type">CancellationToken</span> ct)
+  {
+    <span class="kw">var</span> indexed = results
+      .Where(r =&gt; r.Succeeded)
+      .Sum(r =&gt; r.Value!.Indexed);
+    <span class="com">// swap alias · re-index failed ids …</span>
+    <span class="kw">return</span> <span class="type">Task</span>.CompletedTask;
+  }
+}</pre>
+      </div>
+      <div>
+        <div style="font-size:12px; font-weight:700; color:var(--purple); letter-spacing:0.08em; margin-bottom:6px;">3 · REGISTER + ENQUEUE</div>
+        <pre class="snippet sm" style="font-size:10.5px;"><span class="com">// Register the pair (module Initialize)</span>
+services.AddMapReduceJob&lt;
+    <span class="type">IndexPageHandler</span>, <span class="type">IndexSummaryReducer</span>&gt;();
+
+<span class="com">// Enqueue — NAME the handlers; item/</span>
+<span class="com">// result/state are derived from them</span>
+<span class="com">// and validated. Partition into PAGES.</span>
+<span class="kw">var</span> pages = allIds.Chunk(<span class="num">50</span>)
+  .Select(ids =&gt; <span class="kw">new</span> <span class="type">IndexPage</span>(<span class="str">"Product"</span>, ids));
+
+<span class="kw">await</span> mapReduce.Enqueue&lt;
+    <span class="type">IndexPageHandler</span>, <span class="type">IndexSummaryReducer</span>&gt;(
+  items: pages,
+  state: <span class="kw">new</span> <span class="type">IndexSummary</span>(<span class="str">"Product"</span>,
+      <span class="type">DateTime</span>.UtcNow.Ticks),
+  options: <span class="kw">new</span> <span class="type">MapReduceOptions</span> {
+    Queue = <span class="str">"indexing"</span>,
+    FailurePolicy =
+      <span class="type">FailurePolicy</span>.ContinueOnError,
+    ReportProgress = <span class="kw">true</span> });</pre>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top:14px;">
+      <p style="font-size:13px;"><strong style="color:var(--accent);">Two contracts, one enqueue.</strong> <code>IMapJobHandler&lt;TItem,TResult&gt;</code> runs per item in parallel; <code>IReduceJobHandler&lt;TState,TResult&gt;</code> runs once with every item's <code>MapResult&lt;T&gt;</code>. Both live in <strong>Platform.Core</strong>, so a consumer module needs no dependency on the engine — the Hub owns the worker-side fan-out (checkpoint/resume on retry) and the exactly-once reduce.</p>
+    </div>
+  </section>
+
+  <!-- 13e. MAP/REDUCE ON RABBITMQ — MECHANISM -->
+  <section class="slide" data-section="Code" data-title="Map/Reduce · RabbitMQ mechanism">
+    <div class="breadcrumb">Code · How Fan-out / Fan-in Works</div>
+    <h1 class="slide-title">How RabbitMQ does <span class="accent">fan-out, fan-in</span></h1>
+    <p class="slide-lead">The hard part of Map/Reduce is knowing when <em>all</em> partitions are done so reduce can fire exactly once. The Hub tracks an atomic completion counter; the last map message to ACK trips it and publishes the reduce message.</p>
+    <div class="schema" style="height:300px;">
+      <svg viewBox="0 0 1080 280" xmlns="http://www.w3.org/2000/svg">
+        <rect class="box-accent" x="30" y="112" width="150" height="56" rx="12"/><text class="lbl" x="105" y="136" font-size="12" text-anchor="middle" font-weight="600">Coordinator</text><text class="lbl-sm" x="105" y="154" font-size="9.5" text-anchor="middle">fans out items</text>
+        <line class="arrow-accent" x1="180" y1="140" x2="226" y2="140" marker-end="url(#mq2)"/>
+        <text class="lbl-sm" x="203" y="130" font-size="9" text-anchor="middle" fill="var(--text-muted)">publish N</text>
+        <!-- map queue -->
+        <rect class="box" x="228" y="96" width="150" height="88" rx="10" stroke="var(--accent)"/><text class="lbl" x="303" y="120" font-size="11" text-anchor="middle" font-weight="600">indexing.map</text><text class="lbl-sm" x="303" y="138" font-size="9" text-anchor="middle">durable queue</text><text class="lbl-sm" x="303" y="156" font-size="9" text-anchor="middle" fill="var(--text-muted)">N partition msgs</text><text class="lbl-sm" x="303" y="172" font-size="9" text-anchor="middle" fill="var(--text-muted)">prefetch · fair dispatch</text>
+        <!-- workers -->
+        <line class="arrow-accent" x1="378" y1="118" x2="424" y2="70" marker-end="url(#mq2)"/>
+        <line class="arrow-accent" x1="378" y1="140" x2="424" y2="140" marker-end="url(#mq2)"/>
+        <line class="arrow-accent" x1="378" y1="162" x2="424" y2="210" marker-end="url(#mq2)"/>
+        <rect class="box-cyan" x="426" y="48" width="150" height="44" rx="9"/><text class="lbl-sm" x="501" y="74" text-anchor="middle" font-size="10.5">Worker · MapAsync</text>
+        <rect class="box-cyan" x="426" y="118" width="150" height="44" rx="9"/><text class="lbl-sm" x="501" y="144" text-anchor="middle" font-size="10.5">Worker · MapAsync</text>
+        <rect class="box-cyan" x="426" y="188" width="150" height="44" rx="9"/><text class="lbl-sm" x="501" y="214" text-anchor="middle" font-size="10.5">Worker · MapAsync</text>
+        <text class="lbl-sm" x="501" y="36" font-size="9.5" text-anchor="middle" fill="var(--green)">parallel · scale with KEDA</text>
+        <!-- ACK + counter -->
+        <line class="arrow" x1="576" y1="70" x2="632" y2="128" marker-end="url(#mq3)"/>
+        <line class="arrow" x1="576" y1="140" x2="632" y2="140" marker-end="url(#mq3)"/>
+        <line class="arrow" x1="576" y1="210" x2="632" y2="152" marker-end="url(#mq3)"/>
+        <rect class="box-green" x="634" y="108" width="166" height="64" rx="12"/><text class="lbl" x="717" y="132" font-size="11" text-anchor="middle" font-weight="600">Completion counter</text><text class="lbl-sm" x="717" y="150" font-size="9" text-anchor="middle">atomic decrement on ACK</text><text class="lbl-sm" x="717" y="165" font-size="9" text-anchor="middle" fill="var(--text-muted)">SQL / Redis · per batch id</text>
+        <!-- last one triggers reduce -->
+        <line class="arrow-accent" x1="800" y1="140" x2="846" y2="140" marker-end="url(#mq2)"/>
+        <text class="lbl-sm" x="823" y="130" font-size="8.5" text-anchor="middle" fill="var(--text-muted)">reaches 0</text>
+        <rect class="box-purple" x="848" y="108" width="200" height="64" rx="12"/><text class="lbl" x="948" y="132" font-size="11" text-anchor="middle" font-weight="600">Publish reduce msg</text><text class="lbl-sm" x="948" y="150" font-size="9" text-anchor="middle">→ ReduceAsync runs once</text><text class="lbl-sm" x="948" y="165" font-size="9" text-anchor="middle" fill="var(--purple)">blue-green alias swap</text>
+        <defs>
+          <marker id="mq2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker>
+          <marker id="mq3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <div class="grid-3" style="margin-top:16px;">
+      <div class="card"><h3 style="font-size:14px;"><span class="icon-dot" style="background:var(--accent)"></span>Fan-out</h3><p style="font-size:12.5px;">Coordinator publishes N partition messages to <code>indexing.map</code>; any worker pulls any partition.</p></div>
+      <div class="card"><h3 style="font-size:14px;"><span class="icon-dot" style="background:var(--green)"></span>Counting done</h3><p style="font-size:12.5px;">Each successful ACK atomically decrements a per-batch counter in the shared store — survives worker crashes.</p></div>
+      <div class="card"><h3 style="font-size:14px;"><span class="icon-dot" style="background:var(--purple)"></span>Fan-in → reduce</h3><p style="font-size:12.5px;">The ACK that hits zero publishes the reduce message, so <code>ReduceAsync</code> runs exactly once.</p></div>
+    </div>
+  </section>
+
+  <!-- 13f. PARTNER EXTENSIBILITY — HANDLER CUSTOMIZATION -->
+  <section class="slide" data-section="Code" data-title="Partner extensibility · customizing jobs">
+    <div class="breadcrumb">Code · Partner Extensibility</div>
+    <h1 class="slide-title">Customize jobs with <span class="accent">the tools partners already know</span></h1>
+    <p class="slide-lead">Handlers resolve from DI, so partners customize with the tools they already know. Because the enqueue is handler-explicit, the cleanest override is to ship your own handler and enqueue to it; for payload-typed fallbacks, last-registration still wins. Five intents, five idiomatic mechanisms.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div>
+        <pre class="snippet sm"><span class="com">// 1 · REPLACE — register your own handler,</span>
+<span class="com">// then enqueue to it (handler-explicit)</span>
+services.AddBackgroundJob&lt;<span class="type">ReindexProductJob</span>&gt;();  <span class="com">// base</span>
+services.AddBackgroundJob&lt;<span class="type">AcmeReindexJob</span>&gt;();      <span class="com">// partner</span>
+<span class="kw">await</span> jobs.Enqueue&lt;<span class="type">AcmeReindexJob</span>&gt;(payload);   <span class="com">// runs Acme's</span>
+
+<span class="com">// 2 · DECORATE — wrap, keep cross-cutting clean</span>
+<span class="kw">public class</span> <span class="type">AuditedJob</span>&lt;<span class="type">T</span>&gt;(
+    <span class="type">IBackgroundJobHandler</span>&lt;<span class="type">T</span>&gt; inner, <span class="type">IAuditLog</span> audit)
+  : <span class="type">IBackgroundJobHandler</span>&lt;<span class="type">T</span>&gt; <span class="kw">where</span> <span class="type">T</span> : <span class="kw">class</span>
+{
+  <span class="kw">public async</span> <span class="type">Task</span> Execute(<span class="type">T</span> p,
+      <span class="type">IJobExecutionContext</span> ctx, <span class="type">CancellationToken</span> ct)
+  {
+    <span class="kw">await</span> audit.StartAsync(ctx.JobId);
+    <span class="kw">await</span> inner.Execute(p, ctx, ct);
+    <span class="kw">await</span> audit.EndAsync(ctx.JobId);
+  }
+}</pre>
+      </div>
+      <div>
+        <pre class="snippet sm"><span class="com">// 3 · HOOK — subclass, keep base behaviour</span>
+<span class="kw">public class</span> <span class="type">AcmeReindexJob</span> : <span class="type">ReindexProductJob</span>
+{
+  <span class="kw">public override async</span> <span class="type">Task</span> Execute(...)
+  {
+    <span class="kw">await</span> PreProcess(p, ct);
+    <span class="kw">await base</span>.Execute(p, ctx, ct);       <span class="com">// platform</span>
+    <span class="kw">await</span> NotifyAcmeErp(p, ct);
+  }
+}
+
+<span class="com">// 4 · PIPELINE — many parties, each a step,</span>
+<span class="com">// run in module-dependency order</span>
+<span class="kw">public interface</span> <span class="type">IJobMiddleware</span>&lt;<span class="type">T</span>&gt;
+{
+  <span class="type">Task</span> Invoke(<span class="type">T</span> p, <span class="type">IJobExecutionContext</span> ctx,
+      <span class="type">JobDelegate</span> next, <span class="type">CancellationToken</span> ct);
+}
+
+<span class="com">// 5 · NEW JOB — ship a new handler + payload;</span>
+<span class="com">// nothing to override.</span></pre>
+      </div>
+    </div>
+    <table class="compare" style="margin-top:14px;">
+      <thead><tr><th>Partner intent</th><th>Mechanism</th><th>When to use</th></tr></thead>
+      <tbody>
+        <tr><td>Swap the whole implementation</td><td><strong>Own handler</strong> <span class="pill green">enqueue to it</span></td><td>Behaviour fundamentally differs</td></tr>
+        <tr><td>Wrap with cross-cutting logic</td><td><strong>Decorator</strong></td><td>Audit, extra telemetry, retries</td></tr>
+        <tr><td>Hook into specific points</td><td><strong>Subclass</strong> + <code>base.ExecuteAsync</code></td><td>Add pre/post steps, keep core</td></tr>
+        <tr><td>Many parties each add a step</td><td><strong>IJobMiddleware</strong> pipeline</td><td>Loyalty + tax + ERP on one job</td></tr>
+        <tr><td>Ship a brand-new background job</td><td><strong>Register a new JobType</strong></td><td>Partner's own work</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 13g. PARTNER EXTENSIBILITY — PAYLOAD -->
+  <section class="slide" data-section="Code" data-title="Partner extensibility · extending payload">
+    <div class="breadcrumb">Code · Extending the Payload</div>
+    <h1 class="slide-title">Extend the payload with <span class="accent">AbstractTypeFactory</span></h1>
+    <p class="slide-lead">Payloads use Virto's signature extensibility mechanism — the same <code>AbstractTypeFactory</code> partners already use to extend <code>CustomerOrder</code> or <code>CatalogProduct</code>. A partner subclasses the payload, registers the override, and their type flows end-to-end through RabbitMQ into their handler with all fields intact.</p>
+    <div class="grid-2" style="margin-top:4px;">
+      <div>
+        <pre class="snippet sm"><span class="com">// Base payload — created via the factory,</span>
+<span class="com">// never `new`, so it stays overridable.</span>
+<span class="kw">public class</span> <span class="type">ReindexPayload</span> : <span class="type">ValueObject</span>
+{
+  <span class="kw">public</span> <span class="type">string</span> CatalogId { <span class="kw">get</span>; <span class="kw">set</span>; }
+  <span class="kw">public</span> <span class="type">string</span> StagingIndex { <span class="kw">get</span>; <span class="kw">set</span>; }
+}
+
+<span class="com">// Partner extends with extra fields</span>
+<span class="kw">public class</span> <span class="type">AcmeReindexPayload</span> : <span class="type">ReindexPayload</span>
+{
+  <span class="kw">public</span> <span class="type">string</span> AcmeRegion { <span class="kw">get</span>; <span class="kw">set</span>; }
+  <span class="kw">public</span> <span class="type">bool</span> IncludePreorders { <span class="kw">get</span>; <span class="kw">set</span>; }
+}
+
+<span class="com">// Partner module registers the override</span>
+<span class="type">AbstractTypeFactory</span>&lt;<span class="type">ReindexPayload</span>&gt;
+  .OverrideType&lt;<span class="type">ReindexPayload</span>, <span class="type">AcmeReindexPayload</span>&gt;();</pre>
+      </div>
+      <div>
+        <pre class="snippet sm"><span class="com">// Hub always creates via the factory —</span>
+<span class="com">// the derived type flows through.</span>
+<span class="kw">var</span> payload = <span class="type">AbstractTypeFactory</span>&lt;<span class="type">ReindexPayload</span>&gt;
+    .TryCreateInstance();
+
+<span class="com">// Envelope carries the CONCRETE type name, so</span>
+<span class="com">// the serializer round-trips AcmeReindexPayload,</span>
+<span class="com">// not the base — survives the RabbitMQ trip.</span>
+envelope.PayloadType = payload.GetType()
+    .AssemblyQualifiedName;
+
+<span class="com">// ── No-code alternative ──────────────────</span>
+<span class="com">// For light extension without a subclass,</span>
+<span class="com">// the payload carries a DynamicProperties bag</span>
+<span class="com">// (Virto's built-in mechanism) — extend like</span>
+<span class="com">// adding a custom order field in the admin UI.</span>
+payload.DynamicProperties.Add(
+    <span class="str">"AcmeRegion"</span>, <span class="str">"EU-West"</span>);</pre>
+      </div>
+    </div>
+    <div class="card muted" style="margin-top:14px;">
+      <p style="font-size:13px;"><strong style="color:var(--accent);">Nothing new to learn.</strong> Partners customize jobs with the exact three tools they already use everywhere in Virto — <strong>DI override</strong>, <strong>AbstractTypeFactory</strong>, <strong>Dynamic Properties</strong>. Two guards: payloads stay <strong>serializable and additive</strong> (add fields, never remove — a job may sit in the queue across a deploy), and the envelope's concrete <code>PayloadType</code> is what the factory resolves on deserialization.</p>
+    </div>
+  </section>
+
+  <!-- SECTION 06: DELIVERY -->
+  <section class="slide section" data-section="Delivery" data-title="Section: Delivery" data-toc-divider="true">
+    <div class="section-num">SECTION 06</div>
+    <h2 class="section-title">Delivery<br>&amp; open questions</h2>
+    <p class="section-blurb">What shipped so far — and the decisions now settled by the implementation versus the few still genuinely open.</p>
+  </section>
+
+  <!-- 14. PHASING -->
+  <section class="slide" data-section="Delivery" data-title="Phased delivery">
+    <div class="breadcrumb">Delivery · Roadmap</div>
+    <h1 class="slide-title">What's <span class="accent">shipped</span> — and what's next</h1>
+    <p class="slide-lead">The abstraction landed with Hangfire and zero behaviour change, then RabbitMQ, map/reduce, recurring and a conformance kit followed. Cloud push engines beyond the sample, an event→job binder, and Temporal remain roadmap.</p>
+    <table class="compare">
+      <thead><tr><th>Step</th><th>Deliverable</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td class="code">1</td><td>Core abstraction (contracts in <code>Platform.Core</code>) + Hangfire engine; migrated module-install, token-prune &amp; account-lockout off direct Hangfire refs</td><td><span class="pill green">Shipped</span> Hangfire dep removed from Platform</td></tr>
+        <tr><td class="code">2</td><td>RabbitMQ engine — durable queues, ACK/NACK retry, dead-letter — + the packable conformance TestKit</td><td><span class="pill green">Shipped</span></td></tr>
+        <tr><td class="code">3</td><td>Map/reduce fan-out (handler-explicit) + recurring scheduler with the <code>Cron</code> setting type</td><td><span class="pill green">Shipped</span></td></tr>
+        <tr><td class="code">4</td><td>Push model — Google Cloud Tasks sample proves the callback round-trip; production Cloud Run / ACA + KEDA scaling</td><td><span class="pill orange">Sample shipped · rest roadmap</span></td></tr>
+        <tr><td class="code">5</td><td>Engine-independent OpenTelemetry + jobs/DLQ admin blade · event→job binder · optional Temporal</td><td><span class="pill purple">Roadmap</span></td></tr>
+      </tbody>
+    </table>
+    <div class="card muted" style="margin-top:20px;">
+      <p style="font-size:13.5px;"><strong style="color:var(--accent);">One risk to manage:</strong> payload versioning. Jobs can sit in a queue across a deploy. Keep payloads additive, version the envelope, and for Hangfire's pull model keep enqueuer and worker code in lockstep.</p>
+    </div>
+  </section>
+
+  <!-- 15. OPEN QUESTIONS -->
+  <section class="slide" data-section="Delivery" data-title="Open questions">
+    <div class="breadcrumb">Delivery · For This Review</div>
+    <h1 class="slide-title">Decisions — <span class="accent">settled &amp; still open</span></h1>
+    <p class="slide-lead">The load-bearing ones are settled by what shipped; a few remain genuinely open for the next phase.</p>
+    <div class="feat-grid" style="grid-template-columns: repeat(2, 1fr); gap:16px;">
+      <div class="feat"><div class="fnum" style="color:var(--green)">Q1 · settled</div><h4>Payload contract</h4><p>Serializable messages everywhere; <code>Expression</code>-based enqueue never entered Core. Shipped as handler-explicit <code>Enqueue&lt;THandler&gt;(payload)</code>.</p></div>
+      <div class="feat"><div class="fnum">Q2</div><h4>DX surface for v1</h4><p>Of the sugar — self-describing request, fluent builder, attribute defaults — which do we commit to, which do we defer?</p></div>
+      <div class="feat"><div class="fnum">Q3</div><h4>Handler registration</h4><p>Source generator (compile-time serializability checks) or runtime assembly scan?</p></div>
+      <div class="feat"><div class="fnum" style="color:var(--green)">Q4 · sample</div><h4>First push provider</h4><p>A Google Cloud Tasks sample proves the callback round-trip. Which to productionize — Cloud Run or ACA Jobs — is the open call.</p></div>
+      <div class="feat"><div class="fnum">Q5</div><h4>Idempotency store</h4><p>SQL-backed dedup ledger reusing the platform DB, or Redis? What retention window?</p></div>
+      <div class="feat"><div class="fnum">Q6 · &amp; migration</div><h4>Temporal scope + first module</h4><p>Temporal in v1 or out? And migrate Import (complex, high value) or Subscription (simple, low risk) first?</p></div>
+    </div>
+  </section>
+
+  <!-- 16. CTA -->
+  <section class="slide cta" data-section="Delivery" data-title="Thank you">
+    <div>
+      <h1 class="cta-title">One contract.<br><span class="accent">Any engine.</span></h1>
+      <p style="font-size:20px; color:var(--text-secondary); max-width:760px; margin:0 auto;">The Hangfire lock-in is gone and the Platform is passive. Two engines ship today and a push sample proves scale-to-zero — and no module was rewritten to get there.</p>
+      <div class="cta-links">
+        <span class="cta-link">Shipped · Core + Hangfire + RabbitMQ</span>
+        <span class="cta-link">Proven · GCT push sample · map/reduce · recurring</span>
+        <span class="cta-link">Next · production cloud push · admin observability</span>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<nav class="nav-bar">
+  <button class="nav-btn" id="prevBtn" aria-label="Previous slide"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4 L6 9 L11 14"/></svg></button>
+  <div class="nav-counter"><span class="accent" id="curNum">1</span> / <span id="totNum">35</span></div>
+  <button class="nav-btn" id="nextBtn" aria-label="Next slide"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4 L12 9 L7 14"/></svg></button>
+</nav>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const stage = document.getElementById('stage');
+  let current = 0;
+
+  function fitStage() {
+    const scale = Math.min(window.innerWidth / 1240, window.innerHeight / 760);
+    slides.forEach(s => s.style.setProperty('--fit-scale', scale));
+  }
+  window.addEventListener('resize', fitStage);
+  fitStage();
+
+  function show(i) {
+    current = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach((s, idx) => s.classList.toggle('active', idx === current));
+    document.getElementById('curNum').textContent = current + 1;
+    document.getElementById('prevBtn').disabled = current === 0;
+    document.getElementById('nextBtn').disabled = current === slides.length - 1;
+    updateTocActive();
+  }
+  document.getElementById('totNum').textContent = slides.length;
+
+  document.getElementById('prevBtn').onclick = () => show(current - 1);
+  document.getElementById('nextBtn').onclick = () => show(current + 1);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ') { show(current + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { show(current - 1); }
+    else if (e.key === 't' || e.key === 'T') { toggleToc(); }
+    else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) { document.documentElement.requestFullscreen(); }
+      else { document.exitFullscreen(); }
+    }
+    else if (e.key === 'Escape') { closeToc(); }
+  });
+
+  // ── TOC ──
+  const tocList = document.getElementById('tocList');
+  const tocPanel = document.getElementById('tocPanel');
+  const tocOverlay = document.getElementById('tocOverlay');
+  let lastSection = '';
+  slides.forEach((s, idx) => {
+    const section = s.dataset.section || '';
+    const title = s.dataset.title || `Slide ${idx + 1}`;
+    if (section !== lastSection) {
+      const lbl = document.createElement('div');
+      lbl.className = 'toc-section-label';
+      lbl.textContent = section;
+      tocList.appendChild(lbl);
+      lastSection = section;
+    }
+    const item = document.createElement('div');
+    item.className = 'toc-item';
+    item.dataset.idx = idx;
+    item.innerHTML = `<span class="num">${String(idx + 1).padStart(2, '0')}</span><span>${title}</span>`;
+    item.onclick = () => { show(idx); closeToc(); };
+    tocList.appendChild(item);
+  });
+  function updateTocActive() {
+    document.querySelectorAll('.toc-item').forEach(it => it.classList.toggle('active', +it.dataset.idx === current));
+  }
+  function toggleToc() { tocPanel.classList.toggle('open'); tocOverlay.classList.toggle('open'); }
+  function closeToc() { tocPanel.classList.remove('open'); tocOverlay.classList.remove('open'); }
+  document.getElementById('tocBtn').onclick = toggleToc;
+  document.getElementById('tocClose').onclick = closeToc;
+  tocOverlay.onclick = closeToc;
+
+  show(0);
+</script>
+</body>
+</html>

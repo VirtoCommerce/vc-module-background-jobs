@@ -1,0 +1,12 @@
+Dapper.dll
+Hangfire.AspNetCore.dll
+Hangfire.Console.dll
+Hangfire.Core.dll
+Hangfire.Core.resources.dll
+Hangfire.MemoryStorage.dll
+Hangfire.MySql.dll
+Hangfire.NetCore.dll
+Hangfire.PostgreSql.dll
+Hangfire.SqlServer.dll
+RabbitMQ.Client.dll
+VirtoCommerce.Platform.Hangfire.dll
