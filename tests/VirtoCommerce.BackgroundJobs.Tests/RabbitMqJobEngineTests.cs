@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Moq;
-using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.RabbitMQ;
 using Xunit;
 

@@ -7,13 +7,14 @@ using Cronos;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using VirtoCommerce.BackgroundJobs.Core.Recurring;
 using VirtoCommerce.Platform.Core.Common;
 using VirtoCommerce.Platform.Core.DistributedLock;
 using VirtoCommerce.Platform.Core.Exceptions;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Security;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Recurring;
+namespace VirtoCommerce.BackgroundJobs.Data.Recurring;
 
 /// <summary>
 /// Engine-agnostic <see cref="IRecurringJobScheduler"/> for engines without native recurring support (e.g. RabbitMQ).

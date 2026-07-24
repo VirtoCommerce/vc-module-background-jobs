@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.Platform.Core.Common;
 using VirtoCommerce.Platform.Core.Jobs;

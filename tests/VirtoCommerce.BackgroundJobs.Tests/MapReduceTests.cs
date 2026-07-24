@@ -8,7 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using VirtoCommerce.BackgroundJobs.Core.MapReduce;
-using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
 using VirtoCommerce.Platform.Core.Jobs;

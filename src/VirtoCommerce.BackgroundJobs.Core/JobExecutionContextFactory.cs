@@ -2,7 +2,7 @@ using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs;
 
 /// <summary>
 /// Builds the <see cref="IJobExecutionContext"/> a worker passes to the dispatcher from a received

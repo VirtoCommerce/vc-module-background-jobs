@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Hangfire.Server;
 using Newtonsoft.Json;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 

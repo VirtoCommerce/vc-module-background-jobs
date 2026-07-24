@@ -1,7 +1,7 @@
 #nullable enable
 using Microsoft.Extensions.DependencyInjection;
 using VirtoCommerce.BackgroundJobs.Conformance;
-using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Data.Recurring;
 using VirtoCommerce.Platform.Core.DistributedLock;
 

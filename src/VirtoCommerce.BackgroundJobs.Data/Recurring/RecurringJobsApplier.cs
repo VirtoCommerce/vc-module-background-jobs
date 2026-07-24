@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,7 +13,7 @@ using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Settings;
 using VirtoCommerce.Platform.Core.Settings.Events;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Recurring;
+namespace VirtoCommerce.BackgroundJobs.Data.Recurring;
 
 /// <summary>
 /// Applies every recurring job declared via <c>AddRecurringJob</c> (in the platform or any module) to the active

@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.Platform.Core.Jobs;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs;
 
 /// <summary>
 /// The provider port. Exactly one implementation is active per platform instance, selected by the

@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs;
 
 namespace VirtoCommerce.BackgroundJobs.GoogleCloudTasks.Controllers;
 

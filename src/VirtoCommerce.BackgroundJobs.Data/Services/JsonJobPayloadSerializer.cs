@@ -1,7 +1,7 @@
 #nullable enable
 using System;
 using Newtonsoft.Json;
-using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs;
 
 namespace VirtoCommerce.BackgroundJobs.Data.Services;
 

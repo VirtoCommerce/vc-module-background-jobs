@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using VirtoCommerce.BackgroundJobs.Core.Admin;
 using VirtoCommerce.BackgroundJobs.Core.Recurring;
+using VirtoCommerce.BackgroundJobs.Data.Recurring;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Settings;
 

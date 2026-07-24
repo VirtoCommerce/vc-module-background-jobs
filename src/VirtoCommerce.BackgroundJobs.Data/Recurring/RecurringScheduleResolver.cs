@@ -5,7 +5,7 @@ using Cronos;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Settings;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Recurring;
+namespace VirtoCommerce.BackgroundJobs.Data.Recurring;
 
 /// <summary>
 /// Shared resolution of a recurring job's <b>effective</b> schedule (enabled + cron) and its next occurrence, so the

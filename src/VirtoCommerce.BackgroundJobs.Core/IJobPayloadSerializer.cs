@@ -1,4 +1,4 @@
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs;
 
 /// <summary>Serializes job payloads to/from the envelope's <c>PayloadType</c> + <c>PayloadJson</c>.</summary>
 public interface IJobPayloadSerializer

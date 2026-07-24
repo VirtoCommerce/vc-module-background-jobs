@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using VirtoCommerce.BackgroundJobs.Core.Admin;
-using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Data.Admin;
 using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.BackgroundJobs.Web.Controllers.Api;

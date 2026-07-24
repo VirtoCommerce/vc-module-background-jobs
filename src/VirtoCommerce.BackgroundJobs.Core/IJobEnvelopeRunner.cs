@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs;
 
 /// <summary>
 /// Runs an already-formed <see cref="JobEnvelope"/> in-process: builds the execution context and dispatches the

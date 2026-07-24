@@ -2,7 +2,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using VirtoCommerce.Platform.Core.Jobs;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs;
 
 /// <summary>No-op progress used for fire-and-forget jobs enqueued without progress.</summary>
 public sealed class NoOpJobProgress : IJobProgress

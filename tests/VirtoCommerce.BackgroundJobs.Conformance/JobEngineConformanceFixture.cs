@@ -10,7 +10,7 @@ using Moq;
 using VirtoCommerce.BackgroundJobs.Conformance;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Notifications;
-using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
 using VirtoCommerce.Platform.Core.Common;

@@ -1,6 +1,6 @@
 #nullable enable
 using Microsoft.Extensions.DependencyInjection;
-using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs;
 
 namespace VirtoCommerce.BackgroundJobs.InMemory.Extensions;
 

@@ -1,12 +1,12 @@
 using System;
 using System.Threading;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs;
 
 /// <summary>
 /// Ambient, async-flowed correlation id for a batch of enqueue calls (for example a load-test run). A producer wraps
 /// its <c>Enqueue</c> calls in <see cref="BeginRun"/>; the enqueue facade then stamps the id onto every
-/// <see cref="Models.JobEnvelope"/> as the <see cref="JobHeaders.RunId"/> header, so all jobs from one run can be
+/// <see cref="Core.Models.JobEnvelope"/> as the <see cref="JobHeaders.RunId"/> header, so all jobs from one run can be
 /// filtered together in telemetry. A no-op when unset — nothing is stamped and there is no production impact.
 /// </summary>
 public static class JobEnqueueContext

@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using VirtoCommerce.Platform.Core.Jobs;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs;
 
 /// <summary>
 /// Bulk producer facade: submit many jobs for one handler in a single call. Complements the single-job

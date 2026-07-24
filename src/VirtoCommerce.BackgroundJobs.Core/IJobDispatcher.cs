@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.Platform.Core.Jobs;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs;
 
 /// <summary>
 /// Shared execution path used by every engine (the Hangfire job body, the RabbitMQ consumer, a future push

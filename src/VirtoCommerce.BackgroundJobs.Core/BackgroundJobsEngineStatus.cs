@@ -1,6 +1,6 @@
 using System;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs;
 
 /// <summary>Outcome of comparing the active <see cref="IJobEngine"/> against the configured provider.</summary>
 public enum BackgroundJobsEngineStatus

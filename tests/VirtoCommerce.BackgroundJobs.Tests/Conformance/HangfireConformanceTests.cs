@@ -8,7 +8,7 @@ using Hangfire;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using VirtoCommerce.BackgroundJobs.Conformance;
-using VirtoCommerce.BackgroundJobs.Core.Services;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Hangfire;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Hangfire.Extensions;

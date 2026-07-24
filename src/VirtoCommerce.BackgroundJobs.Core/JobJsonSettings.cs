@@ -1,6 +1,6 @@
 using Newtonsoft.Json;
 
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs;
 
 /// <summary>
 /// Shared Newtonsoft settings for background-job serialization — used for both the job <b>payload</b>

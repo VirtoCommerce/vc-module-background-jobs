@@ -1,7 +1,7 @@
-namespace VirtoCommerce.BackgroundJobs.Core.Services;
+namespace VirtoCommerce.BackgroundJobs;
 
 /// <summary>
-/// Well-known <see cref="Models.JobEnvelope.Headers"/> keys the engine and dispatcher understand. Kept small and
+/// Well-known <see cref="Core.Models.JobEnvelope.Headers"/> keys the engine and dispatcher understand. Kept small and
 /// engine-agnostic: producers stamp them, the shared dispatcher reads them for telemetry.
 /// </summary>
 public static class JobHeaders
