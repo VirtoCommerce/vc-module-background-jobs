@@ -188,12 +188,12 @@ Ready-made Kusto queries (throughput, p95 duration, queue latency, failure rate 
 
 | Project | Layer | Purpose |
 |---|---|---|
-| `VirtoCommerce.BackgroundJobs.Core` | Core | **Contracts, models, options and reusable helpers only** — `IJobEngine`, `IJobDispatcher`, `IJobPayloadSerializer`, `IBackgroundJobsAdminQuery`, `IJobEnvelopeRunner`, `JobEnvelope`/models, progress, `JobExecutionContextFactory`, `JobJsonSettings`, `RecurringScheduleResolver`, plus the map/reduce + recurring orchestration. Published as a NuGet so client and custom-engine projects reference the port without the service implementations. |
+| `VirtoCommerce.BackgroundJobs.Core` | Core | **Contracts, models, options and reusable helpers only** (namespace `VirtoCommerce.BackgroundJobs`) — `IJobEngine`, `IJobDispatcher`, `IJobPayloadSerializer`, `IBackgroundJobsAdminQuery`, `IJobEnvelopeRunner`, `IRecurringJobStateStore`, `JobEnvelope`/models, progress, `JobExecutionContextFactory`, `JobJsonSettings`, plus the map/reduce orchestration. **No service implementations and no Cronos dependency.** Published as a NuGet so client and custom-engine projects reference the port without the implementations. |
 | `VirtoCommerce.BackgroundJobs.Hangfire` | Engine | Hangfire implementation of `IJobEngine`; reuses the platform's former Hangfire storage/dashboard. Published as a NuGet. |
 | `VirtoCommerce.Platform.Hangfire.Shim` | Compat | Produces a type-forwarding `VirtoCommerce.Platform.Hangfire.dll` for binary compatibility with existing modules. |
 | `VirtoCommerce.BackgroundJobs.RabbitMQ` | Engine | RabbitMQ implementation of `IJobEngine` + the in-process consumer (`RabbitMqJobConsumer`). Published as a NuGet. |
 | `VirtoCommerce.BackgroundJobs.Web` | Web | Module host: `PlatformStartup` (engine/mode selection), `JobsController`, settings & permissions. |
-| `VirtoCommerce.BackgroundJobs.Data` | Data | The concrete engine-agnostic **service implementations** (`JobEngineBackgroundJob` facade, `DefaultJobDispatcher`, `JsonJobPayloadSerializer`, `JobTelemetry`, `JobEnvelopeRunner`, `BackgroundJobsAdminQuery`) + the reusable in-process recurring scheduler (`AddInProcessRecurringScheduler`) and the Redis/in-memory occurrence-marker & map/reduce batch stores. Published as a NuGet. |
+| `VirtoCommerce.BackgroundJobs.Data` | Data | The engine-agnostic **service implementations** (`JobEngineBackgroundJob` facade, `DefaultJobDispatcher`, `JsonJobPayloadSerializer`, `JobTelemetry`, `JobEnvelopeRunner`, `BackgroundJobsAdminQuery`), the in-process recurring scheduler + applier + schedule resolver (`AddInProcessRecurringScheduler`, `GenericRecurringJobScheduler`, `RecurringJobsApplier`, `RecurringScheduleResolver` — this is where the **Cronos** dependency lives), and the Redis/in-memory occurrence-marker & map/reduce batch stores. Published as a NuGet. |
 
 ### Key Services
 
@@ -557,9 +557,9 @@ A runnable, self-contained map/reduce example (framed as product indexing) is in
 
 The engine selector is open: any provider name other than `Hangfire`/`RabbitMQ` is left for a custom module to
 satisfy. A custom engine ships as a normal Virto Commerce module that depends on this one, references
-`VirtoCommerce.BackgroundJobs.Core` (the engine port + agnostic implementations) and, optionally,
-`VirtoCommerce.BackgroundJobs.Data` (the reusable in-process recurring scheduler). Both are published as NuGet
-packages.
+`VirtoCommerce.BackgroundJobs.Core` (the engine port + contracts/models/helpers) and, typically,
+`VirtoCommerce.BackgroundJobs.Data` (the reusable service implementations — dispatcher, serializer, envelope runner,
+telemetry, and the in-process recurring scheduler). Both are published as NuGet packages.
 
 ### What you implement vs. reuse
 
