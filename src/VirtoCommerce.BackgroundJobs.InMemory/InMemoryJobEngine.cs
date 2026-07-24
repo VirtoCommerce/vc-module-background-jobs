@@ -43,16 +43,18 @@ public sealed class InMemoryJobEngine(
 
         // Fire-and-forget on the thread pool — the in-process stand-in for a worker draining a queue. CancellationToken
         // is intentionally not forwarded: the enqueue call must not cancel the already-accepted job.
-        _ = Task.Run(() => RunAsync(jobId, envelope, enqueueOptions), CancellationToken.None);
+        _ = Task.Run(() => RunAsync(jobId, envelope), CancellationToken.None);
 
         return Task.FromResult(jobId);
     }
 
-    private async Task RunAsync(string jobId, JobEnvelope envelope, EnqueueOptions enqueueOptions)
+    private async Task RunAsync(string jobId, JobEnvelope envelope)
     {
         // MaxRetryAttempts counts retries on top of the first run (default 3 → up to 4 total). Floor at 0 so 0 disables
-        // retries. Per-enqueue override wins over the engine-wide default.
-        var maxRetries = Math.Max(0, enqueueOptions.MaxRetryAttempts ?? options.Value.MaxRetryAttempts);
+        // retries. Uses the engine-wide default only: EnqueueOptions.MaxRetryAttempts is reserved / not yet honored (it
+        // isn't carried on JobEnvelope and Hangfire/RabbitMQ ignore it), so honoring it here would make retry behavior
+        // diverge between the dev/test engine and production.
+        var maxRetries = Math.Max(0, options.Value.MaxRetryAttempts);
 
         for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
         {

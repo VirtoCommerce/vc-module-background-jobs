@@ -130,6 +130,7 @@ public sealed class JobEngineBackgroundJob(
 
         // Bulk enqueue is fire-and-forget only: no per-job progress notification (that would create N of them).
         var envelopes = new List<JobEnvelope>(payloads.Count);
+        var index = 0;
         foreach (var payload in payloads)
         {
             ArgumentNullException.ThrowIfNull(payload);
@@ -154,11 +155,15 @@ public sealed class JobEngineBackgroundJob(
                 PayloadType = payloadType,
                 PayloadJson = payloadJson,
                 Queue = queue,
-                UniqueKey = options?.UniqueKey,
+                // Suffix the batch-level key with the item index so a single dedup key can't collapse N distinct jobs
+                // into one on dedup-honoring engines (e.g. Google Cloud Tasks) — each item stays uniquely addressable.
+                UniqueKey = string.IsNullOrEmpty(options?.UniqueKey) ? null : $"{options.UniqueKey}:{index}",
                 Title = options?.Title,
                 UserName = userName,
                 Headers = headers,
             });
+
+            index++;
         }
 
         return await engine.EnqueueBatch(envelopes, options ?? new EnqueueOptions(), cancellationToken);

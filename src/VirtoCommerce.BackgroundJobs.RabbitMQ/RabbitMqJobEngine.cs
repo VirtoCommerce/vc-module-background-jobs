@@ -8,7 +8,6 @@ using Newtonsoft.Json;
 using RabbitMQ.Client;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
 
 namespace VirtoCommerce.BackgroundJobs.RabbitMQ;
@@ -81,8 +80,7 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
         {
             var channel = await EnsureChannelAsync(publishToken);
 
-            // Declare each queue once per channel lifetime (idempotent, but avoids a round-trip per publish).
-            if (_declaredQueues.Add(queue))
+            if (!_declaredQueues.Contains(queue))
             {
                 await channel.QueueDeclareAsync(
                     queue: queue,
@@ -91,6 +89,7 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
                     autoDelete: false,
                     arguments: null,
                     cancellationToken: publishToken);
+                _declaredQueues.Add(queue);
             }
 
             await channel.BasicPublishAsync(
@@ -138,9 +137,10 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
             foreach (var envelope in envelopes)
             {
                 var queue = string.IsNullOrEmpty(envelope.Queue) ? "default" : envelope.Queue!;
-                if (_declaredQueues.Add(queue))
+                if (!_declaredQueues.Contains(queue))
                 {
                     await channel.QueueDeclareAsync(queue, durable: true, exclusive: false, autoDelete: false, arguments: null, cancellationToken: publishToken);
+                    _declaredQueues.Add(queue);
                 }
 
                 var jobId = Guid.NewGuid().ToString("N");
