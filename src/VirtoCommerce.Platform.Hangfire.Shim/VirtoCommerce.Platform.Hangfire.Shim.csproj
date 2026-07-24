@@ -14,9 +14,9 @@
 
     <!-- Match the platform's version scheme so existing references bind (assemblies are not strong-named, so
          binding is by simple name; the explicit version also helps the module loader's highest-version-wins copy policy). -->
-    <Version>3.1046.0</Version>
-    <AssemblyVersion>3.1046.0.0</AssemblyVersion>
-    <FileVersion>3.1046.0.0</FileVersion>
+    <Version>3.1050.0</Version>
+    <AssemblyVersion>3.1050.0.0</AssemblyVersion>
+    <FileVersion>3.1050.0.0</FileVersion>
 
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <NoWarn>1591;NU5048;NU1608</NoWarn>
