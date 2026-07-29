@@ -553,6 +553,100 @@ crashes, OOMs, or loses the broker connection):
 A runnable, self-contained map/reduce example (framed as product indexing) is in the
 [sample module](samples/VirtoCommerce.BackgroundJobs.SampleModule/README.md).
 
+## Migrating from VirtoCommerce.Platform.Hangfire
+
+The platform **no longer ships `VirtoCommerce.Platform.Hangfire`** — its Hangfire integration moved into this module.
+
+All of its former public types (`HangfireOptions`, `HangfireJobStorageType`, `IRecurringJobService`, `SettingCronJob`,
+the DI/app-builder extensions, the user-context middleware, …) are preserved by a **type-forwarding shim**
+(`VirtoCommerce.Platform.Hangfire.dll`, shipped by this module), so modules that were **already built** against the old
+assembly keep loading unchanged once the `VirtoCommerce.BackgroundJobs` module is installed — you don't recompile them.
+
+Modules you **do recompile** can no longer restore the old platform package. Do Step 1 to fix the build; do Step 2 when
+you can, to become engine-agnostic (run on Hangfire, RabbitMQ or In-Memory with no code change).
+
+### Step 1 — Fix the build (drop the dead reference)
+
+**You call the Hangfire API directly** — `Hangfire.BackgroundJob.Enqueue`, `RecurringJob.AddOrUpdate`,
+`IBackgroundJobClient`, `IRecurringJobManager`, or any `VirtoCommerce.Platform.Hangfire.*` type.
+
+Swap the dead package for this module's Hangfire engine — **no code changes**:
+
+```xml
+<!-- .csproj — remove -->
+<PackageReference Include="VirtoCommerce.Platform.Hangfire" Version="3.x.x" />
+<!-- .csproj — add (defines the former VirtoCommerce.Platform.Hangfire.* types in their original namespaces) -->
+<PackageReference Include="VirtoCommerce.BackgroundJobs.Hangfire" Version="3.1050.0" />
+```
+
+```xml
+<!-- module.manifest — depend on the engine module (provides the engine + the compat shim + wiring at runtime) -->
+<dependencies>
+  <dependency id="VirtoCommerce.BackgroundJobs" version="3.1050.0" />
+</dependencies>
+```
+
+Your existing `using VirtoCommerce.Platform.Hangfire;` code compiles unchanged, and keeping
+`VirtoCommerce:BackgroundJobs:EnableLegacyHangfire = true` (the default) keeps Hangfire initialized so your direct
+Hangfire calls keep working.
+
+This is a **stepping stone** — prefer Step 2.
+
+### Step 2 — Move off Hangfire to the engine-agnostic API (recommended)
+
+Migrate direct Hangfire calls to the `Platform.Core` contracts, then **remove the `VirtoCommerce.BackgroundJobs.Hangfire`
+reference** — your module compiles against only `VirtoCommerce.Platform.Core` and runs on whatever engine the deployment
+configures.
+
+Define a payload + handler, register it, and enqueue by handler:
+
+```csharp
+// Before (Hangfire):
+BackgroundJob.Enqueue(() => _emailSender.SendOrderConfirmation(orderId));         // fire-and-forget
+RecurringJob.AddOrUpdate("send-digest", () => _digest.Run(), "0 8 * * *");        // recurring
+```
+
+```csharp
+// After (engine-agnostic):
+
+// 1) payload — a plain, serializable class
+public class SendOrderEmailPayload { public string OrderId { get; set; } }
+
+// 2) handler — no Hangfire, no engine reference (Platform.Core only)
+public class SendOrderEmailHandler(IEmailSender sender) : IBackgroundJobHandler<SendOrderEmailPayload>
+{
+    public Task Execute(SendOrderEmailPayload p, IJobExecutionContext ctx, CancellationToken ct)
+        => sender.SendOrderConfirmationAsync(p.OrderId, ct);
+}
+
+// 3) register in Module.Initialize(IServiceCollection)
+services.AddBackgroundJob<SendOrderEmailHandler, SendOrderEmailPayload>();
+services.AddRecurringJob<SendDigestHandler, SendDigestPayload>(s => s.WithCron("0 8 * * *"));
+
+// 4) enqueue — inject IBackgroundJob, or use the static BackgroundJob helper (no constructor injection needed)
+await _backgroundJob.Enqueue<SendOrderEmailHandler>(new SendOrderEmailPayload { OrderId = orderId });
+await BackgroundJob.Enqueue<SendOrderEmailHandler>(new SendOrderEmailPayload { OrderId = orderId });
+```
+
+Common Hangfire APIs and their replacements:
+
+| Hangfire (before) | Engine-agnostic (after) |
+|---|---|
+| `BackgroundJob.Enqueue(() => svc.Work(x))` | payload + `IBackgroundJobHandler<T>` + `IBackgroundJob.Enqueue<THandler>(payload)` (or the static `BackgroundJob.Enqueue<THandler>`) |
+| `RecurringJob.AddOrUpdate(id, () => svc.Work(), cron)` | `services.AddRecurringJob<THandler, TPayload>(s => s.WithCron(cron))` |
+| `IRecurringJobService` / setting-driven cron | `services.AddRecurringJob<THandler, TPayload>(s => s.FromSettings(enabled: …, cron: …))` — with a `SettingValueType.Cron` setting |
+| `PerformContext`, `IJobCancellationToken` (progress / cancel) | the handler's `IJobExecutionContext ctx` + `CancellationToken ct`; report via `ctx.Progress.Report(new JobProgressInfo { Message = …, ProcessedCount = …, TotalCount = … }, ct)` |
+| `HangfireOptions`, the `/hangfire` dashboard | engine-specific — not referenced by handlers |
+
+```xml
+<!-- .csproj after Step 2 — no Hangfire at all -->
+<PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1050.0" />
+<!-- module.manifest still depends on VirtoCommerce.BackgroundJobs for the runtime engine -->
+```
+
+Once **every** module in a deployment has completed Step 2, set `VirtoCommerce:BackgroundJobs:EnableLegacyHangfire = false`
+for a Hangfire-free platform (and, on the cloud, switch `Provider` to `RabbitMQ`) — see [Configuration](#configuration).
+
 ## Writing a custom engine
 
 The engine selector is open: any provider name other than `Hangfire`/`RabbitMQ` is left for a custom module to
