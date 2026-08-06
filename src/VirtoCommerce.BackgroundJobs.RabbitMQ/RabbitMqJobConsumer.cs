@@ -11,6 +11,7 @@ using Newtonsoft.Json;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using VirtoCommerce.BackgroundJobs.Core;
+using VirtoCommerce.BackgroundJobs.Core.Cancellation;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
@@ -31,9 +32,14 @@ public sealed class RabbitMqJobConsumer : BackgroundService
     private static readonly TimeSpan _reconnectDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan _healthCheckInterval = TimeSpan.FromSeconds(5);
 
+    // How often a running job's watch loop polls the shared store for a cancellation request — a balance of
+    // cancellation latency against store (Redis) load per in-flight job.
+    private static readonly TimeSpan _cancelPollInterval = TimeSpan.FromSeconds(3);
+
     private readonly IRabbitMqConnectionProvider _connectionProvider;
     private readonly IJobDispatcher _dispatcher;
     private readonly IPushNotificationManager _pushNotificationManager;
+    private readonly IJobCancellationStore _cancellationStore;
     private readonly RabbitMqOptions _rabbitMqOptions;
     private readonly BackgroundJobsOptions _jobsOptions;
     private readonly ILogger<RabbitMqJobConsumer> _logger;
@@ -57,6 +63,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         IRabbitMqConnectionProvider connectionProvider,
         IJobDispatcher dispatcher,
         IPushNotificationManager pushNotificationManager,
+        IJobCancellationStore cancellationStore,
         IOptions<RabbitMqOptions> rabbitMqOptions,
         IOptions<BackgroundJobsOptions> jobsOptions,
         ILogger<RabbitMqJobConsumer> logger)
@@ -64,6 +71,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         _connectionProvider = connectionProvider;
         _dispatcher = dispatcher;
         _pushNotificationManager = pushNotificationManager;
+        _cancellationStore = cancellationStore;
         _rabbitMqOptions = rabbitMqOptions.Value;
         _jobsOptions = jobsOptions.Value;
         _logger = logger;
@@ -187,7 +195,24 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         }
 
         var jobId = eventArgs.BasicProperties.MessageId ?? string.Empty;
+
+        // Not started: cancelled before this worker picked it up. RabbitMQ can't remove a specific queued message, so
+        // the cancellation is honored here, at dequeue — ack and discard without running the handler.
+        if (!string.IsNullOrEmpty(jobId) && await _cancellationStore.IsCancelRequested(jobId))
+        {
+            _logger.LogInformation("Job {JobId} ({JobType}) was cancelled before start; discarding.", jobId, envelope.JobType);
+            await TryAckAsync(channel, eventArgs.DeliveryTag);
+            await _cancellationStore.Clear(jobId);
+            return;
+        }
+
         var dispatched = false;
+
+        // Per-job cancellation: the handler runs under jobCts.Token; a watch loop polls the shared store and trips it
+        // when a cancel is requested for this job. watchStop ends the watch loop once the job settles.
+        using var jobCts = new CancellationTokenSource();
+        using var watchStop = new CancellationTokenSource();
+        var watch = WatchForCancellationAsync(jobId, jobCts, watchStop.Token);
 
         try
         {
@@ -195,11 +220,18 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
             _logger.LogDebug("Dispatching job {JobId} ({JobType})", jobId, envelope.JobType);
 
-            await _dispatcher.Dispatch(envelope, context, CancellationToken.None);
+            await _dispatcher.Dispatch(envelope, context, jobCts.Token);
             dispatched = true;
 
             await RunChannelOpAsync(async () => await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false));
             _logger.LogDebug("Completed and acked job {JobId} ({JobType})", jobId, envelope.JobType);
+        }
+        catch (OperationCanceledException) when (jobCts.IsCancellationRequested)
+        {
+            // Cancelled while running (cooperative cancel): ack and discard. Do NOT re-route to retry/DLQ — the
+            // cancellation was intentional, not a failure.
+            _logger.LogInformation("Job {JobId} ({JobType}) was cancelled while running; discarding.", jobId, envelope.JobType);
+            await TryAckAsync(channel, eventArgs.DeliveryTag);
         }
         catch (Exception ex) when (!dispatched)
         {
@@ -220,6 +252,53 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             // The handler ran but the ack failed: do NOT re-route (that would double-execute). The broker may
             // redeliver, so handlers should be idempotent.
             _logger.LogError(ackEx, "Job {JobId} executed but acknowledgement failed; it may be redelivered", jobId);
+        }
+        finally
+        {
+            // Stop the watch loop and clear the cancellation flag now that the job has settled.
+            await watchStop.CancelAsync();
+            try
+            {
+                await watch;
+            }
+            catch (OperationCanceledException)
+            {
+                // expected when the watch loop is stopped
+            }
+
+            if (!string.IsNullOrEmpty(jobId))
+            {
+                await _cancellationStore.Clear(jobId);
+            }
+        }
+    }
+
+    // Polls the shared cancellation store for a running job and trips its token when a cancel is requested. Stops when
+    // the job settles (watchStopToken) or once a cancel has been observed and signaled.
+    private async Task WatchForCancellationAsync(string jobId, CancellationTokenSource jobCts, CancellationToken watchStopToken)
+    {
+        if (string.IsNullOrEmpty(jobId))
+        {
+            return;
+        }
+
+        try
+        {
+            while (!watchStopToken.IsCancellationRequested)
+            {
+                await Task.Delay(_cancelPollInterval, watchStopToken);
+
+                if (await _cancellationStore.IsCancelRequested(jobId))
+                {
+                    _logger.LogInformation("Cancellation requested for running job {JobId}; signaling the handler.", jobId);
+                    await jobCts.CancelAsync();
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // watch stopped normally because the job finished
         }
     }
 

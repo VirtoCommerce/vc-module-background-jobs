@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Data.Cancellation;
 using VirtoCommerce.BackgroundJobs.RabbitMQ.Extensions;
 using VirtoCommerce.Platform.Core.Jobs;
 using Xunit;
@@ -39,6 +40,7 @@ public sealed class RabbitMqBatchEnqueueBenchmarkTests(ITestOutputHelper output)
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddRabbitMqJobEngine(config);
+        services.AddJobCancellationStore(); // the RabbitMQ engine now depends on it (host registers it in PlatformStartup)
         await using var provider = services.BuildServiceProvider();
         var engine = provider.GetRequiredService<IJobEngine>();
 

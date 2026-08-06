@@ -13,6 +13,6 @@
     <NoWarn>1591;NU5048;NU1608</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1050.0" />
+    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1057.0-alpha.13360-vcst-5686" />
   </ItemGroup>
 </Project>
