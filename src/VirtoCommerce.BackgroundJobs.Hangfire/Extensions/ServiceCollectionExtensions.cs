@@ -64,7 +64,7 @@ namespace VirtoCommerce.Platform.Hangfire.Extensions
 
             // Lets a single enqueue opt out of (or tighten) the global retry count via EnqueueOptions.MaxRetryAttempts.
             // Must be registered after the filter above — it overrides the reschedule that one elects.
-            GlobalJobFilters.Filters.Add(new BackgroundJobs.Hangfire.PerJobRetryFilter());
+            GlobalJobFilters.Filters.Add(new BackgroundJobs.Hangfire.PerJobRetryFilterAttribute());
 
             if (hangfireOptions.JobStorageType == HangfireJobStorageType.SqlServer ||
                 hangfireOptions.JobStorageType == HangfireJobStorageType.Database)

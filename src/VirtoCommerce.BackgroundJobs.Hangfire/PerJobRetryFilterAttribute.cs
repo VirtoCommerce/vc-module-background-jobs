@@ -12,21 +12,28 @@ namespace VirtoCommerce.BackgroundJobs.Hangfire;
 /// Honors the per-job <see cref="JobEnvelope.MaxRetryAttempts"/> (set through <c>EnqueueOptions.MaxRetryAttempts</c>)
 /// on top of the engine-wide <see cref="global::Hangfire.AutomaticRetryAttribute"/>. Hangfire has no per-job retry
 /// count: the global filter decides for every job alike, and an attribute cannot be attached to a single enqueue. So
-/// this filter runs <b>after</b> it (filter order 30 vs 20) and undoes a reschedule the job did not ask for,
-/// putting the original failure back — the replacement for Hangfire's <c>[AutomaticRetry(Attempts = N)]</c>.
+/// this filter runs <b>after</b> it (filter order 30 vs 20) and undoes a reschedule the job did not ask for, putting
+/// the original failure back — the replacement for Hangfire's <c>[AutomaticRetry(Attempts = N)]</c>.
+/// <para>
+/// It can only <b>tighten</b> the global count, never raise it: there is nothing to override unless
+/// <see cref="global::Hangfire.AutomaticRetryAttribute"/> elected a reschedule in the first place.
+/// </para>
 /// <para>
 /// Only jobs enqueued by this engine (whose body is <see cref="HangfireJobExecutor"/>) are inspected; anything else
 /// keeps the global behavior untouched. The envelope is deserialized only when a retry was actually elected, i.e. on
 /// failure, never on the success path.
 /// </para>
 /// </summary>
-public sealed class PerJobRetryFilter : JobFilterAttribute, IElectStateFilter
+public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectStateFilter
 {
-    // Job parameter AutomaticRetryAttribute writes the current attempt number to; it has already been incremented for
-    // this failure by the time this filter runs.
-    private const string _retryAttemptParameter = "RetryAttempt";
+    /// <summary>
+    /// Job parameter <see cref="global::Hangfire.AutomaticRetryAttribute"/> keeps the attempt number in; it has
+    /// already been incremented for this failure by the time this filter runs. Hangfire's own name — asserted against
+    /// the shipped assembly by a unit test, because a silent rename upstream would turn this filter into a no-op.
+    /// </summary>
+    public const string RetryCountParameter = "RetryCount";
 
-    public PerJobRetryFilter()
+    public PerJobRetryFilterAttribute()
     {
         // After AutomaticRetryAttribute (20), so CandidateState is the reschedule it elected and can be overridden.
         Order = 30;
@@ -48,8 +55,10 @@ public sealed class PerJobRetryFilter : JobFilterAttribute, IElectStateFilter
             return;
         }
 
-        var retryAttempt = context.GetJobParameter<int>(_retryAttemptParameter);
-        if (retryAttempt <= maxRetryAttempts)
+        // allowStale: false on purpose. AutomaticRetryAttribute wrote the incremented count through the storage
+        // connection moments ago; the job's parameter snapshot still holds the value from before this failure.
+        var retryCount = context.GetJobParameter<int>(RetryCountParameter, allowStale: false);
+        if (retryCount <= maxRetryAttempts)
         {
             return;
         }
