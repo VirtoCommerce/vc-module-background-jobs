@@ -109,6 +109,7 @@ public sealed class JobEngineBackgroundJob(
             PayloadType = payloadType,
             PayloadJson = payloadJson,
             Queue = options?.Queue ?? _options.DefaultQueue,
+            MaxRetryAttempts = options?.MaxRetryAttempts,
             UniqueKey = options?.UniqueKey,
             ProgressNotificationId = progressNotificationId,
             Title = title,
@@ -168,6 +169,7 @@ public sealed class JobEngineBackgroundJob(
                 PayloadType = payloadType,
                 PayloadJson = payloadJson,
                 Queue = queue,
+                MaxRetryAttempts = options?.MaxRetryAttempts,
                 // Suffix the batch-level key with the item index so a single dedup key can't collapse N distinct jobs
                 // into one on dedup-honoring engines (e.g. Google Cloud Tasks) — each item stays uniquely addressable.
                 UniqueKey = string.IsNullOrEmpty(options?.UniqueKey) ? null : $"{options.UniqueKey}:{index}",

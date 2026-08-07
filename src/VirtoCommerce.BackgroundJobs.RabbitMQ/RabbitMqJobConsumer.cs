@@ -338,7 +338,9 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         // MaxRetryAttempts counts retries: the first run is Attempt 1, so requeue while Attempt <= MaxRetryAttempts
         // (e.g. default 3 → up to 3 re-publications), then dead-letter. Floor at 0 (not 1) so MaxRetryAttempts = 0
         // disables retries entirely — dead-letter on the first failure — matching Hangfire's AutomaticRetry { Attempts = 0 }.
-        var maxAttempts = Math.Max(0, _jobsOptions.MaxRetryAttempts);
+        // The envelope's per-job value (EnqueueOptions.MaxRetryAttempts) wins over the engine-wide default; it rides on
+        // the message, so the retry decision is the same on whichever worker picks the job up.
+        var maxAttempts = Math.Max(0, envelope.MaxRetryAttempts ?? _jobsOptions.MaxRetryAttempts);
 
         if (envelope.Attempt <= maxAttempts)
         {

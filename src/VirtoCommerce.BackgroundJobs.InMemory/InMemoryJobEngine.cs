@@ -59,10 +59,9 @@ public sealed class InMemoryJobEngine(
     private async Task RunAsync(string jobId, JobEnvelope envelope, CancellationToken cancellationToken)
     {
         // MaxRetryAttempts counts retries on top of the first run (default 3 → up to 4 total). Floor at 0 so 0 disables
-        // retries. Uses the engine-wide default only: EnqueueOptions.MaxRetryAttempts is reserved / not yet honored (it
-        // isn't carried on JobEnvelope and Hangfire/RabbitMQ ignore it), so honoring it here would make retry behavior
-        // diverge between the dev/test engine and production.
-        var maxRetries = Math.Max(0, options.Value.MaxRetryAttempts);
+        // retries. The envelope's per-job value (EnqueueOptions.MaxRetryAttempts) wins over the engine-wide default,
+        // matching Hangfire and RabbitMQ.
+        var maxRetries = Math.Max(0, envelope.MaxRetryAttempts ?? options.Value.MaxRetryAttempts);
 
         try
         {
