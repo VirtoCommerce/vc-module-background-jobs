@@ -9,8 +9,6 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using VirtoCommerce.BackgroundJobs.Core;
-using VirtoCommerce.BackgroundJobs.Core.Recurring;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
 using VirtoCommerce.BackgroundJobs.Data.Recurring;
 using VirtoCommerce.BackgroundJobs.Data.Services;
@@ -112,8 +110,8 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
         // Engine-agnostic services (always registered — producers need to enqueue; the facade's IJobEngine is an
         // optional dependency, so it resolves even with no engine and throws an actionable error on use).
         services.AddSingleton<IJobPayloadSerializer, JsonJobPayloadSerializer>();
-        // Engine-agnostic job telemetry. Its TelemetryClient dependency is optional, so this is inert unless the
-        // platform's Application Insights module is installed (then jobs/* metrics + JobCompleted events flow to AI).
+        // Engine-agnostic job telemetry, emitted via the standard ActivitySource/Meter primitives. Application Insights module registers a listener
+        // so this carries no cost when nothing observes it.
         services.AddSingleton<JobTelemetry>();
         services.AddSingleton<IJobDispatcher, DefaultJobDispatcher>();
         // Shared "run a pushed envelope in-process" path (build context + dispatch), reused by push engines (GCT).

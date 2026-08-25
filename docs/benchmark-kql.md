@@ -1,7 +1,8 @@
 # Benchmark KQL (Application Insights / Log Analytics)
 
-Queries for the Hangfire-vs-RabbitMQ comparison. Custom metrics are emitted by `JobTelemetry` from the shared
-dispatcher; CPU/memory come from the AI module's performance counters; dependency latency (SQL/Redis) is auto-collected.
+Queries for the Hangfire-vs-RabbitMQ comparison. Custom metrics are emitted by `JobTelemetry` (via the standard
+`ActivitySource`/`Meter` OpenTelemetry primitives) from the shared dispatcher; CPU/memory come from the AI module's
+performance counters; dependency latency (SQL/Redis) is auto-collected.
 
 > Metric names are prefixed `VirtoCommerce.BackgroundJobs/…`. Dimensions live in `customMetrics.customDimensions`
 > (`engine`, `handler`, `outcome`). Scope every query to the run's time window and pick one `engine` at a time.
@@ -59,15 +60,18 @@ dependencies
 | render timechart
 ```
 
-## Per-run drill-down (JobCompleted event)
+## Per-run drill-down (JobCompleted span)
+
+`JobTelemetry` emits the drill-down as an `ActivityKind.Internal` span, which Application Insights' OpenTelemetry
+exporter lands in `dependencies` (not `customEvents`) — its `duration` column is the actual handler run time, so no
+custom measurement is needed:
 
 ```kusto
-customEvents
+dependencies
 | where name == "JobCompleted"
-| extend engine = tostring(customDimensions.engine), runId = tostring(customDimensions.runId),
-         execMs = todouble(customMeasurements.executionMs)
+| extend engine = tostring(customDimensions.engine), runId = tostring(customDimensions.runId)
 | where runId == "<RUN_ID>"
-| summarize jobs = count(), p95 = percentile(execMs, 95) by engine
+| summarize jobs = count(), p95 = percentile(duration, 95) by engine
 ```
 
 > `JobCompleted` is subject to adaptive sampling; use it for drill-down/correlation, and the pre-aggregated

@@ -37,15 +37,18 @@ fair numbers.
 
 The platform's `VirtoCommerce.ApplicationInsights` module auto-collects requests, dependencies (SQL/Redis/HTTP),
 exceptions, **performance counters (CPU %, memory, threads)** and Live Metrics. We add engine-agnostic job telemetry
-from the shared dispatcher (`JobTelemetry`):
+from the shared dispatcher (`JobTelemetry`) via the standard OpenTelemetry `ActivitySource`/`Meter` primitives:
 
 - `VirtoCommerce.BackgroundJobs/jobs/execution.duration.ms` — handler run time (count = throughput)
 - `VirtoCommerce.BackgroundJobs/jobs/queue.latency.ms` — enqueue→dispatch delay (from the `vc-enqueued-at` header)
 - both dimensioned by `engine`, `handler`, `outcome` (low-cardinality → sampling-immune)
-- a `JobCompleted` custom event carrying `runId` for per-run drill-down
+- a `JobCompleted` span (`ActivityKind.Internal`) carrying `runId` for per-run drill-down; its duration is the actual
+  handler run time
 
-Telemetry is inert when App Insights isn't configured (optional `TelemetryClient`). Broker/store depth: RabbitMQ
-management API + Redis `INFO memory`.
+Telemetry is inert unless a host registers a listener for the `VirtoCommerce.BackgroundJobs` ActivitySource/Meter
+name. The AI v3 module does this via a wildcard subscription (`AddSource("VirtoCommerce.*")` /
+`AddMeter("VirtoCommerce.*")`) covering every VirtoCommerce module by naming convention, rather than listing this
+module by name. Broker/store depth: RabbitMQ management API + Redis `INFO memory`.
 
 ## Pull vs Push (same RabbitMQ worker image)
 
