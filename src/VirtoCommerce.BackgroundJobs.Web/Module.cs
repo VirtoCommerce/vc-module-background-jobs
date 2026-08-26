@@ -2,10 +2,9 @@ using System;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using VirtoCommerce.BackgroundJobs.Core;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Data.Recurring;
 using VirtoCommerce.BackgroundJobs.RabbitMQ;
 using VirtoCommerce.Platform.Core;
@@ -26,12 +25,6 @@ public class Module : IModule, IHasConfiguration
 
     public void Initialize(IServiceCollection serviceCollection)
     {
-        // Override models
-        //AbstractTypeFactory<OriginalModel>.OverrideType<OriginalModel, ExtendedModel>().MapToType<ExtendedEntity>();
-        //AbstractTypeFactory<OriginalEntity>.OverrideType<OriginalEntity, ExtendedEntity>();
-
-        // Register services
-        //serviceCollection.AddTransient<IMyService, MyService>();
     }
 
     public void PostInitialize(IApplicationBuilder appBuilder)
