@@ -52,8 +52,8 @@ public sealed class JobTelemetry : IDisposable
 
         // Drill-down span carrying the run id for per-run analysis.
         var end = DateTimeOffset.UtcNow;
-        var activity = _activitySource.StartActivity(
-            "JobCompleted", ActivityKind.Internal, default(ActivityContext), startTime: end.AddMilliseconds(-executionMs));
+        var activity = _activitySource.StartActivity("JobCompleted", ActivityKind.Internal, default(ActivityContext), startTime: end.AddMilliseconds(-executionMs));
+
         if (activity is null)
         {
             return;
@@ -62,13 +62,20 @@ public sealed class JobTelemetry : IDisposable
         activity.SetTag("engine", engine);
         activity.SetTag("handler", handler);
         activity.SetTag("outcome", outcome);
+
         if (!string.IsNullOrEmpty(runId))
         {
             activity.SetTag("runId", runId);
         }
+
         if (queueLatencyMs is { } queue)
         {
             activity.SetTag("queueLatencyMs", queue);
+        }
+
+        if (outcome != "success")
+        {
+            activity.SetStatus(ActivityStatusCode.Error, outcome);
         }
 
         activity.SetEndTime(end.UtcDateTime);
