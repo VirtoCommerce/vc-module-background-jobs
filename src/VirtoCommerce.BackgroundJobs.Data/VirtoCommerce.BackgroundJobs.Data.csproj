@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <SonarQubeTestProject>false</SonarQubeTestProject>
@@ -12,7 +12,7 @@
     <NoWarn>1591;NU5048;NU1608</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1050.0" />
+    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1065.0" />
     <PackageReference Include="StackExchange.Redis" Version="3.0.0" />
     <PackageReference Include="Cronos" Version="0.9.0" />
     <PackageReference Include="Microsoft.ApplicationInsights" Version="2.23.0" />

@@ -199,7 +199,8 @@ Ready-made Kusto queries (throughput, p95 duration, queue latency, failure rate 
 
 | Service | Interface | Responsibility |
 |---|---|---|
-| Enqueue facade | `IBackgroundJob` | Engine-agnostic, handler-explicit enqueue (`Enqueue<THandler>(payload)`; also a non-generic `Enqueue(Type, payload)` for name/type-addressed triggering). |
+| Enqueue facade | `IBackgroundJob` | Engine-agnostic, handler-explicit enqueue (`Enqueue<THandler>(payload)`; also a non-generic `Enqueue(Type, payload)` for name/type-addressed triggering) and `Cancel(jobId)` + `SupportsCancellation`. |
+| Cancellation store | `IJobCancellationStore` | Shared "cancellation requested" flags (Redis fleet-wide, in-memory fallback); used by RabbitMQ for cooperative cancel. |
 | Static enqueue | `BackgroundJob` (static) | Hangfire-style `BackgroundJob.Enqueue<THandler>(payload)` migration helper; opens a scope and delegates to the scoped `IBackgroundJob`. |
 | Job handler | `IBackgroundJobHandler<TPayload>` | Your job logic; resolved from DI, overridable. |
 | Admin read model | `IBackgroundJobsAdminQuery` | Lists registered handlers + recurring schedules (effective cron, last/next run) for the admin API. |
@@ -220,6 +221,7 @@ Ready-made Kusto queries (throughput, p95 duration, queue latency, failure rate 
 | GET | `api/background-jobs/registered` | List registered handlers (name, handler type, payload type). Requires `background-jobs:read`. |
 | GET | `api/background-jobs/recurring` | List recurring jobs with effective cron, enabled, last/next run. Requires `background-jobs:read`. |
 | POST | `api/background-jobs/enqueue` | Trigger a registered job by name — body `{ name, payload, options? }` → engine job id. Requires `background-jobs:execute`. |
+| POST | `api/platform/jobs/{id}/cancel` | Request cancellation of a job. `501` when the active engine can't cancel, `404` when nothing was cancelled. Requires `background_jobs:manage`. |
 
 ## Usage
 
@@ -328,6 +330,38 @@ POST /api/background-jobs/enqueue
 
 An unknown name returns **404**; a payload that doesn't match the handler returns **400**. The addressable name
 defaults to the handler's type name; pass `AddBackgroundJob<THandler, TPayload>(name: "my-name")` to set a custom one.
+
+### Cancellation
+
+Cancel a job engine-agnostically through the facade. Cancellation is a **capability an engine may or may not have**,
+so probe `SupportsCancellation` first to tell "not supported" from "nothing to cancel" (a UI can disable the button;
+the REST endpoint answers `501`):
+
+```csharp
+public class ThumbnailsController(IBackgroundJob backgroundJob)
+{
+    public async Task<ActionResult> Cancel(string jobId, CancellationToken ct)
+    {
+        if (!backgroundJob.SupportsCancellation)
+            return StatusCode(501, "Cancellation not supported by the active engine.");
+
+        return await backgroundJob.Cancel(jobId, ct) ? Ok() : NotFound();
+    }
+}
+```
+
+**Handlers must honor their `CancellationToken`** — cancellation asks a running job to stop; a handler that ignores
+the token can't be stopped mid-run. Per engine:
+
+| Engine | Not started | Running | Notes |
+|---|---|---|---|
+| **Hangfire** | removed from the queue | transitioned to *Deleted*; the handler's `CancellationToken` trips | native; no extra infrastructure |
+| **RabbitMQ** | discarded when the worker dequeues it (a published message can't be recalled) | the handler's `CancellationToken` trips | **cooperative** via `IJobCancellationStore`; needs **Redis** for fleet-wide cancel (in-memory fallback is single-instance). The worker polls the store on a short interval, so running-cancel has bounded latency |
+| **In-Memory** | removed | the running task's `CancellationToken` trips | dev/test only, single process |
+
+`Cancel` returns `true` when the active engine accepted the request. On RabbitMQ that means "recorded" (it has no job
+ledger to confirm the id existed); on Hangfire/In-Memory it reflects whether a job was actually found. Cancelling a
+whole map/reduce fan-out by `batchId` is a separate follow-on — a single `jobId` cancel stops one job, not the batch.
 
 ### Extending jobs (partner modules)
 
@@ -636,6 +670,7 @@ Common Hangfire APIs and their replacements:
 | `RecurringJob.AddOrUpdate(id, () => svc.Work(), cron)` | `services.AddRecurringJob<THandler, TPayload>(s => s.WithCron(cron))` |
 | `IRecurringJobService` / setting-driven cron | `services.AddRecurringJob<THandler, TPayload>(s => s.FromSettings(enabled: …, cron: …))` — with a `SettingValueType.Cron` setting |
 | `PerformContext`, `IJobCancellationToken` (progress / cancel) | the handler's `IJobExecutionContext ctx` + `CancellationToken ct`; report via `ctx.Progress.Report(new JobProgressInfo { Message = …, ProcessedCount = …, TotalCount = … }, ct)` |
+| `BackgroundJob.Delete(jobId)` (cancel) | `IBackgroundJob.Cancel(jobId)` (probe `SupportsCancellation` first) — see [Cancellation](#cancellation) |
 | `HangfireOptions`, the `/hangfire` dashboard | engine-specific — not referenced by handlers |
 
 ```xml

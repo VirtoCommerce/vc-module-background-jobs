@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using RabbitMQ.Client;
 using VirtoCommerce.BackgroundJobs.Core;
+using VirtoCommerce.BackgroundJobs.Core.Cancellation;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.Platform.Core.Jobs;
 
@@ -22,8 +23,10 @@ namespace VirtoCommerce.BackgroundJobs.RabbitMQ;
 /// it is re-created transparently if it drops.
 /// </para>
 /// <para>
-/// RabbitMQ has no native job store, so <see cref="GetStatus"/> and <see cref="Delete"/> are best-effort:
-/// <see cref="GetStatus"/> returns <c>null</c> (unknown) and delete is unsupported (progress is observed over SignalR instead).
+/// RabbitMQ has no native job store, so <see cref="GetStatus"/> is best-effort and returns <c>null</c> (unknown).
+/// Cancellation cannot recall a published message, so it is <b>cooperative</b>: <see cref="Delete"/> records a request
+/// in the shared <see cref="IJobCancellationStore"/>, and <see cref="RabbitMqJobConsumer"/> discards the message if it
+/// has not started or trips the running handler's <see cref="CancellationToken"/> if it has.
 /// </para>
 /// </summary>
 public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
@@ -36,6 +39,7 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
 
     private readonly IRabbitMqConnectionProvider _connectionProvider;
     private readonly ILogger<RabbitMqJobEngine> _logger;
+    private readonly IJobCancellationStore _cancellationStore;
     private readonly SemaphoreSlim _publishLock = new(1, 1);
     // Upper bound for a single publish+confirm, used INSTEAD of the caller's token so a client disconnect can't tear
     // an in-flight publish, while a genuinely unresponsive broker still fails instead of hanging the publish lock.
@@ -43,10 +47,14 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
     private readonly HashSet<string> _declaredQueues = new(StringComparer.Ordinal);
     private IChannel? _channel;
 
-    public RabbitMqJobEngine(IRabbitMqConnectionProvider connectionProvider, ILogger<RabbitMqJobEngine> logger)
+    public RabbitMqJobEngine(
+        IRabbitMqConnectionProvider connectionProvider,
+        ILogger<RabbitMqJobEngine> logger,
+        IJobCancellationStore cancellationStore)
     {
         _connectionProvider = connectionProvider;
         _logger = logger;
+        _cancellationStore = cancellationStore;
     }
 
     public string ProviderName => ProviderNameValue;
@@ -195,8 +203,18 @@ public sealed class RabbitMqJobEngine : IJobEngine, IAsyncDisposable
         return Task.FromResult<Job?>(null);
     }
 
-    /// <summary>Not supported on RabbitMQ — a published message cannot be recalled by id. Always returns false.</summary>
-    public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+    /// <summary>
+    /// RabbitMQ cannot recall a published message, so cancellation is cooperative: record the request in the shared
+    /// <see cref="IJobCancellationStore"/>. The consumer discards the message if it has not started, or trips the
+    /// running handler's <see cref="CancellationToken"/> if it has. Always returns <c>true</c> (request accepted).
+    /// </summary>
+    public async Task<bool> Delete(string jobId, CancellationToken cancellationToken = default)
+    {
+        await _cancellationStore.RequestCancel(jobId, cancellationToken);
+        return true;
+    }
+
+    public bool SupportsCancellation => true;
 
     public async ValueTask DisposeAsync()
     {

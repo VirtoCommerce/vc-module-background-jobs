@@ -22,6 +22,7 @@ public sealed class InMemoryEngineConformanceFixture : JobEngineConformanceFixtu
         SupportsQueueRouting = true,
         SupportsRetry = true,
         SupportsRecurringScheduler = true,
+        SupportsCancellation = true,
     };
 
     protected override bool TryConfigureEngine(IServiceCollection services, out string? unavailableReason)

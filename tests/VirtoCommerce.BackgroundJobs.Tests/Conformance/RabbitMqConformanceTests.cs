@@ -28,6 +28,7 @@ public sealed class RabbitMqConformanceFixture : JobEngineConformanceFixture
         SupportsQueueRouting = true,
         SupportsRetry = true,
         SupportsRecurringScheduler = true,
+        SupportsCancellation = true,
     };
 
     protected override bool TryConfigureEngine(IServiceCollection services, out string? unavailableReason)

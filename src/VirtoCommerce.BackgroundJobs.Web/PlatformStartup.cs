@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Recurring;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Data.Cancellation;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
 using VirtoCommerce.BackgroundJobs.Data.Recurring;
 using VirtoCommerce.BackgroundJobs.Data.Services;
@@ -130,6 +131,10 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
         // Map/reduce orchestration (facade + coordinators + batch store) — engine-agnostic, rides the active engine.
         services.AddMapReduce();
+
+        // Shared cancellation flag store (Redis when configured for fleet-wide cancel, else in-memory) — used by the
+        // RabbitMQ engine/consumer for cooperative cancellation; harmless to register for any engine.
+        services.AddJobCancellationStore();
 
         // Admin read model for the troubleshooting API (list registered handlers + recurring schedules). Engine-agnostic.
         services.AddScoped<Core.Admin.IBackgroundJobsAdminQuery, Data.Admin.BackgroundJobsAdminQuery>();

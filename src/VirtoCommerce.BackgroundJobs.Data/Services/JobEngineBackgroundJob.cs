@@ -43,6 +43,19 @@ public sealed class JobEngineBackgroundJob(
         return EnqueueCore(handlerType, payload, options, cancellationToken);
     }
 
+    /// <summary>Surfaces the active engine's cancellation capability; <c>false</c> when no engine is installed.</summary>
+    public bool SupportsCancellation => engine?.SupportsCancellation ?? false;
+
+    /// <summary>
+    /// Delegates cancellation to the active engine's <see cref="IJobEngine.Delete"/>. Returns <c>false</c> (rather than
+    /// throwing) when no engine is installed, so a caller can treat "no engine" like "not supported".
+    /// </summary>
+    public Task<bool> Cancel(string jobId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(jobId);
+        return engine is null ? Task.FromResult(false) : engine.Delete(jobId, cancellationToken);
+    }
+
     private async Task<string> EnqueueCore(Type handlerType, object payload, EnqueueOptions? options,
         CancellationToken cancellationToken)
     {
@@ -96,6 +109,7 @@ public sealed class JobEngineBackgroundJob(
             PayloadType = payloadType,
             PayloadJson = payloadJson,
             Queue = options?.Queue ?? _options.DefaultQueue,
+            MaxRetryAttempts = options?.MaxRetryAttempts,
             UniqueKey = options?.UniqueKey,
             ProgressNotificationId = progressNotificationId,
             Title = title,
@@ -155,6 +169,7 @@ public sealed class JobEngineBackgroundJob(
                 PayloadType = payloadType,
                 PayloadJson = payloadJson,
                 Queue = queue,
+                MaxRetryAttempts = options?.MaxRetryAttempts,
                 // Suffix the batch-level key with the item index so a single dedup key can't collapse N distinct jobs
                 // into one on dedup-honoring engines (e.g. Google Cloud Tasks) — each item stays uniquely addressable.
                 UniqueKey = string.IsNullOrEmpty(options?.UniqueKey) ? null : $"{options.UniqueKey}:{index}",

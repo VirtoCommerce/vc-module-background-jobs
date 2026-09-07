@@ -26,6 +26,14 @@ public sealed record JobEnvelope
 
     public string? Queue { get; init; }
 
+    /// <summary>
+    /// Per-job override of the engine-wide <c>BackgroundJobsOptions.MaxRetryAttempts</c>, taken from
+    /// <c>EnqueueOptions.MaxRetryAttempts</c>. Null means "use the engine default". <c>0</c> disables retries for this
+    /// job — the replacement for Hangfire's <c>[AutomaticRetry(Attempts = 0)]</c>. It travels on the envelope because
+    /// the worker that decides whether to retry is not the process that enqueued the job.
+    /// </summary>
+    public int? MaxRetryAttempts { get; init; }
+
     /// <summary>De-duplication key.</summary>
     public string? UniqueKey { get; init; }
 

@@ -33,59 +33,84 @@ public sealed class InMemoryJobEngine(
     ILogger<InMemoryJobEngine> logger) : IJobEngine
 {
     private readonly ConcurrentDictionary<string, string> _states = new();
+    // Per-job cancellation sources for in-flight jobs, so Delete can cancel a running job's token (parity with the
+    // real engines). Entries are added on enqueue and removed when the job settles.
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _running = new();
 
     public string ProviderName => BackgroundJobsProviders.InMemory;
+
+    public bool SupportsCancellation => true;
 
     public Task<string> Enqueue(JobEnvelope envelope, EnqueueOptions enqueueOptions, CancellationToken cancellationToken = default)
     {
         var jobId = Guid.NewGuid().ToString("N");
         _states[jobId] = "Enqueued";
+        var cts = new CancellationTokenSource();
+        _running[jobId] = cts;
 
-        // Fire-and-forget on the thread pool — the in-process stand-in for a worker draining a queue. CancellationToken
-        // is intentionally not forwarded: the enqueue call must not cancel the already-accepted job.
-        _ = Task.Run(() => RunAsync(jobId, envelope), CancellationToken.None);
+        // Fire-and-forget on the thread pool — the in-process stand-in for a worker draining a queue. The enqueue
+        // CancellationToken is intentionally not forwarded (it must not cancel the already-accepted job); the job's own
+        // token (cts) is used instead, tripped by Delete.
+        _ = Task.Run(() => RunAsync(jobId, envelope, cts.Token), CancellationToken.None);
 
         return Task.FromResult(jobId);
     }
 
-    private async Task RunAsync(string jobId, JobEnvelope envelope)
+    private async Task RunAsync(string jobId, JobEnvelope envelope, CancellationToken cancellationToken)
     {
         // MaxRetryAttempts counts retries on top of the first run (default 3 → up to 4 total). Floor at 0 so 0 disables
-        // retries. Uses the engine-wide default only: EnqueueOptions.MaxRetryAttempts is reserved / not yet honored (it
-        // isn't carried on JobEnvelope and Hangfire/RabbitMQ ignore it), so honoring it here would make retry behavior
-        // diverge between the dev/test engine and production.
-        var maxRetries = Math.Max(0, options.Value.MaxRetryAttempts);
+        // retries. The envelope's per-job value (EnqueueOptions.MaxRetryAttempts) wins over the engine-wide default,
+        // matching Hangfire and RabbitMQ.
+        var maxRetries = Math.Max(0, envelope.MaxRetryAttempts ?? options.Value.MaxRetryAttempts);
 
-        for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
+        try
         {
-            try
+            for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
             {
-                _states[jobId] = "Processing";
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    _states[jobId] = "Processing";
 
-                // Own DI scope so scoped dependencies (repositories, DbContext, …) resolve per execution — same
-                // contract as the real engines' worker path.
-                using var scope = scopeFactory.CreateScope();
-                var dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcher>();
-                var context = JobExecutionContextFactory.Create(pushNotificationManager, envelope, jobId);
+                    // Own DI scope so scoped dependencies (repositories, DbContext, …) resolve per execution — same
+                    // contract as the real engines' worker path.
+                    using var scope = scopeFactory.CreateScope();
+                    var dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcher>();
+                    var context = JobExecutionContextFactory.Create(pushNotificationManager, envelope, jobId);
 
-                await dispatcher.Dispatch(envelope with { Attempt = attempt }, context, CancellationToken.None);
+                    await dispatcher.Dispatch(envelope with { Attempt = attempt }, context, cancellationToken);
 
-                _states[jobId] = "Succeeded";
-                return;
+                    _states[jobId] = "Succeeded";
+                    return;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    // Cancelled via Delete — a terminal outcome, not a failure; don't retry.
+                    _states[jobId] = "Cancelled";
+                    logger.LogInformation("In-memory job {JobId} ({JobType}) was cancelled.", jobId, envelope.JobType);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _states[jobId] = "Failed";
+                    if (attempt <= maxRetries)
+                    {
+                        logger.LogWarning(ex, "In-memory job {JobId} ({JobType}) failed on attempt {Attempt}; retrying (max {MaxRetries}).",
+                            jobId, envelope.JobType, attempt, maxRetries);
+                    }
+                    else
+                    {
+                        logger.LogError(ex, "In-memory job {JobId} ({JobType}) failed on final attempt {Attempt}.",
+                            jobId, envelope.JobType, attempt);
+                    }
+                }
             }
-            catch (Exception ex)
+        }
+        finally
+        {
+            if (_running.TryRemove(jobId, out var cts))
             {
-                _states[jobId] = "Failed";
-                if (attempt <= maxRetries)
-                {
-                    logger.LogWarning(ex, "In-memory job {JobId} ({JobType}) failed on attempt {Attempt}; retrying (max {MaxRetries}).",
-                        jobId, envelope.JobType, attempt, maxRetries);
-                }
-                else
-                {
-                    logger.LogError(ex, "In-memory job {JobId} ({JobType}) failed on final attempt {Attempt}.",
-                        jobId, envelope.JobType, attempt);
-                }
+                cts.Dispose();
             }
         }
     }
@@ -96,5 +121,16 @@ public sealed class InMemoryJobEngine(
             : null);
 
     public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default)
-        => Task.FromResult(_states.TryRemove(jobId, out _));
+    {
+        // Signal a running job to stop (its handler's token trips); RunAsync removes and disposes the source when it
+        // settles. A not-yet-started or already-finished job just has its state removed.
+        var known = _states.ContainsKey(jobId);
+        if (_running.TryGetValue(jobId, out var cts))
+        {
+            cts.Cancel();
+        }
+
+        _states.TryRemove(jobId, out _);
+        return Task.FromResult(known);
+    }
 }

@@ -128,7 +128,9 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         }
     }
 
-    // 7 — Delete of an unknown id returns false for every engine (universal contract).
+    // 7 — Delete of an unknown id: a status-tracking engine reports false (nothing to remove). A ledgerless
+    // cooperative-cancel engine (RabbitMQ) cannot tell a known id from an unknown one — it just records a cancel
+    // request — so it accepts unconditionally; the stray flag never matches a job and TTLs out.
     [Fact]
     public async Task Delete_Unknown_Job_Returns_False()
     {
@@ -136,7 +138,14 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         var deleted = await fixture.Services.GetRequiredService<IJobEngine>()
             .Delete("conformance-missing-" + NewId(), TestContext.Current.CancellationToken);
 
-        Assert.False(deleted);
+        if (fixture.Capabilities.SupportsCancellation && !fixture.Capabilities.SupportsStatusQuery)
+        {
+            Assert.True(deleted, "a ledgerless cooperative-cancel engine accepts a cancel request for any id.");
+        }
+        else
+        {
+            Assert.False(deleted, "a status-tracking engine has nothing to remove for an unknown id.");
+        }
     }
 
     // 8 — unique-key de-duplication: two enqueues with the same key collapse to one execution (when supported).
@@ -197,5 +206,29 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
             new EnqueueOptions { ReportProgress = true, Title = id });
 
         Assert.Contains(fixture.ProgressNotifications, n => n.Title == id && n.Description == ConformanceConstants.ProgressMessage);
+    }
+
+    // 13 — cancellation: a running, cancellable job stops when cancelled (natively or cooperatively), tripping the
+    // handler's CancellationToken. Skipped for engines that do not support cancellation.
+    [Fact]
+    public async Task Running_Job_Is_Cancelled_When_Supported()
+    {
+        RequireEngine();
+        Assert.SkipUnless(fixture.Capabilities.SupportsCancellation, "engine does not support cancellation.");
+
+        var engine = fixture.Services.GetRequiredService<IJobEngine>();
+        Assert.True(engine.SupportsCancellation, "engine declared SupportsCancellation in its capabilities but reports false.");
+
+        var id = NewId();
+        var jobId = await EnqueueAsync(new ConformancePayload { CorrelationId = id, Value = "cancel", BlockUntilCancelled = true });
+
+        // Wait until the handler is actually running, then request cancellation.
+        await fixture.Probe.WaitStartedAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+
+        var accepted = await engine.Delete(jobId, TestContext.Current.CancellationToken);
+        Assert.True(accepted, "the engine must accept the cancellation request for a known, running job.");
+
+        // The handler's token must trip within a bounded window (cooperative engines poll on an interval).
+        await fixture.Probe.WaitCancelledAsync(id, ConformanceConstants.CancellationTimeout, TestContext.Current.CancellationToken);
     }
 }
