@@ -4,9 +4,9 @@
   <version>3.1052.0</version>
   <version-tag></version-tag>
 
-  <platformVersion>3.1065.0</platformVersion>
+  <platformVersion>3.1071.0-alpha.13395-vcst-4717</platformVersion>
   <dependencies>
-    <dependency id="VirtoCommerce.ApplicationInsights" version="3.1005.0-alpha.81-vcst-4717" optional="true" />
+    <dependency id="VirtoCommerce.ApplicationInsights" version="3.1005.0-alpha.84-vcst-4717" optional="true" />
   </dependencies>
 
   <title>Background Jobs</title>
