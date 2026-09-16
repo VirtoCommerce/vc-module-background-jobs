@@ -58,4 +58,8 @@ public sealed class HangfireJobEngine(IBackgroundJobClient client) : IJobEngine
 
     public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default)
         => Task.FromResult(global::Hangfire.BackgroundJob.Delete(jobId));
+
+    // Hangfire removes a not-started job from its queue and transitions a running one to Deleted, which trips the
+    // CancellationToken already flowed through HangfireJobExecutor into the dispatcher/handler.
+    public bool SupportsCancellation => true;
 }

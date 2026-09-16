@@ -15,6 +15,8 @@ namespace VirtoCommerce.BackgroundJobs.Conformance;
 public sealed class ConformanceProbe
 {
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _completions = new();
+    private readonly ConcurrentDictionary<string, TaskCompletionSource> _started = new();
+    private readonly ConcurrentDictionary<string, TaskCompletionSource> _cancelled = new();
     private readonly ConcurrentDictionary<string, JobObservation> _jobs = new();
     private readonly ConcurrentDictionary<string, int> _executions = new();
     private readonly ConcurrentDictionary<string, ReduceObservation> _reduces = new();
@@ -43,9 +45,23 @@ public sealed class ConformanceProbe
     /// <summary>Signals that the correlation id reached its terminal success state — releases <see cref="WaitAsync"/>.</summary>
     public void SignalCompleted(string correlationId) => Completion(correlationId).TrySetResult();
 
+    /// <summary>Signals that the handler has begun executing for the correlation id — releases <see cref="WaitStartedAsync"/>.</summary>
+    public void SignalStarted(string correlationId) => Started(correlationId).TrySetResult();
+
+    /// <summary>Signals that the handler observed cancellation for the correlation id — releases <see cref="WaitCancelledAsync"/>.</summary>
+    public void SignalCancelled(string correlationId) => Cancelled(correlationId).TrySetResult();
+
     /// <summary>Waits until the correlation id signals completion, or throws <see cref="TimeoutException"/>.</summary>
     public Task WaitAsync(string correlationId, TimeSpan timeout, CancellationToken cancellationToken)
         => Completion(correlationId).Task.WaitAsync(timeout, cancellationToken);
+
+    /// <summary>Waits until the handler has started for the correlation id, or throws <see cref="TimeoutException"/>.</summary>
+    public Task WaitStartedAsync(string correlationId, TimeSpan timeout, CancellationToken cancellationToken)
+        => Started(correlationId).Task.WaitAsync(timeout, cancellationToken);
+
+    /// <summary>Waits until the handler observed cancellation for the correlation id, or throws <see cref="TimeoutException"/>.</summary>
+    public Task WaitCancelledAsync(string correlationId, TimeSpan timeout, CancellationToken cancellationToken)
+        => Cancelled(correlationId).Task.WaitAsync(timeout, cancellationToken);
 
     public JobObservation? Job(string correlationId) => _jobs.TryGetValue(correlationId, out var value) ? value : null;
 
@@ -55,6 +71,12 @@ public sealed class ConformanceProbe
 
     private TaskCompletionSource Completion(string correlationId)
         => _completions.GetOrAdd(correlationId, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+
+    private TaskCompletionSource Started(string correlationId)
+        => _started.GetOrAdd(correlationId, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+
+    private TaskCompletionSource Cancelled(string correlationId)
+        => _cancelled.GetOrAdd(correlationId, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
 
     public sealed record JobObservation
     {

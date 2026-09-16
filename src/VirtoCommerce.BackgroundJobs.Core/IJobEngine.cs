@@ -39,4 +39,6 @@ public interface IJobEngine
 
     /// <summary>Delete/cancel a job. Returns true if the job existed and was removed.</summary>
     Task<bool> Delete(string jobId, CancellationToken cancellationToken = default);
+
+    bool SupportsCancellation => false;
 }

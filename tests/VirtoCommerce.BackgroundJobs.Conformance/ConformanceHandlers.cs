@@ -21,6 +21,9 @@ public class ConformancePayload
 
     /// <summary>Report progress from the handler — drives the progress scenario.</summary>
     public bool ReportProgress { get; set; }
+
+    /// <summary>Block in the handler until the <c>CancellationToken</c> trips — drives the cancellation scenario.</summary>
+    public bool BlockUntilCancelled { get; set; }
 }
 
 /// <summary>An <c>AbstractTypeFactory</c>-derived payload, used to prove the engine round-trips the
@@ -43,6 +46,22 @@ public sealed class RecordingConformanceHandler(ConformanceProbe probe, IUserNam
         if (payload.FailAttempts > 0 && executions <= payload.FailAttempts)
         {
             throw new InvalidOperationException($"Conformance-induced failure (execution {executions} of {payload.FailAttempts}).");
+        }
+
+        // Long-running, cancellable job: signal started, then wait for the token to trip. When it does, record that the
+        // handler observed cancellation and rethrow so the engine sees the job as cancelled.
+        if (payload.BlockUntilCancelled)
+        {
+            probe.SignalStarted(payload.CorrelationId);
+            try
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                probe.SignalCancelled(payload.CorrelationId);
+                throw;
+            }
         }
 
         if (payload.ReportProgress)

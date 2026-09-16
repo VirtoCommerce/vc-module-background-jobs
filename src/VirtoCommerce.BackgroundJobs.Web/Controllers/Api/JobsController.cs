@@ -1,6 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core;
@@ -44,6 +45,26 @@ namespace VirtoCommerce.BackgroundJobs.Web.Controllers.Api
                 ?? new Job { Id = id, Completed = true };
 
             return Ok(result);
+        }
+
+        /// <summary>
+        /// Request cancellation of a background job. Best-effort and engine-dependent (see
+        /// <see cref="IBackgroundJob.Cancel"/>): a not-started job is prevented from running, a running job is asked to
+        /// stop via its cancellation token. Returns 501 when the active engine (or absence of one) cannot cancel.
+        /// </summary>
+        /// <param name="id">Job ID.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        [HttpPost]
+        [Route("{id}/cancel")]
+        public async Task<ActionResult> Cancel(string id, CancellationToken cancellationToken)
+        {
+            if (_jobEngine is null || !_jobEngine.SupportsCancellation)
+            {
+                return StatusCode(StatusCodes.Status501NotImplemented, "Cancellation is not supported by the active background-job engine.");
+            }
+
+            var canceled = await _jobEngine.Delete(id, cancellationToken);
+            return canceled ? Ok() : NotFound();
         }
     }
 }

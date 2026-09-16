@@ -13,6 +13,7 @@ using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
+using VirtoCommerce.BackgroundJobs.Data.Cancellation;
 using VirtoCommerce.Platform.Core.Common;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
@@ -74,6 +75,7 @@ public abstract class JobEngineConformanceFixture : IAsyncLifetime
             options.MaxRetryAttempts = 3;
         });
         services.AddMapReduce();
+        services.AddJobCancellationStore();
 
         // Conformance test doubles / capture.
         services.AddSingleton(Probe);

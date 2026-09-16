@@ -17,6 +17,10 @@ public static class ConformanceConstants
 
     /// <summary>Default time a scenario waits for the engine to process a job before failing.</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>Time the cancellation scenario waits for a running handler's token to trip after a cancel request.
+    /// Generous enough for cooperative engines that poll the shared store on an interval (RabbitMQ).</summary>
+    public static readonly TimeSpan CancellationTimeout = TimeSpan.FromSeconds(30);
 }
 
 /// <summary>

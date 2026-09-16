@@ -31,4 +31,9 @@ public sealed record EngineCapabilities
     /// <summary>The engine registers an <c>IRecurringJobScheduler</c> (native, like Hangfire, or the in-process
     /// generic scheduler). When false the recurring-scheduler smoke test is skipped.</summary>
     public bool SupportsRecurringScheduler { get; init; }
+
+    /// <summary>The engine reports <c>IJobEngine.SupportsCancellation</c> and can cancel a running job on demand —
+    /// natively (Hangfire) or cooperatively via the shared cancellation store (RabbitMQ). When true, cancelling a
+    /// running job trips its handler's <c>CancellationToken</c>. Skipped when unsupported.</summary>
+    public bool SupportsCancellation { get; init; }
 }
