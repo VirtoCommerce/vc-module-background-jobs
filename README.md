@@ -159,25 +159,34 @@ JobEngineBackgroundJob  ── builds JobEnvelope (serializes payload) ──►
 * **Progress** is engine-independent: handlers call `context.Progress.Report(...)`, surfaced to the admin
   notification UI over SignalR.
 
-## Telemetry (Application Insights)
+## Telemetry (OpenTelemetry)
 
 Every job — on **every** engine — emits telemetry from the shared dispatch path (`DefaultJobDispatcher`), so Hangfire,
-RabbitMQ and In-Memory are measured identically. It is **opt-in by presence**: `JobTelemetry` takes an optional
-`TelemetryClient`, so when the platform's **Application Insights** module isn't installed it resolves to `null` and
-every call is a no-op — no behavior, no cost. (The AI package is a compile-time type reference on
-`VirtoCommerce.BackgroundJobs.Data`; nothing is sent unless AI is configured.)
+RabbitMQ and In-Memory are measured identically. `JobTelemetry` uses only the standard .NET OpenTelemetry primitives
+(`ActivitySource` + `Meter`, both named `VirtoCommerce.BackgroundJobs`) — no dependency on any specific telemetry
+backend, and it never registers itself with a `TracerProviderBuilder`/`MeterProviderBuilder` (that's the host's call,
+per standard OTel library guidance — a module that self-registered would force sampling/tag-building cost even in
+installs with no telemetry configured at all). Recording is a near-zero-cost no-op unless something has registered a
+listener for that name. The [Application Insights v3 module](https://github.com/VirtoCommerce/vc-module-app-insights)
+is the platform's usual consumer, and is expected to opt every VirtoCommerce module in at once via a wildcard
+subscription — `AddSource("VirtoCommerce.*")` / `AddMeter("VirtoCommerce.*")` — rather than naming each module's
+source individually (the AI module has no reference to, and shouldn't need one to, `VirtoCommerce.BackgroundJobs` or
+any other specific module). Any OpenTelemetry exporter that does the same works equally well.
 
-**Pre-aggregated metrics** (`customMetrics`), dimensioned by the low-cardinality `engine` / `handler` / `outcome`
-(`success` \| `canceled` \| `failure`) — sampling-immune and safe for the per-series cap:
+**Pre-aggregated metrics** (`Meter` histograms → `customMetrics` when exported to Application Insights), dimensioned
+by the low-cardinality `engine` / `handler` / `outcome` (`success` \| `canceled` \| `failure`) — sampling-immune and
+safe for the per-series cap:
 
 | Metric | Meaning |
 |---|---|
 | `VirtoCommerce.BackgroundJobs/jobs/execution.duration.ms` | Handler run time. |
 | `VirtoCommerce.BackgroundJobs/jobs/queue.latency.ms` | Enqueue → dispatch delay (omitted when the enqueue-time header is absent, e.g. a redelivered legacy message). |
 
-**Drill-down event** (`customEvents`): `JobCompleted` — properties `engine`, `handler`, `outcome`, `runId`; metrics
-`executionMs`, `queueLatencyMs`. The high-cardinality `runId` is carried on the event (subject to sampling) rather
-than on the metric dimensions, so per-run analysis stays possible without blowing the metric series cap.
+**Drill-down span** (`Activity` → `dependencies` when exported to Application Insights, `ActivityKind.Internal`):
+`JobCompleted` — tags `engine`, `handler`, `outcome`, `runId`, `queueLatencyMs`; its duration is the actual handler
+run time (the activity is backdated to span the execution window). The high-cardinality `runId` is carried on the
+span (subject to sampling) rather than on the metric dimensions, so per-run analysis stays possible without blowing
+the metric series cap.
 
 Ready-made Kusto queries (throughput, p95 duration, queue latency, failure rate — sliced by engine/handler) live in
 [`docs/benchmark-kql.md`](docs/benchmark-kql.md).

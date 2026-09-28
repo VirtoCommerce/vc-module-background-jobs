@@ -12,10 +12,9 @@
     <NoWarn>1591;NU5048;NU1608</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1065.0" />
+    <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1071.0-alpha.13395-vcst-4717" />
     <PackageReference Include="StackExchange.Redis" Version="3.0.0" />
     <PackageReference Include="Cronos" Version="0.9.0" />
-    <PackageReference Include="Microsoft.ApplicationInsights" Version="2.23.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\VirtoCommerce.BackgroundJobs.Core\VirtoCommerce.BackgroundJobs.Core.csproj" />
