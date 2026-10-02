@@ -15,11 +15,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1065.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.10" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.10" />
-    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1076.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.12" />
+    <PackageReference Include="Moq" Version="4.21.0" />
     <!-- Library that DEFINES abstract test bases (not an executable test project): reference the extensibility core
          (test attributes, fixtures, TestContext) + the assertion library, not the xunit.v3 meta-package. -->
     <PackageReference Include="xunit.v3.extensibility.core" Version="3.2.2" />
