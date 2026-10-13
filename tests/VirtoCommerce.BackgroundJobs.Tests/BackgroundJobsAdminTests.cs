@@ -56,6 +56,44 @@ public class BackgroundJobsAdminTests
     }
 
     [Fact]
+    public void GetRegisteredJobs_ListsDistinctHandlers_SharingATypeName()
+    {
+        // VCST-6312: several modules register a handler class with the same simple name (LogEntityChangesJobHandler),
+        // so the default Name collides. Each distinct handler must still be listed.
+        var descriptors = new[]
+        {
+            new BackgroundJobDescriptor { Name = "LogEntityChangesJobHandler", HandlerType = "Catalog.LogEntityChangesJobHandler, Catalog", PayloadType = "Catalog.LogEntityChangesJobPayload, Catalog", Triggerable = false },
+            new BackgroundJobDescriptor { Name = "LogEntityChangesJobHandler", HandlerType = "Pricing.LogEntityChangesJobHandler, Pricing", PayloadType = "Pricing.LogEntityChangesJobPayload, Pricing", Triggerable = false },
+        };
+
+        var query = new BackgroundJobsAdminQuery(descriptors, [], Mock.Of<ISettingsManager>());
+
+        var jobs = query.GetRegisteredJobs();
+        Assert.Equal(["Catalog.LogEntityChangesJobHandler", "Pricing.LogEntityChangesJobHandler"], jobs.Select(x => x.HandlerType));
+        Assert.Equal(["Catalog.LogEntityChangesJobHandler", "Pricing.LogEntityChangesJobHandler"], jobs.Select(x => x.Name));
+
+        // Each is addressable by its listed (qualified) name; the shared short name is ambiguous and addresses none.
+        Assert.Equal("Catalog.LogEntityChangesJobHandler, Catalog", query.FindRegisteredJob("Catalog.LogEntityChangesJobHandler")?.HandlerType);
+        Assert.Equal("Pricing.LogEntityChangesJobHandler, Pricing", query.FindRegisteredJob("Pricing.LogEntityChangesJobHandler")?.HandlerType);
+        Assert.Null(query.FindRegisteredJob("LogEntityChangesJobHandler"));
+    }
+
+    [Fact]
+    public void GetRegisteredJobs_SameHandlerForSeveralPayloads_UnderOneName_QualifiesWithPayload()
+    {
+        var descriptors = new[]
+        {
+            new BackgroundJobDescriptor { Name = "multi", HandlerType = "My.Ns.MultiHandler, My.Asm", PayloadType = "My.Ns.PayloadA, My.Asm" },
+            new BackgroundJobDescriptor { Name = "multi", HandlerType = "My.Ns.MultiHandler, My.Asm", PayloadType = "My.Ns.PayloadB, My.Asm" },
+        };
+
+        var query = new BackgroundJobsAdminQuery(descriptors, [], Mock.Of<ISettingsManager>());
+
+        Assert.Equal(["My.Ns.MultiHandler:My.Ns.PayloadA", "My.Ns.MultiHandler:My.Ns.PayloadB"], query.GetRegisteredJobs().Select(x => x.Name));
+        Assert.Equal("My.Ns.PayloadB, My.Asm", query.FindRegisteredJob("My.Ns.MultiHandler:My.Ns.PayloadB")?.PayloadType);
+    }
+
+    [Fact]
     public async Task GetRecurringJobs_FixedCron_ResolvesScheduleAndNextRun()
     {
         var registration = new RecurringJobRegistration

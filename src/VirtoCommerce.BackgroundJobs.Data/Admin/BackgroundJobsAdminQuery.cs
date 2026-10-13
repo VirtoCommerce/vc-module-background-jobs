@@ -25,11 +25,7 @@ public sealed class BackgroundJobsAdminQuery(
     IRecurringJobStateStore? stateStore = null) : IBackgroundJobsAdminQuery
 {
     public IReadOnlyList<RegisteredJobInfo> GetRegisteredJobs()
-        => descriptors
-            // Last() per name to match DI's "last registration wins" (partner override), so the listed/addressed
-            // descriptor is the one that actually runs.
-            .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.Last())
+        => GetCatalog()
             .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .Select(x => new RegisteredJobInfo
             {
@@ -41,7 +37,26 @@ public sealed class BackgroundJobsAdminQuery(
             .ToList();
 
     public BackgroundJobDescriptor? FindRegisteredJob(string name)
-        => descriptors.LastOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
+        => GetCatalog().FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    // One entry per distinct handler/payload (an identical re-registration collapses, last wins). The name is the
+    // address, so when distinct handlers share one (e.g. the default type name of LogEntityChangesJobHandler, declared
+    // by several modules) each is listed and addressed by its full handler type name instead.
+    private IEnumerable<BackgroundJobDescriptor> GetCatalog()
+        => descriptors
+            .GroupBy(x => (x.HandlerType, x.PayloadType))
+            .Select(g => g.Last())
+            .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .SelectMany(g => g.Count() == 1 ? g : g.Select(x => x with { Name = QualifiedName(x, g) }));
+
+    // Full handler type name; suffixed with the payload when the same handler is registered for several payloads.
+    private static string QualifiedName(BackgroundJobDescriptor descriptor, IEnumerable<BackgroundJobDescriptor> sameName)
+    {
+        var name = TypeName(descriptor.HandlerType);
+        return sameName.Count(x => x.HandlerType == descriptor.HandlerType) == 1
+            ? name
+            : $"{name}:{TypeName(descriptor.PayloadType)}";
+    }
 
     public async Task<IReadOnlyList<RecurringJobInfo>> GetRecurringJobsAsync(CancellationToken cancellationToken = default)
     {
