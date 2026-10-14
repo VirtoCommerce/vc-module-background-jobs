@@ -3,11 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using Hangfire;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Recurring;
 using VirtoCommerce.BackgroundJobs;
@@ -112,7 +114,10 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
         // Engine-agnostic services (always registered — producers need to enqueue; the facade's IJobEngine is an
         // optional dependency, so it resolves even with no engine and throws an actionable error on use).
-        services.AddSingleton<IJobPayloadSerializer, JsonJobPayloadSerializer>();
+        // Payloads round-trip with the converters the platform and modules register on the MVC settings, as under Hangfire.
+        services.AddSingleton<IJobPayloadSerializer>(sp => new JsonJobPayloadSerializer(
+            sp.GetService<IOptions<MvcNewtonsoftJsonOptions>>()?.Value.SerializerSettings.Converters,
+            sp.GetService<IHostApplicationLifetime>()));
         // Engine-agnostic job telemetry. Its TelemetryClient dependency is optional, so this is inert unless the
         // platform's Application Insights module is installed (then jobs/* metrics + JobCompleted events flow to AI).
         services.AddSingleton<JobTelemetry>();
