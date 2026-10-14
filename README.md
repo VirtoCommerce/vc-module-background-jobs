@@ -330,6 +330,8 @@ POST /api/background-jobs/enqueue
 
 An unknown name returns **404**; a payload that doesn't match the handler returns **400**. The addressable name
 defaults to the handler's type name; pass `AddBackgroundJob<THandler, TPayload>(name: "my-name")` to set a custom one.
+When distinct handlers share a name (e.g. a `LogEntityChangesJobHandler` in several modules), each is listed and
+addressed by its full handler type name, such as `VirtoCommerce.CatalogModule.Data.Jobs.LogEntityChangesJobHandler`.
 
 ### Cancellation
 
