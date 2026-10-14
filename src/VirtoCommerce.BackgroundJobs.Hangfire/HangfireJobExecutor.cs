@@ -18,6 +18,7 @@ namespace VirtoCommerce.BackgroundJobs.Hangfire;
 /// </summary>
 public sealed class HangfireJobExecutor(IJobDispatcher dispatcher, IPushNotificationManager pushNotificationManager)
 {
+    [HandlerJobDisplayName]
     public async Task Execute(string envelopeJson, PerformContext? performContext, CancellationToken cancellationToken)
     {
         var envelope = JsonConvert.DeserializeObject<JobEnvelope>(envelopeJson)
