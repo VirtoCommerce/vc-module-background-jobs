@@ -14,11 +14,14 @@ namespace VirtoCommerce.BackgroundJobs.Core.Admin;
 /// </summary>
 public interface IBackgroundJobsAdminQuery
 {
-    /// <summary>All registered handlers, de-duplicated by name.</summary>
+    /// <summary>
+    /// All registered handlers, one per distinct handler/payload. When distinct handlers share a name, each is listed
+    /// under its full handler type name.
+    /// </summary>
     IReadOnlyList<RegisteredJobInfo> GetRegisteredJobs();
 
     /// <summary>
-    /// Finds a registered handler by its friendly name (case-insensitive), returning the raw descriptor (with the
+    /// Finds a registered handler by its name as listed by <see cref="GetRegisteredJobs"/> (case-insensitive), returning the raw descriptor (with the
     /// assembly-qualified handler/payload types needed to resolve and enqueue it), or null when unknown.
     /// </summary>
     BackgroundJobDescriptor? FindRegisteredJob(string name);

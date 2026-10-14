@@ -11,8 +11,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using VirtoCommerce.BackgroundJobs.Core;
-using VirtoCommerce.BackgroundJobs.Core.Recurring;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Data.Cancellation;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
 using VirtoCommerce.BackgroundJobs.Data.Recurring;
@@ -51,6 +49,9 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
 
     public void ConfigureHostServices(IServiceCollection services, IConfiguration config)
     {
+        services.AddSingleton<RecurringJobsApplier>();
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<RecurringJobsApplier>());
+
         var options = GetOptions(config);
         var processes = options.Mode != BackgroundJobsMode.Producer;
         if (!processes)
@@ -128,11 +129,6 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
         services.AddScoped<JobEngineBackgroundJob>();
         services.AddScoped<IBackgroundJob>(sp => sp.GetRequiredService<JobEngineBackgroundJob>());
         services.AddScoped<IBulkBackgroundJob>(sp => sp.GetRequiredService<JobEngineBackgroundJob>());
-
-        // The recurring applier is engine-agnostic and always registered; it drives whatever IRecurringJobScheduler
-        // the active engine (built-in or custom) registers, and warns when none is present.
-        services.AddSingleton<RecurringJobsApplier>();
-        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<RecurringJobsApplier>());
 
         // Map/reduce orchestration (facade + coordinators + batch store) — engine-agnostic, rides the active engine.
         services.AddMapReduce();
@@ -228,7 +224,7 @@ public class PlatformStartup : IPlatformStartup, IHasLogger
         }
 
         // For a custom (non-built-in) provider, the engine module registers its own IRecurringJobScheduler — or calls
-        // AddInProcessRecurringScheduler(). The always-registered RecurringJobsApplier (ConfigureServices) drives it.
+        // AddInProcessRecurringScheduler(). The always-registered RecurringJobsApplier (ConfigureHostServices) drives it.
     }
 
     public void Configure(IApplicationBuilder app, IConfiguration config)
