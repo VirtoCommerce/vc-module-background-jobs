@@ -1,5 +1,6 @@
 #nullable enable
 using System.Threading.Tasks;
+using Hangfire;
 
 namespace VirtoCommerce.BackgroundJobs.Hangfire;
 
@@ -10,5 +11,6 @@ namespace VirtoCommerce.BackgroundJobs.Hangfire;
 /// </summary>
 public interface IRecurringJobInvoker
 {
+    [JobDisplayName("Recurring: {0}")]
     Task Run(string recurringJobId);
 }

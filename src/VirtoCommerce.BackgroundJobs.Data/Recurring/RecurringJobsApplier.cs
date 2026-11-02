@@ -17,10 +17,7 @@ namespace VirtoCommerce.BackgroundJobs.Data.Recurring;
 
 /// <summary>
 /// Applies every recurring job declared via <c>AddRecurringJob</c> (in the platform or any module) to the active
-/// engine's <see cref="IRecurringJobScheduler"/>. Resolves the effective cron (fixed or setting-driven) and
-/// re-applies live when a watched setting changes. Registered by the background-job engine module, so it runs only
-/// when an engine is installed; as a hosted service it starts after module post-initialization, so the engine's
-/// recurring store is ready.
+/// engine's <see cref="IRecurringJobScheduler"/>.
 /// </summary>
 public sealed class RecurringJobsApplier : BackgroundService, IEventHandler<ObjectSettingChangedEvent>
 {
