@@ -167,11 +167,16 @@ RabbitMQ and In-Memory are measured identically. `JobTelemetry` uses only the st
 backend, and it never registers itself with a `TracerProviderBuilder`/`MeterProviderBuilder` (that's the host's call,
 per standard OTel library guidance — a module that self-registered would force sampling/tag-building cost even in
 installs with no telemetry configured at all). Recording is a near-zero-cost no-op unless something has registered a
-listener for that name. The [Application Insights v3 module](https://github.com/VirtoCommerce/vc-module-app-insights)
-is the platform's usual consumer, and is expected to opt every VirtoCommerce module in at once via a wildcard
-subscription — `AddSource("VirtoCommerce.*")` / `AddMeter("VirtoCommerce.*")` — rather than naming each module's
-source individually (the AI module has no reference to, and shouldn't need one to, `VirtoCommerce.BackgroundJobs` or
-any other specific module). Any OpenTelemetry exporter that does the same works equally well.
+listener for that name. Export is opt-in per deployment: add `VirtoCommerce.BackgroundJobs` to the `OpenTelemetry:Sources`
+and `OpenTelemetry:Meters` lists, which both the [Application Insights module](https://github.com/VirtoCommerce/vc-module-app-insights)
+and the [OpenTelemetry module](https://github.com/VirtoCommerce/vc-module-opentelemetry) read:
+
+```
+OpenTelemetry__Sources__0=VirtoCommerce.BackgroundJobs
+OpenTelemetry__Meters__0=VirtoCommerce.BackgroundJobs
+```
+
+Neither module references `VirtoCommerce.BackgroundJobs`; the deployment names the source, the module only declares it.
 
 **Pre-aggregated metrics** (`Meter` histograms → `customMetrics` when exported to Application Insights), dimensioned
 by the low-cardinality `engine` / `handler` / `outcome` (`success` \| `canceled` \| `failure`) — sampling-immune and

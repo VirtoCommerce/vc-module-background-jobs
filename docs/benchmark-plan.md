@@ -46,9 +46,9 @@ from the shared dispatcher (`JobTelemetry`) via the standard OpenTelemetry `Acti
   handler run time
 
 Telemetry is inert unless a host registers a listener for the `VirtoCommerce.BackgroundJobs` ActivitySource/Meter
-name. The AI v3 module does this via a wildcard subscription (`AddSource("VirtoCommerce.*")` /
-`AddMeter("VirtoCommerce.*")`) covering every VirtoCommerce module by naming convention, rather than listing this
-module by name. Broker/store depth: RabbitMQ management API + Redis `INFO memory`.
+name. For the benchmark, opt it in via `OpenTelemetry__Sources__0=VirtoCommerce.BackgroundJobs` and
+`OpenTelemetry__Meters__0=VirtoCommerce.BackgroundJobs` (read by both the Application Insights and OpenTelemetry
+modules; nothing is subscribed by default). Broker/store depth: RabbitMQ management API + Redis `INFO memory`.
 
 ## Pull vs Push (same RabbitMQ worker image)
 
