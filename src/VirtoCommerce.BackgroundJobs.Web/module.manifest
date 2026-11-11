@@ -3,9 +3,9 @@
   <id>VirtoCommerce.BackgroundJobs</id>
   <version>3.1055.0</version>
   <version-tag></version-tag>
-
-  <platformVersion>3.1095.0</platformVersion>
+  <platformVersion>3.1097.0</platformVersion>
   <dependencies>
+    <dependency id="VirtoCommerce.ApplicationInsights" version="3.1007.0" optional="true" />
   </dependencies>
 
   <title>Background Jobs</title>
