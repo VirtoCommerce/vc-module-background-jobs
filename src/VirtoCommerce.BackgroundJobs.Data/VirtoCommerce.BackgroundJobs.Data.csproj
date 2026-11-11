@@ -13,6 +13,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="VirtoCommerce.Platform.Data" Version="3.1097.0" />
+    <PackageReference Include="StackExchange.Redis" Version="3.4.5" />
     <PackageReference Include="Cronos" Version="0.9.0" />
   </ItemGroup>
   <ItemGroup>
