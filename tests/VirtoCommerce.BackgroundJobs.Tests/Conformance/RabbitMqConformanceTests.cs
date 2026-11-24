@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using VirtoCommerce.BackgroundJobs.Conformance;
@@ -29,7 +30,10 @@ public sealed class RabbitMqConformanceFixture : JobEngineConformanceFixture
         SupportsRetry = true,
         SupportsRecurringScheduler = true,
         SupportsCancellation = true,
+        ReportsAttemptBudget = true,
     };
+
+    public override int RetryBudget => 3;
 
     protected override bool TryConfigureEngine(IServiceCollection services, out string? unavailableReason)
     {
@@ -46,7 +50,7 @@ public sealed class RabbitMqConformanceFixture : JobEngineConformanceFixture
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["VirtoCommerce:BackgroundJobs:Provider"] = "RabbitMQ",
-                ["VirtoCommerce:BackgroundJobs:MaxRetryAttempts"] = "3",
+                ["VirtoCommerce:BackgroundJobs:MaxRetryAttempts"] = RetryBudget.ToString(CultureInfo.InvariantCulture),
                 ["VirtoCommerce:RabbitMQ:Uri"] = connection,
                 ["VirtoCommerce:RabbitMQ:Queues:0"] = ConformanceConstants.CustomQueue,
                 // Pin both knobs so the run is deterministic (PrefetchCount defaults to 0 = auto-scale to CPU count).

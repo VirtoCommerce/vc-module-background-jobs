@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.Platform.Core.Jobs;
 using Xunit;
 
@@ -230,5 +231,94 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
 
         // The handler's token must trip within a bounded window (cooperative engines poll on an interval).
         await fixture.Probe.WaitCancelledAsync(id, ConformanceConstants.CancellationTimeout, TestContext.Current.CancellationToken);
+    }
+
+    // The owned notification the facade creates at enqueue (ReportProgress, no ProgressNotificationId) is the one the
+    // worker closes. Its id is generated there, so a scenario finds it by the unique title it enqueued with; the facade
+    // sends it before Enqueue returns, so it is already captured.
+    private string NotificationIdOf(string title)
+        => fixture.ProgressNotifications.First(x => x.Title == title).Id;
+
+    private async Task<(string JobId, string NotificationId)> EnqueueWithNotificationAsync(ConformancePayload payload)
+    {
+        var jobId = await EnqueueAsync(payload, new EnqueueOptions { ReportProgress = true, Title = payload.CorrelationId });
+
+        return (jobId, NotificationIdOf(payload.CorrelationId));
+    }
+
+    // 14 — a failed attempt with a retry pending keeps the notification open and says which attempt of how many failed.
+    // An engine that does not report its attempt budget treats every attempt as final: the first failure closes it.
+    [Fact]
+    public async Task Retry_Pending_Keeps_Notification_Open()
+    {
+        RequireEngine();
+        Assert.SkipUnless(fixture.Capabilities.SupportsRetry, "engine does not retry failed jobs.");
+        var id = NewId();
+
+        var (_, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "retry-pending", FailAttempts = 1, ReportProgress = true });
+
+        if (fixture.Capabilities.ReportsAttemptBudget)
+        {
+            var total = fixture.RetryBudget + 1;
+            var update = await fixture.WaitForProgressAsync(
+                notificationId,
+                x => x.Description is not null && x.Description.StartsWith($"Attempt 1 of {total} failed, retrying"),
+                ConformanceConstants.DefaultTimeout);
+
+            Assert.Null(update.Finished);
+            Assert.Null(update.Outcome);
+            Assert.Equal(1, update.Attempt);
+            Assert.Equal(total, update.TotalAttempts);
+        }
+        else
+        {
+            var update = await fixture.WaitForProgressAsync(
+                notificationId, x => x.Outcome == JobOutcome.Failed, ConformanceConstants.DefaultTimeout);
+
+            Assert.NotNull(update.Finished);
+        }
+    }
+
+    // 15 — the failure that exhausts the attempts closes the notification Failed, with the error and the finish time.
+    [Fact]
+    public async Task Final_Failure_Closes_Notification_Failed()
+    {
+        RequireEngine();
+        var id = NewId();
+
+        var (_, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "final-failure", FailAlways = true, ReportProgress = true });
+
+        var closing = await fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(JobOutcome.Failed, closing.Outcome);
+        Assert.False(string.IsNullOrEmpty(closing.Error));
+        Assert.NotNull(closing.Finished);
+
+        if (fixture.Capabilities.ReportsAttemptBudget)
+        {
+            Assert.NotNull(closing.TotalAttempts);
+            Assert.Equal(closing.TotalAttempts, closing.Attempt);
+        }
+    }
+
+    // 16 — a job that returns closes its notification Succeeded.
+    [Fact]
+    public async Task Success_Closes_Notification_Succeeded()
+    {
+        RequireEngine();
+        var id = NewId();
+
+        var (_, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "success", ReportProgress = true });
+
+        var closing = await fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(JobOutcome.Succeeded, closing.Outcome);
+        Assert.Null(closing.Error);
+        Assert.NotNull(closing.Finished);
     }
 }

@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 
@@ -76,9 +76,13 @@ public sealed class InMemoryJobEngine(
                     // contract as the real engines' worker path.
                     using var scope = scopeFactory.CreateScope();
                     var dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcher>();
-                    var context = JobExecutionContextFactory.Create(pushNotificationManager, envelope, jobId);
 
-                    await dispatcher.Dispatch(envelope with { Attempt = attempt }, context, cancellationToken);
+                    // The context and the dispatcher see the same envelope: the notification shows the attempt the
+                    // context was built with, and the dispatcher decides from the same numbers whether a failure is final.
+                    var attemptEnvelope = envelope with { Attempt = attempt, TotalAttempts = maxRetries + 1 };
+                    var context = JobExecutionContextFactory.Create(pushNotificationManager, attemptEnvelope, jobId);
+
+                    await dispatcher.Dispatch(attemptEnvelope, context, cancellationToken);
 
                     _states[jobId] = "Succeeded";
                     return;

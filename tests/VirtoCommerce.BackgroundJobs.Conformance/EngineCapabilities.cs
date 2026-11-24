@@ -36,4 +36,10 @@ public sealed record EngineCapabilities
     /// natively (Hangfire) or cooperatively via the shared cancellation store (RabbitMQ). When true, cancelling a
     /// running job trips its handler's <c>CancellationToken</c>. Skipped when unsupported.</summary>
     public bool SupportsCancellation { get; init; }
+
+    /// <summary>The engine fills <c>Attempt</c> and <c>TotalAttempts</c> on the envelope before dispatch, so a failed
+    /// attempt with a retry pending keeps the job's notification open ("attempt N of M") and only the final failure
+    /// closes it. When false the engine leaves <c>TotalAttempts</c> null and every attempt counts as final: the first
+    /// failure closes the notification <c>Failed</c> (the documented fallback, asserted instead).</summary>
+    public bool ReportsAttemptBudget { get; init; }
 }

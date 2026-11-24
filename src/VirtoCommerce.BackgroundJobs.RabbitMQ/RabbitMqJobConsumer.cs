@@ -10,10 +10,10 @@ using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Cancellation;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 
@@ -216,11 +216,15 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
         try
         {
-            var context = JobExecutionContextFactory.Create(_pushNotificationManager, envelope, jobId);
+            // The attempts the job gets in all, by the same rule HandleFailureAsync retries by. Only the copy handed to the
+            // dispatcher carries it: the envelope re-published for a retry stays as received.
+            var maxRetries = Math.Max(0, envelope.MaxRetryAttempts ?? _jobsOptions.MaxRetryAttempts);
+            var attemptEnvelope = envelope with { TotalAttempts = maxRetries + 1 };
+            var context = JobExecutionContextFactory.Create(_pushNotificationManager, attemptEnvelope, jobId);
 
             _logger.LogDebug("Dispatching job {JobId} ({JobType})", jobId, envelope.JobType);
 
-            await _dispatcher.Dispatch(envelope, context, jobCts.Token);
+            await _dispatcher.Dispatch(attemptEnvelope, context, jobCts.Token);
             dispatched = true;
 
             await RunChannelOpAsync(async () => await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false));

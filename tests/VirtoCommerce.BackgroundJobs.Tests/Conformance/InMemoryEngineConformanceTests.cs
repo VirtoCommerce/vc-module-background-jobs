@@ -23,7 +23,10 @@ public sealed class InMemoryEngineConformanceFixture : JobEngineConformanceFixtu
         SupportsRetry = true,
         SupportsRecurringScheduler = true,
         SupportsCancellation = true,
+        ReportsAttemptBudget = true,
     };
+
+    public override int RetryBudget => 3;
 
     protected override bool TryConfigureEngine(IServiceCollection services, out string? unavailableReason)
     {

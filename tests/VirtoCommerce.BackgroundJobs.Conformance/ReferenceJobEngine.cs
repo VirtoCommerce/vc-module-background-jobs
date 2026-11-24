@@ -4,9 +4,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 
@@ -38,7 +38,9 @@ public sealed class ReferenceJobEngine(
 
     private async Task RunAsync(string jobId, JobEnvelope envelope, EnqueueOptions enqueueOptions)
     {
-        var maxRetries = Math.Max(0, enqueueOptions.MaxRetryAttempts ?? options.Value.MaxRetryAttempts);
+        // The envelope's per-job value rides to whichever worker runs the job; the enqueue option is the same value for
+        // a caller that did not go through the facade.
+        var maxRetries = Math.Max(0, envelope.MaxRetryAttempts ?? enqueueOptions.MaxRetryAttempts ?? options.Value.MaxRetryAttempts);
 
         for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
         {
@@ -47,8 +49,12 @@ public sealed class ReferenceJobEngine(
                 _states[jobId] = "Processing";
                 using var scope = scopeFactory.CreateScope();
                 var dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcher>();
-                var context = JobExecutionContextFactory.Create(pushNotificationManager, envelope, jobId);
-                await dispatcher.Dispatch(envelope with { Attempt = attempt }, context, CancellationToken.None);
+
+                // Fill the attempt and the attempts the job gets in all, and build the context from that same envelope, so
+                // the dispatcher can tell a failure with a retry pending from the final one.
+                var attemptEnvelope = envelope with { Attempt = attempt, TotalAttempts = maxRetries + 1 };
+                var context = JobExecutionContextFactory.Create(pushNotificationManager, attemptEnvelope, jobId);
+                await dispatcher.Dispatch(attemptEnvelope, context, CancellationToken.None);
                 _states[jobId] = "Succeeded";
                 return;
             }

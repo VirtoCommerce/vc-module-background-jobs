@@ -19,6 +19,9 @@ public class ConformancePayload
     /// <summary>Throw on the first N executions (then succeed) — drives the retry scenario. 0 = never throw.</summary>
     public int FailAttempts { get; set; }
 
+    /// <summary>Throw on every execution — drives the exhausted-retries (final failure) scenario.</summary>
+    public bool FailAlways { get; set; }
+
     /// <summary>Report progress from the handler — drives the progress scenario.</summary>
     public bool ReportProgress { get; set; }
 
@@ -41,6 +44,11 @@ public sealed class RecordingConformanceHandler(ConformanceProbe probe, IUserNam
     {
         var executions = probe.RecordExecution(
             payload.CorrelationId, payload, userNameResolver.GetCurrentUserName(), context.Headers, context.JobId);
+
+        if (payload.FailAlways)
+        {
+            throw new InvalidOperationException($"Conformance-induced failure (execution {executions}, always failing).");
+        }
 
         // Fail the first N executions so the engine's retry brings it back; succeed afterwards.
         if (payload.FailAttempts > 0 && executions <= payload.FailAttempts)
