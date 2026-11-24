@@ -22,5 +22,17 @@ public class JobProgressPushNotification : PushNotification
 
     public long TotalCount { get; set; }
 
+    /// <summary>The engine's job id, written by the worker once it runs the job (null while queued).</summary>
+    public string? JobId { get; set; }
+
+    /// <summary>A <see cref="JobOutcome"/> constant once the job ended, null while it is queued or running.</summary>
+    public string? Outcome { get; set; }
+
+    public int? Attempt { get; set; }
+
+    public int? TotalAttempts { get; set; }
+
+    public string? Error { get; set; }
+
     public ICollection<ProgressMessage> ProgressLog { get; set; } = new List<ProgressMessage>();
 }

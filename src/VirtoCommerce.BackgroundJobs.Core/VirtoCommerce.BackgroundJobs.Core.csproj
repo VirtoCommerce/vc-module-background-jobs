@@ -13,6 +13,9 @@
     <NoWarn>1591;NU5048;NU1608</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="VirtoCommerce.BackgroundJobs.Data" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="VirtoCommerce.Platform.Core" Version="3.1097.0" />
   </ItemGroup>
 </Project>

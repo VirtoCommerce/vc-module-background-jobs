@@ -9,9 +9,10 @@ using Moq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Linq;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.Platform.Core.Common;
 using VirtoCommerce.Platform.Core.Jobs;
@@ -351,6 +352,65 @@ public class BackgroundJobsTests
         Assert.Equal("default", captured.Queue);
         Assert.Equal("tester", captured.UserName);
         Assert.Contains("hi", captured.PayloadJson);
+    }
+
+    private static (JobEngineBackgroundJob Sut, List<JobProgressPushNotification> Sent) CreateFacadeWithRecordedNotifications(
+        Action<int> onEngineEnqueue = null)
+    {
+        var sent = new List<JobProgressPushNotification>();
+        var manager = new Mock<IPushNotificationManager>();
+        manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+            .Callback<PushNotification>(x => sent.Add((JobProgressPushNotification)x))
+            .Returns(Task.CompletedTask);
+
+        var engine = new Mock<IJobEngine>();
+        engine.SetupGet(x => x.ProviderName).Returns("Test");
+        engine.Setup(x => x.Enqueue(It.IsAny<JobEnvelope>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<JobEnvelope, EnqueueOptions, CancellationToken>((_, _, _) => onEngineEnqueue?.Invoke(sent.Count))
+            .ReturnsAsync("job-1");
+
+        var sut = new JobEngineBackgroundJob(
+            new JsonJobPayloadSerializer(),
+            Options.Create(new BackgroundJobsOptions { DefaultQueue = "default" }),
+            manager.Object,
+            Mock.Of<IUserNameResolver>(),
+            engine.Object);
+
+        return (sut, sent);
+    }
+
+    [Fact]
+    public async Task Enqueue_Twice_InitialNotificationsDiffer()
+    {
+        var (sut, sent) = CreateFacadeWithRecordedNotifications();
+        var options = new EnqueueOptions { ReportProgress = true };
+
+        await sut.Enqueue<RecordingHandler>(new TestPayload { Value = "a" }, options, TestContext.Current.CancellationToken);
+        await sut.Enqueue<RecordingHandler>(new TestPayload { Value = "a" }, options, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, sent.Count);
+        Assert.NotEqual(sent[0].Id, sent[1].Id);
+        Assert.NotEqual(sent[0].Description, sent[1].Description);
+        Assert.All(sent, x =>
+        {
+            Assert.True(x.IsNew);
+            Assert.NotNull(x.Started);
+            Assert.Null(x.JobId);
+        });
+    }
+
+    // Guards the no-re-send rule: the notification is sent once, before the engine takes the job; the worker owns
+    // every later update (a re-send after the engine returns could overwrite a worker update that already ran).
+    [Fact]
+    public async Task Enqueue_SendsNothingAfterEngineReturns()
+    {
+        var sentAtEngineEnqueue = -1;
+        var (sut, sent) = CreateFacadeWithRecordedNotifications(count => sentAtEngineEnqueue = count);
+
+        await sut.Enqueue<RecordingHandler>(new TestPayload { Value = "a" }, new EnqueueOptions { ReportProgress = true }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, sentAtEngineEnqueue);
+        Assert.Equal(sentAtEngineEnqueue, sent.Count);
     }
 
     [Fact]

@@ -15,7 +15,7 @@ public static class JobExecutionContextFactory
     {
         IJobProgress progress = string.IsNullOrEmpty(envelope.ProgressNotificationId)
             ? NoOpJobProgress.Instance
-            : new PushNotificationJobProgress(pushNotificationManager, envelope.ProgressNotificationId!, envelope.UserName, envelope.Title);
+            : new PushNotificationJobProgress(pushNotificationManager, envelope, jobId);
 
         return new JobExecutionContext(jobId, progress, envelope.Headers);
     }

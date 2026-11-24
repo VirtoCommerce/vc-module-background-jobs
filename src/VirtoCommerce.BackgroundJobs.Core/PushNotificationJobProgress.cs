@@ -1,6 +1,8 @@
 using System;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
+using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Modularity;
@@ -12,60 +14,139 @@ namespace VirtoCommerce.BackgroundJobs;
 /// <see cref="IJobProgress"/> that streams updates to the admin UI by sending a
 /// <see cref="JobProgressPushNotification"/> (keyed by the enqueue-time notification id) over SignalR.
 /// </summary>
-public sealed class PushNotificationJobProgress(
-    IPushNotificationManager pushNotificationManager,
-    string notificationId,
-    string? creator,
-    string? title = null) : IJobProgress
+/// <remarks>
+/// Push storage replaces a notification by id, so every send carries the whole set of display fields (title, start
+/// time, job id, attempt) — a field left out of one update is lost from the notification the admin UI shows.
+/// </remarks>
+public sealed class PushNotificationJobProgress : IJobProgress, IJobProgressComplete
 {
+    private readonly IPushNotificationManager _pushNotificationManager;
+    private readonly string _notificationId;
+    private readonly string _creator;
+    private readonly string? _title;
+    private readonly bool _owned;
+    private readonly string? _jobId;
+    private readonly DateTime? _started;
+    private readonly int? _attempt;
+    private readonly int? _totalAttempts;
+
     private long _processedCount;
     private long _totalCount;
+    private string? _lastMessage;
 
-    public async Task Report(JobProgressInfo progress, CancellationToken cancellationToken = default)
+    /// <summary>Reports into the notification as its owner, without a job id or attempt.</summary>
+    public PushNotificationJobProgress(
+        IPushNotificationManager pushNotificationManager,
+        string notificationId,
+        string? creator,
+        string? title = null)
+    {
+        _pushNotificationManager = pushNotificationManager;
+        _notificationId = notificationId;
+        _creator = creator ?? "system";
+        _title = title;
+        _owned = true;
+    }
+
+    /// <summary>
+    /// Reports for the job <paramref name="envelope"/> describes. An owned notification (the job's own) takes its start
+    /// time from the enqueue header and carries the job id; a shared one (a map/reduce batch) takes the batch start and
+    /// no job id, since the job is only one of many behind the bar.
+    /// </summary>
+    public PushNotificationJobProgress(IPushNotificationManager pushNotificationManager, JobEnvelope envelope, string jobId)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+
+        _pushNotificationManager = pushNotificationManager;
+        _notificationId = envelope.ProgressNotificationId!;
+        _creator = envelope.UserName ?? "system";
+        _title = envelope.Title;
+        _owned = envelope.CompletesProgressNotification;
+        _jobId = _owned ? jobId : null;
+        _started = ReadTicks(envelope, _owned ? JobHeaders.EnqueuedAt : JobHeaders.BatchStartedAt);
+        _attempt = envelope.Attempt;
+        _totalAttempts = envelope.TotalAttempts;
+    }
+
+    public Task Report(JobProgressInfo progress, CancellationToken cancellationToken = default)
     {
         _processedCount = progress.ProcessedCount ?? _processedCount;
         _totalCount = progress.TotalCount ?? _totalCount;
 
-        // Push storage replaces the notification by id, so each update must carry the display fields (Title) or they
-        // are lost — re-apply the title here so it doesn't reset to null after the enqueue-time notification.
-        var notification = new JobProgressPushNotification(creator ?? "system")
+        if (!string.IsNullOrEmpty(progress.Message))
         {
-            Id = notificationId,
-            Title = title,
-            Description = progress.Message,
-            ProcessedCount = _processedCount,
-            TotalCount = _totalCount,
-        };
+            _lastMessage = progress.Message;
+        }
+
+        var notification = Build(progress.Message, outcome: null, error: null, finished: null);
 
         if (!string.IsNullOrEmpty(progress.Message))
         {
             notification.ProgressLog.Add(new ProgressMessage { Message = progress.Message });
         }
 
-        await pushNotificationManager.SendAsync(notification);
+        return _pushNotificationManager.SendAsync(notification);
     }
 
     /// <summary>
-    /// Marks the notification finished (so the admin UI closes the live bar). Preserves the last reported counts and
-    /// title; records an error entry when the job failed. Called by the dispatcher when the job owns its notification.
+    /// Marks the notification finished (so the admin UI closes the live bar). Keeps the last reported counts, title and
+    /// message; records an error entry when the job failed. Does nothing for a shared notification — a single job must
+    /// not close the aggregate bar, its owner does.
     /// </summary>
-    public async Task Complete(string? error, CancellationToken cancellationToken = default)
+    public Task Complete(string outcome, string? error)
     {
-        var notification = new JobProgressPushNotification(creator ?? "system")
+        ArgumentException.ThrowIfNullOrEmpty(outcome);
+
+        if (!_owned)
         {
-            Id = notificationId,
-            Title = title,
-            Description = error ?? "Completed",
-            ProcessedCount = _processedCount,
-            TotalCount = _totalCount,
-            Finished = DateTime.UtcNow,
-        };
+            return Task.CompletedTask;
+        }
+
+        var notification = Build(_lastMessage ?? outcome, outcome, error, finished: DateTime.UtcNow);
 
         if (!string.IsNullOrEmpty(error))
         {
             notification.ProgressLog.Add(new ProgressMessage { Level = ProgressMessageLevel.Error, Message = error });
         }
 
-        await pushNotificationManager.SendAsync(notification);
+        return _pushNotificationManager.SendAsync(notification);
+    }
+
+    /// <summary>Completes as <see cref="JobOutcome.Failed"/> when <paramref name="error"/> is set, otherwise as <see cref="JobOutcome.Succeeded"/>.</summary>
+    public Task Complete(string? error, CancellationToken cancellationToken = default)
+    {
+        return Complete(error is null ? JobOutcome.Succeeded : JobOutcome.Failed, error);
+    }
+
+    private JobProgressPushNotification Build(string? description, string? outcome, string? error, DateTime? finished)
+    {
+        return JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
+            _notificationId,
+            _creator,
+            _title,
+            _started,
+            description,
+            _processedCount,
+            _totalCount,
+            _jobId,
+            _attempt,
+            _totalAttempts,
+            outcome,
+            error,
+            finished,
+            IsNew: false));
+    }
+
+    private static DateTime? ReadTicks(JobEnvelope envelope, string header)
+    {
+        if (envelope.Headers.TryGetValue(header, out var raw)
+            && long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ticks)
+            && ticks >= DateTime.MinValue.Ticks
+            && ticks <= DateTime.MaxValue.Ticks)
+        {
+            return new DateTime(ticks, DateTimeKind.Utc);
+        }
+
+        return null;
     }
 }

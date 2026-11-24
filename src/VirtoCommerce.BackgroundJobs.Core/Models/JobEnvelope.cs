@@ -55,5 +55,8 @@ public sealed record JobEnvelope
 
     public int Attempt { get; init; } = 1;
 
+    /// <summary>How many attempts the job gets in all (the first run plus its retries), shown next to <see cref="Attempt"/>; null when unknown.</summary>
+    public int? TotalAttempts { get; init; }
+
     public IReadOnlyDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
 }

@@ -6,10 +6,10 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs.Core.Notifications;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 using VirtoCommerce.Platform.Core.Security;
@@ -74,16 +74,29 @@ public sealed class JobEngineBackgroundJob(
         var userName = userNameResolver.GetCurrentUserName();
         var title = string.IsNullOrEmpty(options?.Title) ? $"Background job: {payload.GetType().Name}" : options.Title;
 
+        var enqueuedAt = DateTime.UtcNow;
+
         var progressNotificationId = options?.ProgressNotificationId;
         var ownsNotification = false;
         if (options?.ReportProgress == true && string.IsNullOrEmpty(progressNotificationId))
         {
-            var notification = new JobProgressPushNotification(userName ?? "system")
-            {
-                Title = title,
-                Description = "Queued",
-                Started = DateTime.UtcNow,
-            };
+            // The only send the facade makes: from here the worker owns the notification (it keeps this Started and
+            // adds the job id), so nothing is sent after the engine takes the job — that would race the worker.
+            var notification = JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
+                Guid.NewGuid().ToString(),
+                userName ?? "system",
+                title,
+                enqueuedAt,
+                $"Queued at {enqueuedAt:O}",
+                ProcessedCount: 0,
+                TotalCount: 0,
+                JobId: null,
+                Attempt: null,
+                TotalAttempts: null,
+                Outcome: null,
+                Error: null,
+                Finished: null,
+                IsNew: true));
             await pushNotificationManager.SendAsync(notification);
             progressNotificationId = notification.Id;
             ownsNotification = true;
@@ -93,7 +106,7 @@ public sealed class JobEngineBackgroundJob(
         // (e.g. a load-test run), the run id — so every job on every engine carries the same measurable headers.
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            [JobHeaders.EnqueuedAt] = DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture),
+            [JobHeaders.EnqueuedAt] = enqueuedAt.Ticks.ToString(CultureInfo.InvariantCulture),
         };
 
         var runId = JobEnqueueContext.RunId;
