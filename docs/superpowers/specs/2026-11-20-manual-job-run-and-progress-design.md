@@ -2,8 +2,10 @@
 
 **Date:** 2026-11-20
 **Ticket:** VCST-6934 (also takes the Hangfire part of VCST-6850 item 3, see Change log)
-**Scope:** `vc-module-background-jobs` (this repo). Companion PR: `vc-module-admin-shell` (broadcast filter, §3.10).
-No Platform.Core change: the module keeps its floor of platform **3.1097.0**.
+**Scope:** `vc-module-background-jobs` (this repo). Companion PRs: `vc-platform` (completion contract, §3.4) and
+`vc-module-admin-shell` (broadcast filter, §3.10).
+One Platform.Core change (2026-11-24, see Change log): `IJobProgress.Complete` with a default implementation and the
+`JobOutcome` enum. The module's platform floor rises from **3.1097.0** to the platform version that carries them.
 **Code read at:** `vc-module-background-jobs` `5ba4054` (dev), `vc-platform` `7b08741c6` (dev, 3.1102.0),
 `vc-module-admin-shell` `b8fa323c5` (dev), `@vc-shell/framework` tags `v2.7.0` and `v2.12.0`.
 
@@ -19,7 +21,7 @@ but nothing in the admin lets a person start it, and once it runs there is no re
 - The only entry point is `POST api/background-jobs/enqueue`. The module ships no admin UI
   (`Web/Scripts/module.js` registers nothing; there is no `vue/` plugin). The Hangfire dashboard is a developer tool
   behind `background_jobs:manage`, exists only on the Hangfire engine, and cannot create a job.
-- On platform 3.1097–3.1099, the module's supported floor, the enqueue payload does not bind: `EnqueueJobRequest.Payload`
+- On platform 3.1097–3.1099, the module's floor before this delivery, the enqueue payload does not bind: `EnqueueJobRequest.Payload`
   is a `System.Text.Json.JsonElement` while the platform's MVC formatter is Newtonsoft, so an object payload arrives
   `Undefined` and the controller enqueues `{}`. The job runs with a default payload and ends Succeeded. Observed on
   platform 3.1097.0 with this module's `dev` (§5): a `DeleteDocumentsJobHandler` payload with both fields set was
@@ -63,8 +65,9 @@ but nothing in the admin lets a person start it, and once it runs there is no re
   catch-all notification templates as they are.
 - Engine-agnostic job-state store, a job list endpoint, progress fields on `GET api/platform/jobs/{id}`, and a truthful
   status on RabbitMQ (follows in the next delivery, on top of the completion seam of §3.4).
-- Anything needing a Platform.Core release: recurring-schedule progress/title, a handler-visible "skipped" outcome,
-  per-job permissions, the attempt number on `IJobExecutionContext`, the `EnqueueOptions.UniqueKey` xmldoc.
+- Platform.Core changes other than the completion contract (§3.4): recurring-schedule progress/title, a
+  handler-visible "skipped" outcome, per-job permissions, the attempt number on `IJobExecutionContext` (stays with
+  VCST-6850, see Change log 2026-11-24), the `EnqueueOptions.UniqueKey` xmldoc.
 - VCST-6850 items other than the Hangfire raise: backoff delays, retryable exception lists, docs page.
 - Real `UniqueKey` de-duplication.
 - Changing how the global retry default resolves (`VirtoCommerce:BackgroundJobs:MaxRetryAttempts`, else the legacy
@@ -89,8 +92,8 @@ but nothing in the admin lets a person start it, and once it runs there is no re
 | retry | an attempt after a failure | — |
 | retry limit | how many retries are allowed: the job's `MaxRetryAttempts`, else the engine default; a negative value counts as 0 | `JobEnvelope.MaxRetryAttempts` |
 | final attempt | `Attempt >= TotalAttempts`, or `TotalAttempts` unknown | derived in the dispatcher |
-| outcome | how the job ended: `Succeeded`, `Failed`, `Canceled` | new static class `JobOutcome` of string constants (module Core) |
-| close the notification | set `Finished` and `Outcome`, so the UI stops showing it as running | completion seam §3.4 |
+| outcome | how the job ended: `Succeeded`, `Failed`, `Canceled` | new enum `JobOutcome` (Platform.Core, `VirtoCommerce.Platform.Core.Jobs`); the notification carries its name as a string (§3.4) |
+| close the notification | set `Finished` and `Outcome`, so the UI stops showing it as running | `IJobProgress.Complete`, §3.4 |
 | owned notification | the notification the facade created for this job (`CompletesProgressNotification` true) | `JobEnvelope.CompletesProgressNotification` |
 | shared notification | a notification several jobs report into (map/reduce batch) | `CompletesProgressNotification` false |
 
@@ -159,13 +162,19 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
 
 ### 3.4 Completion seam, job id and the notification builder
 
-- **Completion seam.** New interface `IJobProgressComplete` in `BackgroundJobs.Core` (a separate interface, because
-  `IJobProgress` is declared in Platform.Core, `VirtoCommerce.Platform.Core.Jobs`, and cannot change here):
-  `Task Complete(string outcome, string? error)`, where `outcome` is one of the constants of the static class
-  `JobOutcome` (`Succeeded`, `Failed`, `Canceled`). `PushNotificationJobProgress` and every progress wrapper
-  implement it. `DefaultJobDispatcher` tests the interface, not the concrete type (today
-  `context.Progress is PushNotificationJobProgress`). The existing public `PushNotificationJobProgress.Complete`
-  overloads stay for source compatibility.
+- **Completion seam.** `IJobProgress` (Platform.Core, `VirtoCommerce.Platform.Core.Jobs`) gains
+  `Task Complete(JobOutcome outcome, string error = null, CancellationToken cancellationToken = default)` with a
+  default implementation that does nothing, and Platform.Core gains the enum `JobOutcome` (`Succeeded`, `Failed`,
+  `Canceled`). This is the shape `IBackgroundJob.Cancel` and `SupportsCancellation` already have (VCST-5686): a
+  reporter or engine that does not close a notification keeps today's behaviour, and a module compiled against an
+  older Platform.Core keeps loading. `PushNotificationJobProgress` and every progress wrapper implement it;
+  `DefaultJobDispatcher` calls `context.Progress.Complete` (today it tests `context.Progress is
+  PushNotificationJobProgress`). The existing public `PushNotificationJobProgress.Complete(string? error, …)`
+  overload stays for source compatibility. A wrapper that does not override `Complete` still compiles and drops the
+  outcome silently: the console wrapper (§3.7) overrides it, and its task review checks the forwarding. Today's
+  implementers outside this repo need nothing: the platform's `InlineJobExecutionContext` no-op reporter, and
+  vc-module-mcp's `TrackingContext`, which wraps the context it hands to the inner handler only, while the dispatcher
+  completes the outer one.
 - **The dispatcher always delivers the outcome to the context's progress** through the seam, whether or not the
   envelope owns its notification. Ownership is decided inside the push reporter: it closes the notification only when
   `CompletesProgressNotification` is true. A wrapper (§3.7) therefore always learns the outcome, even around
@@ -188,6 +197,8 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   The initial description is unique per enqueue (it carries the enqueue time), because platform storage folds a new
   notification with the same title, type and description into the previous one
   (`PushNotificationInMemoryStorage.cs:36-48`): two Runs of the same job would otherwise share one notification.
+  `BackgroundJobs.Data` builds it through a public factory on `JobProgressPushNotification` for a queued job, so no
+  assembly needs access to Core internals.
 - **One builder produces every `JobProgressPushNotification`** (today built in `PushNotificationJobProgress.Report`/
   `Complete`, `MapReduceJob.cs:131-142`, `ReduceCoordinator.cs:120-127`). For an **owned** notification:
   - `Started` and `Created` come from the envelope's `JobHeaders.EnqueuedAt` and stay the same on every update;
@@ -199,10 +210,12 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   - `Complete` keeps the last progress message as the description and records the outcome in `Outcome` and
     `Finished`; the error goes to `Error`.
   - New fields: `JobId`, `Outcome`, `Attempt`, `TotalAttempts`, `Error`.
-  - `Outcome` is a `string` holding a `JobOutcome` constant, not a CLR enum: SignalR serializes outside MVC and has no
-    `StringEnumConverter` (vc-platform `Startup.cs:137,202`, `SignalRBuilderExtensions.cs:30`), so an enum would reach
-    the Admin Shell as a number on the live channel and as a string from storage, and a check for `"Failed"` would
-    show a failure as a success.
+  - `Outcome` on the notification is a `string` holding the `JobOutcome` name, not the enum: the live channel's enum
+    shape depends on deployment — the default System.Text.Json hub protocol (an enum as a number) without
+    `PushNotifications:ScalabilityMode`, Newtonsoft with it (vc-platform `SignalRBuilderExtensions.cs:25-33`) — while
+    storage reads go through MVC's `StringEnumConverter`. An enum would reach the Admin Shell in two shapes, and a
+    check for `"Failed"` would show a failure as a success. The enum is the C# contract; only the notification's
+    field is serialized.
 - **State across attempts.** Counts and the current message belong to the attempt: a retry runs the work again, so
   its first report starts from that attempt's own counts. `Started`, `Created`, `JobId` and the title stay the same
   across attempts; `Attempt` and `TotalAttempts` show which attempt the counts belong to.
@@ -246,9 +259,13 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   - An engine that does nothing keeps today's behaviour (the notification stays open).
 - **A job canceled before it runs, or while it waits for a retry**, is closed `Canceled` too:
   - Hangfire: an apply-state filter on `Deleted`, for a job that was `Enqueued`, `Scheduled` (a retry wait included)
-    or `Awaiting`, reads the envelope from the job's first argument and closes its notification with a synchronous
-    send; no executor will run for such a job. A job that was `Processing` is left to the executor, a finished one
-    is left alone;
+    or `Awaiting`, reads the envelope from the job's first argument and closes its notification; no executor will
+    run for such a job. A job that was `Processing` is left to the executor, a finished one is left alone. The filter
+    builds `PushNotificationJobProgress` from the envelope and the Hangfire job id, so `JobId` stays what earlier
+    attempts wrote (storage replaces a notification by id), and waits for `Complete` synchronously, as
+    `IPushNotificationManager.Send` itself does, because Hangfire state filters are synchronous. A retry-waiting
+    job's last message, counts and attempt are not in the envelope and are not kept: its closed notification shows
+    `Canceled` with the enqueue-time fields (AC 12, the one exception);
   - RabbitMQ: the pre-dispatch discard of a cancelled message (`RabbitMqJobConsumer.OnReceivedAsync`) closes it;
   - InMemory: cancellation observed outside the attempt loop (before the first attempt or between attempts) closes it.
 - **Cancel of a finished job changes nothing.** Today `POST api/platform/jobs/{id}/cancel` on a Succeeded Hangfire job
@@ -285,8 +302,8 @@ elected and the `RetryCount` that election wrote:
 
 - `HangfireJobExecutor` wraps the context's progress (the push-notification one and `NoOpJobProgress` alike) in a
   Hangfire-project wrapper that also writes to the job's console: a line when the message changes, a progress bar
-  updated when the integer percentage changes (`TotalCount > 0`, clamped to 0..100). The wrapper implements the
-  completion seam, forwards the outcome to the inner progress (§3.4) and writes a final line with the outcome.
+  updated when the integer percentage changes (`TotalCount > 0`, clamped to 0..100). The wrapper overrides
+  `IJobProgress.Complete`, forwards the outcome to the inner progress (§3.4) and writes a final line with the outcome.
 - Console errors are caught and logged; they never fail the job. Without `UseConsole()` (Memory storage) the
   Hangfire.Console calls are silent no-ops (`ConsoleContext.FromPerformContext` returns null, v1.4.3).
 
@@ -313,6 +330,8 @@ Hangfire and RabbitMQ. This delivery only adds scenarios and capability flags to
 
 ### 3.9 Documentation in this repo
 
+- README requirements: the minimum platform version rises to the one carrying `IJobProgress.Complete` (§3.4); the
+  custom-engine section names `Complete` as the way an engine closes a notification.
 - README "Retries": `EnqueueOptions.MaxRetryAttempts` is honored and may raise or lower the count on every engine
   (today's text says "not yet honored"); no upper bound.
 - README REST section: `options.progressNotificationId` is refused (§3.2).
@@ -335,7 +354,7 @@ Hangfire and RabbitMQ. This delivery only adds scenarios and capability flags to
 | Admin UI | Admin Shell Vue plugin only | AngularJS blade: legacy, no new functionality goes there |
 | After Run | progress page linked by `JobId` on the notification, `JobId` written by the worker | facade re-sends with `JobId` after `Enqueue`: races a fast worker and can turn a finished notification back into "Queued"; return the notification id from `enqueue` (body or header): not needed — the notification type reaches the shell store, so matching by `JobId` works, and the body change would break integrators; re-send only while storage still holds "Queued": a non-atomic read-then-write, narrows the race without closing it, no precedent in any module |
 | Payload binding | `JToken` + module-owned converter | raise the floor to 3.1100: depends on an unrelated converter and still loses decimals; read the raw body: lose model binding and the Swagger schema |
-| Completion | interface the dispatcher tests, outcome always delivered | dispatcher unwraps a wrapper: ties it to wrapper types; deliver only to owned notifications: the console wrapper never learns the outcome |
+| Completion | `IJobProgress.Complete` with a default implementation (Platform.Core), outcome always delivered | a module interface the dispatcher discovers by a type test (`IJobProgressComplete`, chosen first, replaced 2026-11-24): a second seam beside the platform's own, found by a cast, and the Hangfire filter needed Core internals to close a job that had not run; dispatcher unwraps a wrapper: ties it to wrapper types; deliver only to owned notifications: the console wrapper never learns the outcome |
 | Final attempt | engine supplies attempt and total, dispatcher derives "final" | engine supplies a final flag: cannot show "attempt N of M"; Hangfire state filter on `Failed`: Hangfire-only and loses counts and the last message |
 | Hangfire raise | filter applies a copy of the global `AutomaticRetryAttribute` with the job's limit, by decision table | re-implement scheduling and delays: duplicates Hangfire; a fresh attribute: wrong delays, and it only handles `FailedState` |
 | Cancel of a finished job | engine `Delete` refuses it (`false`) | hide Cancel in the UI only: the API still rewrites history for any other caller |
@@ -404,7 +423,8 @@ Each criterion names its check: `test` only where the failure is silent and harm
     handled like a handler failure: closed `Failed` on the final attempt, open while a retry is pending. — test
 12. FOR an owned notification, every update SHALL keep `Started`, `Created` and `JobId` unchanged, keep the last known
     counts within an attempt when a report omits them, and keep the job's last message as the description on
-    completion. — test
+    completion. The one exception: a Hangfire job canceled while it waits for a retry is closed with `JobId` and
+    `Started` kept but without its last message and counts (§3.5). — test
 13. WHEN a job reports into a shared notification, THEN its updates SHALL NOT close that notification — test; and
     SHALL carry the batch start time — E2E.
 14. WHEN a job enqueued with `MaxRetryAttempts = N` (N >= 0; a negative value counts as 0) fails every time, THEN every
@@ -521,6 +541,14 @@ the same assertion; items an engine may not support are capability-gated with th
   `JobId`, `Outcome` and attempts, is what other instances store and serve. The same path already carries other
   modules' derived notifications. Not reproduced on a multi-instance stand; the single-instance 3.1097 stand cannot
   observe it.
+- **The platform floor rises** (§3.4): a host on an older platform cannot install this module version. The companion
+  vc-platform PR ships first; the module pins its alpha, then its release.
+- **Live enum shape varies by deployment** (found 2026-11-24, outside this delivery): with no
+  `PushNotifications:ScalabilityMode` the hub uses System.Text.Json, which ignores the Newtonsoft
+  `[JsonConverter(typeof(StringEnumConverter))]` on `ProgressMessage.Level`, so the level arrives as a number live and
+  as a string from storage, and admin code comparing `level === 'Error'` (vc-module-admin-angular-js
+  `module-wizard-progress-step.js:34`) misses it on a single-instance host. Unifying the hub protocol changes the live
+  shape of every module's notification; a separate vc-platform ticket, not this PR.
 
 ## 10. Change log
 
@@ -556,3 +584,13 @@ the same assertion; items an engine may not support are capability-gated with th
 - 2026-11-24 — Scope extended (operator), after test 1 stopped on the case above: `JobJsonSettings` reads with
   `DateParseHandling.None` and `FloatParseHandling.Decimal` (§3.1), after a sweep of untyped payload members in other
   modules; the bulk-actions date shift on non-UTC hosts is a risk (§9) with a separate vc-module-catalog ticket.
+- 2026-11-24 — Scope changed (operator), after the Task 5a review: the completion seam moves into Platform.Core as
+  `IJobProgress.Complete` with a default implementation, plus the `JobOutcome` enum (§3.4), in a companion vc-platform
+  PR; the module's platform floor rises (lifts the earlier "no Platform.Core change"). The module interface
+  `IJobProgressComplete` and the module `JobOutcome` constants, never released, are removed, and with them every
+  `InternalsVisibleTo` this branch added: the Hangfire filter closes through the public reporter, and
+  `BackgroundJobs.Data` builds the queued notification through a public factory. The Task 5a review found that the
+  filter's closing notification dropped `JobId` for a job waiting for a retry (AC 12); it now carries the Hangfire job
+  id, and the remaining loss (last message, counts) is the AC 12 exception in §3.5. Kept out of the platform PR: the
+  attempt number on `IJobExecutionContext` (stays with VCST-6850; no handler reads its attempt today, and a Hangfire
+  job requeued after failing would report its final attempt on a fresh run), and unifying the hub's enum shape (§9).
