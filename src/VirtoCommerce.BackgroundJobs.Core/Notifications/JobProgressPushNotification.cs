@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Modularity;
 using VirtoCommerce.Platform.Core.PushNotifications;
 
@@ -14,6 +15,31 @@ public class JobProgressPushNotification : PushNotification
         NotifyType = nameof(JobProgressPushNotification);
     }
 
+    /// <summary>
+    /// The notification a job gets when it is enqueued: new, titled, and not yet picked up. <paramref name="enqueuedAt"/>
+    /// is both its start and creation time, and is written into the description so two enqueues of the same job never
+    /// share a description (platform storage folds a notification with the same title, type and description into the
+    /// previous one).
+    /// </summary>
+    public static JobProgressPushNotification CreateQueued(string creator, string title, DateTime enqueuedAt)
+    {
+        return JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
+            Guid.NewGuid().ToString(),
+            creator,
+            title,
+            enqueuedAt,
+            $"Queued at {enqueuedAt:O}",
+            ProcessedCount: 0,
+            TotalCount: 0,
+            JobId: null,
+            Attempt: null,
+            TotalAttempts: null,
+            Outcome: null,
+            Error: null,
+            Finished: null,
+            IsNew: true));
+    }
+
     public DateTime? Started { get; set; }
 
     public DateTime? Finished { get; set; }
@@ -25,7 +51,10 @@ public class JobProgressPushNotification : PushNotification
     /// <summary>The engine's job id, written by the worker once it runs the job (null while queued).</summary>
     public string? JobId { get; set; }
 
-    /// <summary>A <see cref="JobOutcome"/> constant once the job ended, null while it is queued or running.</summary>
+    /// <summary>
+    /// The name of the <see cref="JobOutcome"/> once the job ended, null while it is queued or running. A string, not the
+    /// enum: how an enum is serialized on the live channel depends on the deployment.
+    /// </summary>
     public string? Outcome { get; set; }
 
     public int? Attempt { get; set; }

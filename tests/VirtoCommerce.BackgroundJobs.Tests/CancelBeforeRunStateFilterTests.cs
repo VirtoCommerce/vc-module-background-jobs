@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
+using System.Threading.Tasks;
 using Hangfire;
 using Hangfire.Common;
 using Hangfire.States;
@@ -14,6 +15,7 @@ using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.BackgroundJobs.Hangfire;
 using VirtoCommerce.Platform.Core.PushNotifications;
 using Xunit;
+using JobOutcome = VirtoCommerce.Platform.Core.Jobs.JobOutcome;
 
 namespace VirtoCommerce.BackgroundJobs.Tests;
 
@@ -24,6 +26,8 @@ namespace VirtoCommerce.BackgroundJobs.Tests;
 /// </summary>
 public class CancelBeforeRunStateFilterTests
 {
+    private const string _hangfireJobId = "job-1";
+
     private static readonly DateTime _enqueuedAt = new(2026, 11, 24, 10, 0, 0, DateTimeKind.Utc);
 
     private static JobEnvelope CreateEnvelope() => new()
@@ -51,7 +55,7 @@ public class CancelBeforeRunStateFilterTests
             new Mock<JobStorage>().Object,
             new Mock<IStorageConnection>().Object,
             new Mock<IWriteOnlyTransaction>().Object,
-            new BackgroundJob("job-1", job, DateTime.UtcNow),
+            new BackgroundJob(_hangfireJobId, job, DateTime.UtcNow),
             new DeletedState(),
             oldStateName);
     }
@@ -60,8 +64,9 @@ public class CancelBeforeRunStateFilterTests
     {
         var sent = new List<JobProgressPushNotification>();
         var manager = new Mock<IPushNotificationManager>();
-        manager.Setup(x => x.Send(It.IsAny<PushNotification>()))
-            .Callback<PushNotification>(x => sent.Add((JobProgressPushNotification)x));
+        manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+            .Callback<PushNotification>(x => sent.Add((JobProgressPushNotification)x))
+            .Returns(Task.CompletedTask);
 
         return (new CancelBeforeRunStateFilter(manager.Object), sent);
     }
@@ -78,9 +83,9 @@ public class CancelBeforeRunStateFilterTests
 
         var closing = Assert.Single(sent);
         Assert.Equal("notification-1", closing.Id);
-        Assert.Equal(JobOutcome.Canceled, closing.Outcome);
+        Assert.Equal(nameof(JobOutcome.Canceled), closing.Outcome);
         Assert.NotNull(closing.Finished);
-        Assert.Null(closing.JobId);
+        Assert.Equal(_hangfireJobId, closing.JobId);
     }
 
     // AutomaticRetry's OnAttemptsExceeded = Delete moves a Processing job to Deleted after the dispatcher has closed

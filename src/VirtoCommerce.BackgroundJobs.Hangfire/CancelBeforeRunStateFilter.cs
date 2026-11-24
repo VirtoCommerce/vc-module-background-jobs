@@ -7,6 +7,7 @@ using Hangfire.States;
 using Hangfire.Storage;
 using Newtonsoft.Json;
 using VirtoCommerce.BackgroundJobs.Core.Models;
+using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 
 namespace VirtoCommerce.BackgroundJobs.Hangfire;
@@ -39,23 +40,25 @@ public sealed class CancelBeforeRunStateFilter(IPushNotificationManager pushNoti
                 return;
             }
 
-            var job = context.BackgroundJob?.Job;
-            if (job?.Type != typeof(HangfireJobExecutor) || job.Args is not { Count: > 0 } args || args[0] is not string envelopeJson)
+            var backgroundJob = context.BackgroundJob;
+            var job = backgroundJob?.Job;
+            if (backgroundJob is null || job?.Type != typeof(HangfireJobExecutor) || job.Args is not { Count: > 0 } args || args[0] is not string envelopeJson)
             {
                 return;
             }
 
             var envelope = ReadEnvelope(envelopeJson);
-            if (envelope is null)
+            if (envelope is null || string.IsNullOrEmpty(envelope.ProgressNotificationId))
             {
                 return;
             }
 
-            var closing = PushNotificationJobProgress.BuildClosingForJobThatDidNotRun(pushNotificationManager, envelope, JobOutcome.Canceled);
-            if (closing is not null)
-            {
-                pushNotificationManager.Send(closing);
-            }
+            // The reporter decides whether the notification is the job's to close (a shared map/reduce bar is not).
+            // Carrying the Hangfire job id keeps the JobId earlier attempts wrote: storage replaces a notification by id.
+            new PushNotificationJobProgress(pushNotificationManager, envelope, backgroundJob.Id)
+                .Complete(JobOutcome.Canceled)
+                .GetAwaiter()
+                .GetResult();
         }
         catch (Exception ex)
         {

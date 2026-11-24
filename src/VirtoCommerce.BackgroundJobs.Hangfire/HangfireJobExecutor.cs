@@ -70,7 +70,7 @@ public sealed class HangfireJobExecutor(IJobDispatcher dispatcher, IPushNotifica
     {
         try
         {
-            if (context.Progress is not IJobProgressComplete complete || performContext?.Storage is null || jobId.Length == 0)
+            if (performContext?.Storage is null || jobId.Length == 0)
             {
                 return;
             }
@@ -83,7 +83,7 @@ public sealed class HangfireJobExecutor(IJobDispatcher dispatcher, IPushNotifica
 
             if (stateName == DeletedState.StateName)
             {
-                await complete.Complete(JobOutcome.Canceled, null);
+                await context.Progress.Complete(JobOutcome.Canceled);
             }
         }
         catch (Exception ex)

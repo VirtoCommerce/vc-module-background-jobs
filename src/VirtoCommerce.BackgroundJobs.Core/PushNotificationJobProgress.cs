@@ -18,7 +18,7 @@ namespace VirtoCommerce.BackgroundJobs;
 /// Push storage replaces a notification by id, so every send carries the whole set of display fields (title, start
 /// time, job id, attempt) — a field left out of one update is lost from the notification the admin UI shows.
 /// </remarks>
-public sealed class PushNotificationJobProgress : IJobProgress, IJobProgressComplete
+public sealed class PushNotificationJobProgress : IJobProgress
 {
     private readonly IPushNotificationManager _pushNotificationManager;
     private readonly string _notificationId;
@@ -54,13 +54,6 @@ public sealed class PushNotificationJobProgress : IJobProgress, IJobProgressComp
     /// no job id, since the job is only one of many behind the bar.
     /// </summary>
     public PushNotificationJobProgress(IPushNotificationManager pushNotificationManager, JobEnvelope envelope, string jobId)
-        : this(envelope, jobId, pushNotificationManager)
-    {
-    }
-
-    // The parameter order differs from the public constructor so the two are distinct overloads: this one lets an
-    // internal caller state "no job id" (the job never ran) without a null reaching the public signature.
-    private PushNotificationJobProgress(JobEnvelope envelope, string? jobId, IPushNotificationManager pushNotificationManager)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
@@ -100,38 +93,14 @@ public sealed class PushNotificationJobProgress : IJobProgress, IJobProgressComp
     /// message; records an error entry when the job failed. Does nothing for a shared notification — a single job must
     /// not close the aggregate bar, its owner does.
     /// </summary>
-    public Task Complete(string outcome, string? error)
+    public Task Complete(JobOutcome outcome, string? error = null, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrEmpty(outcome);
-
         if (!_owned)
         {
             return Task.CompletedTask;
         }
 
-        return _pushNotificationManager.SendAsync(BuildClosing(outcome, error));
-    }
-
-    /// <summary>
-    /// The closing notification of an owned job that never ran (canceled while queued or waiting for a retry), built by
-    /// the same field rules as <see cref="Complete(string, string?)"/> but without a job id: no worker ever took it. Null
-    /// for a shared notification or an envelope with no notification id. Returned rather than sent, because the caller
-    /// is a Hangfire state filter, which cannot await.
-    /// </summary>
-    internal static JobProgressPushNotification? BuildClosingForJobThatDidNotRun(
-        IPushNotificationManager pushNotificationManager,
-        JobEnvelope envelope,
-        string outcome)
-    {
-        ArgumentNullException.ThrowIfNull(envelope);
-        ArgumentException.ThrowIfNullOrEmpty(outcome);
-
-        if (!envelope.CompletesProgressNotification || string.IsNullOrEmpty(envelope.ProgressNotificationId))
-        {
-            return null;
-        }
-
-        return new PushNotificationJobProgress(envelope, jobId: null, pushNotificationManager).BuildClosing(outcome, error: null);
+        return _pushNotificationManager.SendAsync(BuildClosing(outcome.ToString(), error));
     }
 
     private JobProgressPushNotification BuildClosing(string outcome, string? error)
@@ -149,7 +118,7 @@ public sealed class PushNotificationJobProgress : IJobProgress, IJobProgressComp
     /// <summary>Completes as <see cref="JobOutcome.Failed"/> when <paramref name="error"/> is set, otherwise as <see cref="JobOutcome.Succeeded"/>.</summary>
     public Task Complete(string? error, CancellationToken cancellationToken = default)
     {
-        return Complete(error is null ? JobOutcome.Succeeded : JobOutcome.Failed, error);
+        return Complete(error is null ? JobOutcome.Succeeded : JobOutcome.Failed, error, cancellationToken);
     }
 
     private JobProgressPushNotification Build(string? description, string? outcome, string? error, DateTime? finished)

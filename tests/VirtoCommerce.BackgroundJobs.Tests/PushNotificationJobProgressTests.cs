@@ -106,11 +106,11 @@ public class PushNotificationJobProgressTests
         var (progress, sent) = CreateProgress(CreateEnvelope());
 
         await progress.Report(new JobProgressInfo { Message = "Imported 900 of 1000, 100 errors", ProcessedCount = 900, TotalCount = 1000 }, TestContext.Current.CancellationToken);
-        await progress.Complete(JobOutcome.Succeeded, error: null);
+        await progress.Complete(JobOutcome.Succeeded, error: null, TestContext.Current.CancellationToken);
 
         var completed = sent.Last();
         Assert.Equal("Imported 900 of 1000, 100 errors", completed.Description);
-        Assert.Equal(JobOutcome.Succeeded, completed.Outcome);
+        Assert.Equal(nameof(JobOutcome.Succeeded), completed.Outcome);
         Assert.NotNull(completed.Finished);
         Assert.Equal(900, completed.ProcessedCount);
         Assert.Equal("job-1", completed.JobId);

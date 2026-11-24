@@ -274,7 +274,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         else
         {
             var update = await fixture.WaitForProgressAsync(
-                notificationId, x => x.Outcome == JobOutcome.Failed, ConformanceConstants.DefaultTimeout);
+                notificationId, x => x.Outcome == nameof(JobOutcome.Failed), ConformanceConstants.DefaultTimeout);
 
             Assert.NotNull(update.Finished);
         }
@@ -293,7 +293,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         var closing = await fixture.WaitForProgressAsync(
             notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
 
-        Assert.Equal(JobOutcome.Failed, closing.Outcome);
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
         Assert.False(string.IsNullOrEmpty(closing.Error));
         Assert.NotNull(closing.Finished);
 
@@ -317,7 +317,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         var closing = await fixture.WaitForProgressAsync(
             notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
 
-        Assert.Equal(JobOutcome.Succeeded, closing.Outcome);
+        Assert.Equal(nameof(JobOutcome.Succeeded), closing.Outcome);
         Assert.Null(closing.Error);
         Assert.NotNull(closing.Finished);
     }
@@ -373,7 +373,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
             var closing = await fixture.WaitForProgressAsync(
                 notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
 
-            Assert.Equal(JobOutcome.Canceled, closing.Outcome);
+            Assert.Equal(nameof(JobOutcome.Canceled), closing.Outcome);
             Assert.NotNull(closing.Finished);
             Assert.Null(closing.Error);
         }

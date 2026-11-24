@@ -131,7 +131,7 @@ public class HangfireConformanceTests(HangfireConformanceFixture fixture)
         Assert.Equal(total + 1, Fixture.Probe.ExecutionCount(correlationId));
 
         var last = Fixture.ProgressUpdates(notificationId).Last();
-        Assert.Equal(JobOutcome.Failed, last.Outcome);
+        Assert.Equal(nameof(JobOutcome.Failed), last.Outcome);
         Assert.NotNull(last.Finished);
         Assert.Equal(total, last.TotalAttempts);
         Assert.Equal(last.TotalAttempts, last.Attempt);
@@ -155,7 +155,7 @@ public class HangfireConformanceTests(HangfireConformanceFixture fixture)
 
         var closing = await Fixture.WaitForProgressAsync(notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
 
-        Assert.Equal(JobOutcome.Canceled, closing.Outcome);
+        Assert.Equal(nameof(JobOutcome.Canceled), closing.Outcome);
         Assert.NotNull(closing.Finished);
     }
 

@@ -82,21 +82,7 @@ public sealed class JobEngineBackgroundJob(
         {
             // The only send the facade makes: from here the worker owns the notification (it keeps this Started and
             // adds the job id), so nothing is sent after the engine takes the job — that would race the worker.
-            var notification = JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
-                Guid.NewGuid().ToString(),
-                userName ?? "system",
-                title,
-                enqueuedAt,
-                $"Queued at {enqueuedAt:O}",
-                ProcessedCount: 0,
-                TotalCount: 0,
-                JobId: null,
-                Attempt: null,
-                TotalAttempts: null,
-                Outcome: null,
-                Error: null,
-                Finished: null,
-                IsNew: true));
+            var notification = JobProgressPushNotification.CreateQueued(userName ?? "system", title, enqueuedAt);
             await pushNotificationManager.SendAsync(notification);
             progressNotificationId = notification.Id;
             ownsNotification = true;

@@ -64,7 +64,8 @@ public sealed class DefaultJobDispatcher(
                 ExceptionDispatchInfo.Throw(actual); // preserves the original stack; never returns
             }
 
-            await TryCompleteProgress(context, JobOutcome.Succeeded, error: null);
+            // Whether the notification is the job's to close (a shared map/reduce bar is not) is the reporter's decision.
+            await context.Progress.Complete(JobOutcome.Succeeded);
         }
         finally
         {
@@ -155,7 +156,7 @@ public sealed class DefaultJobDispatcher(
         var isFinal = envelope.TotalAttempts is null || envelope.Attempt >= envelope.TotalAttempts;
         if (isFinal)
         {
-            await TryCompleteProgress(context, JobOutcome.Failed, message);
+            await context.Progress.Complete(JobOutcome.Failed, message);
         }
         else
         {
@@ -164,13 +165,5 @@ public sealed class DefaultJobDispatcher(
                 Message = $"Attempt {envelope.Attempt} of {envelope.TotalAttempts} failed, retrying: {message}",
             });
         }
-    }
-
-    // Whether the notification is the job's to close (a shared map/reduce bar is not) is the reporter's decision.
-    private static Task TryCompleteProgress(IJobExecutionContext context, string outcome, string? error)
-    {
-        return context.Progress is IJobProgressComplete complete
-            ? complete.Complete(outcome, error)
-            : Task.CompletedTask;
     }
 }

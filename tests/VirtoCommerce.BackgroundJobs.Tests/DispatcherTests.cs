@@ -70,11 +70,11 @@ public class DispatcherTests
         Assert.Equal("alice", recorder.UserSeenDuringExecute);
     }
 
-    // Records what the dispatcher tells the job's progress channel; implements the completion seam like the push reporter.
-    private sealed class RecordingProgress : IJobProgress, IJobProgressComplete
+    // Records what the dispatcher tells the job's progress channel; overrides the completion seam like the push reporter.
+    private sealed class RecordingProgress : IJobProgress
     {
         public List<JobProgressInfo> Reports { get; } = [];
-        public List<(string Outcome, string Error)> Completions { get; } = [];
+        public List<(JobOutcome Outcome, string Error)> Completions { get; } = [];
 
         public Task Report(JobProgressInfo progress, CancellationToken cancellationToken = default)
         {
@@ -82,7 +82,7 @@ public class DispatcherTests
             return Task.CompletedTask;
         }
 
-        public Task Complete(string outcome, string error)
+        public Task Complete(JobOutcome outcome, string error = null, CancellationToken cancellationToken = default)
         {
             Completions.Add((outcome, error));
             return Task.CompletedTask;
