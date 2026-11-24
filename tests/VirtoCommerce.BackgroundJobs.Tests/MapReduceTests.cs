@@ -7,10 +7,12 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using VirtoCommerce.BackgroundJobs.Core.MapReduce;
 using VirtoCommerce.BackgroundJobs;
-using VirtoCommerce.BackgroundJobs.Data.Services;
+using VirtoCommerce.BackgroundJobs.Core.MapReduce;
+using VirtoCommerce.BackgroundJobs.Core.Models;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
+using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 using VirtoCommerce.Platform.Core.Security;
@@ -461,5 +463,69 @@ public class MapReduceTests
             [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"), cancellationToken: ct);
         await PumpMaps(fanOut, map, bus, ct);
         await reduce.Execute(bus.Enqueued.OfType<ReduceTaskEnvelope>().Single(), Context(), ct);
+    }
+
+    public sealed record BatchPayload(int Value);
+
+    private sealed class FailingMapTaskHandler : IBackgroundJobHandler<BatchPayload>
+    {
+        public Task Execute(BatchPayload payload, IJobExecutionContext context, CancellationToken cancellationToken = default)
+            => payload.Value == 0 ? throw new InvalidOperationException("boom") : Task.CompletedTask;
+    }
+
+    // A map task reports into the batch's shared notification; the dispatcher hands completion to every reporter, so the
+    // reporter must be the one that refuses to close a bar it does not own.
+    [Fact]
+    public async Task MapTaskProgress_DoesNotCloseSharedNotification()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var sent = new List<JobProgressPushNotification>();
+        var manager = new Mock<IPushNotificationManager>();
+        manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+            .Callback<PushNotification>(x => sent.Add((JobProgressPushNotification)x))
+            .Returns(Task.CompletedTask);
+
+        var services = new ServiceCollection();
+        services.AddTransient<IBackgroundJobHandler<BatchPayload>, FailingMapTaskHandler>();
+        using var provider = services.BuildServiceProvider();
+
+        var serializer = new JsonJobPayloadSerializer();
+        var dispatcher = new DefaultJobDispatcher(provider, serializer);
+
+        async Task<Exception?> DispatchMapTask(int value)
+        {
+            var (payloadType, payloadJson) = serializer.Serialize(new BatchPayload(value));
+            var envelope = new JobEnvelope
+            {
+                JobType = typeof(BatchPayload).AssemblyQualifiedName!,
+                PayloadType = payloadType,
+                PayloadJson = payloadJson,
+                ProgressNotificationId = "batch-1",
+                CompletesProgressNotification = false,
+                Attempt = 1,
+                TotalAttempts = 1,
+            };
+            var progress = new PushNotificationJobProgress(manager.Object, envelope, "job-1");
+            var context = new JobExecutionContext("job-1", progress, new Dictionary<string, string>());
+
+            try
+            {
+                await dispatcher.Dispatch(envelope, context, ct);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                return ex;
+            }
+        }
+
+        Assert.Null(await DispatchMapTask(1));
+        Assert.IsType<InvalidOperationException>(await DispatchMapTask(0));
+
+        Assert.All(sent, x =>
+        {
+            Assert.Null(x.Finished);
+            Assert.Null(x.Outcome);
+        });
     }
 }
