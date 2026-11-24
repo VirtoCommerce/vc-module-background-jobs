@@ -65,6 +65,12 @@ public sealed class HangfireConformanceFixture : JobEngineConformanceFixture
         {
             GlobalJobFilters.Filters.Remove(filter);
         }
+
+        // Production registers two: Hangfire's own default (10 attempts) and, after it, the module's configured one
+        // (AddHangfire does not remove the default). Hangfire keeps the later of two filters of a type, so the fixture
+        // mirrors that [default, configured] order — a reader that picks the first one would read 10 and show a total
+        // the job never reaches.
+        GlobalJobFilters.Filters.Add(new AutomaticRetryAttribute());
         GlobalJobFilters.Filters.Add(new AutomaticRetryAttribute { Attempts = RetryBudget, DelaysInSeconds = new int[RetryBudget], OnAttemptsExceeded = AttemptsExceededAction.Fail });
 
         // Run the real Hangfire server in-process; drain the default + conformance queues.
