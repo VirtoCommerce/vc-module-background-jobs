@@ -1,12 +1,12 @@
 #nullable enable
 using System;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
-using VirtoCommerce.BackgroundJobs.Core.Admin;
+using Newtonsoft.Json.Linq;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Core.Admin;
 using VirtoCommerce.BackgroundJobs.Data.Admin;
 using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.BackgroundJobs.Web.Controllers.Api;
@@ -63,7 +63,7 @@ public class BackgroundJobsExecuteTests
         var request = new EnqueueJobRequest
         {
             Name = "AdminSampleHandler",
-            Payload = JsonDocument.Parse("""{"value":"hello"}""").RootElement,
+            Payload = JToken.Parse("""{"value":"hello"}"""),
         };
 
         var result = await controller.Enqueue(request, TestContext.Current.CancellationToken);

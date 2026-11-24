@@ -17,6 +17,12 @@ namespace VirtoCommerce.BackgroundJobs;
 /// platform and modules register on the host's MVC settings (<see cref="WithConverters"/>), as Hangfire did. Without a
 /// host, <see cref="Default"/> carries the platform's <see cref="PolymorphJsonConverter"/> alone.
 /// </para>
+/// <para>
+/// Date-like strings stay strings and numbers with a fraction are read as decimals
+/// (<see cref="DateParseHandling.None"/>, <see cref="FloatParseHandling.Decimal"/>): <c>PolymorphJsonConverter.ReadJson</c>
+/// loads a polymorphic member with <c>JObject.Load</c>, which inherits these reader settings, so with the defaults a nested
+/// decimal is cut to double precision and a nested date-like string is re-formatted.
+/// </para>
 /// </summary>
 public static class JobJsonSettings
 {
@@ -30,6 +36,8 @@ public static class JobJsonSettings
         {
             ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
             NullValueHandling = NullValueHandling.Include,
+            DateParseHandling = DateParseHandling.None,
+            FloatParseHandling = FloatParseHandling.Decimal,
             Converters = converters.Select(x => x is PolymorphJsonConverter ? new NullSafeJsonConverter(x) : x).ToList(),
         };
     }

@@ -1,15 +1,16 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Admin;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Web.Models;
 using VirtoCommerce.Platform.Core.Jobs;
 
@@ -56,6 +57,19 @@ public class BackgroundJobsAdminController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<string>> Enqueue([FromBody] EnqueueJobRequest request, CancellationToken cancellationToken)
     {
+        // A body that is not valid JSON, or a payload the converter cannot read, fails model binding: answer 400 naming
+        // the failing member instead of treating the request as one with no name (or with a default payload).
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        // A REST caller cannot own a notification created elsewhere; in-process callers keep the option.
+        if (!string.IsNullOrEmpty(request?.Options?.ProgressNotificationId))
+        {
+            return BadRequest("'options.progressNotificationId' is not accepted over REST: a progress notification is created by the endpoint when 'options.reportProgress' is set.");
+        }
+
         if (string.IsNullOrWhiteSpace(request?.Name))
         {
             return BadRequest("A registered job 'name' is required.");
@@ -75,9 +89,9 @@ public class BackgroundJobsAdminController(
         }
 
         // Bind the request payload JSON to the handler's payload type. Missing/empty payload ⇒ default instance.
-        var payloadJson = request.Payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
+        var payloadJson = request.Payload is null || request.Payload.Type == JTokenType.Null
             ? "{}"
-            : request.Payload.GetRawText();
+            : request.Payload.ToString(Formatting.None);
 
         object payload;
         try
