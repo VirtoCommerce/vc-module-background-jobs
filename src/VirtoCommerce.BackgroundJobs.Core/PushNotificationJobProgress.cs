@@ -54,6 +54,13 @@ public sealed class PushNotificationJobProgress : IJobProgress, IJobProgressComp
     /// no job id, since the job is only one of many behind the bar.
     /// </summary>
     public PushNotificationJobProgress(IPushNotificationManager pushNotificationManager, JobEnvelope envelope, string jobId)
+        : this(envelope, jobId, pushNotificationManager)
+    {
+    }
+
+    // The parameter order differs from the public constructor so the two are distinct overloads: this one lets an
+    // internal caller state "no job id" (the job never ran) without a null reaching the public signature.
+    private PushNotificationJobProgress(JobEnvelope envelope, string? jobId, IPushNotificationManager pushNotificationManager)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
@@ -102,6 +109,33 @@ public sealed class PushNotificationJobProgress : IJobProgress, IJobProgressComp
             return Task.CompletedTask;
         }
 
+        return _pushNotificationManager.SendAsync(BuildClosing(outcome, error));
+    }
+
+    /// <summary>
+    /// The closing notification of an owned job that never ran (canceled while queued or waiting for a retry), built by
+    /// the same field rules as <see cref="Complete(string, string?)"/> but without a job id: no worker ever took it. Null
+    /// for a shared notification or an envelope with no notification id. Returned rather than sent, because the caller
+    /// is a Hangfire state filter, which cannot await.
+    /// </summary>
+    internal static JobProgressPushNotification? BuildClosingForJobThatDidNotRun(
+        IPushNotificationManager pushNotificationManager,
+        JobEnvelope envelope,
+        string outcome)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentException.ThrowIfNullOrEmpty(outcome);
+
+        if (!envelope.CompletesProgressNotification || string.IsNullOrEmpty(envelope.ProgressNotificationId))
+        {
+            return null;
+        }
+
+        return new PushNotificationJobProgress(envelope, jobId: null, pushNotificationManager).BuildClosing(outcome, error: null);
+    }
+
+    private JobProgressPushNotification BuildClosing(string outcome, string? error)
+    {
         var notification = Build(_lastMessage ?? outcome, outcome, error, finished: DateTime.UtcNow);
 
         if (!string.IsNullOrEmpty(error))
@@ -109,7 +143,7 @@ public sealed class PushNotificationJobProgress : IJobProgress, IJobProgressComp
             notification.ProgressLog.Add(new ProgressMessage { Level = ProgressMessageLevel.Error, Message = error });
         }
 
-        return _pushNotificationManager.SendAsync(notification);
+        return notification;
     }
 
     /// <summary>Completes as <see cref="JobOutcome.Failed"/> when <paramref name="error"/> is set, otherwise as <see cref="JobOutcome.Succeeded"/>.</summary>

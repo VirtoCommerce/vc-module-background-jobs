@@ -321,4 +321,72 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Null(closing.Error);
         Assert.NotNull(closing.Finished);
     }
+
+    // How long a scenario watches for a closing send an engine is documented NOT to make. Nothing signals the absence
+    // of an event, so the check can only wait; it runs after the cancel was observed, never in place of that wait.
+    private static readonly TimeSpan _noCloseObservation = TimeSpan.FromSeconds(1);
+
+    // 17 — a requested cancel of a running job closes its notification Canceled. An engine that cannot tell a
+    // requested cancel from a shutdown (ClosesCanceledNotification false) leaves it open: the documented fallback.
+    [Fact]
+    public async Task Running_Job_Cancel_Closes_Notification_Canceled()
+    {
+        RequireEngine();
+        Assert.SkipUnless(fixture.Capabilities.SupportsCancellation, "engine does not support cancellation.");
+        var id = NewId();
+
+        var (jobId, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "cancel-notification", BlockUntilCancelled = true });
+        await fixture.Probe.WaitStartedAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+
+        var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
+        Assert.True(accepted, "the engine must accept the cancellation request for a known, running job.");
+
+        await AssertCancelOutcomeAsync(id, notificationId, observeHandlerCancel: true);
+    }
+
+    // 18 — the same for a job that never ran: it is canceled while still queued, so no worker will ever close it.
+    [Fact]
+    public async Task Queued_Job_Cancel_Closes_Notification_Canceled()
+    {
+        RequireEngine();
+        Assert.SkipUnless(fixture.Capabilities.CanHoldQueuedJob, "engine cannot hold a job queued.");
+        Assert.SkipUnless(fixture.Capabilities.SupportsDelete, "engine does not support delete.");
+        var id = NewId();
+
+        var jobId = await EnqueueAsync(
+            new ConformancePayload { CorrelationId = id, Value = "cancel-queued" },
+            new EnqueueOptions { ReportProgress = true, Title = id, Queue = fixture.UnservedQueue });
+        var notificationId = NotificationIdOf(id);
+
+        var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
+        Assert.True(accepted, "the engine must accept the cancellation request for a known, queued job.");
+
+        await AssertCancelOutcomeAsync(id, notificationId, observeHandlerCancel: false);
+        Assert.Equal(0, fixture.Probe.ExecutionCount(id));
+    }
+
+    private async Task AssertCancelOutcomeAsync(string correlationId, string notificationId, bool observeHandlerCancel)
+    {
+        if (fixture.Capabilities.ClosesCanceledNotification)
+        {
+            var closing = await fixture.WaitForProgressAsync(
+                notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+            Assert.Equal(JobOutcome.Canceled, closing.Outcome);
+            Assert.NotNull(closing.Finished);
+            Assert.Null(closing.Error);
+        }
+        else
+        {
+            if (observeHandlerCancel)
+            {
+                await fixture.Probe.WaitCancelledAsync(correlationId, ConformanceConstants.CancellationTimeout, TestContext.Current.CancellationToken);
+            }
+
+            await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain(fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);
+        }
+    }
 }

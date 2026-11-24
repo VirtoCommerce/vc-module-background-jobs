@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Hangfire;
+using Hangfire.States;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using VirtoCommerce.BackgroundJobs;
@@ -35,6 +36,8 @@ public sealed class HangfireConformanceFixture : JobEngineConformanceFixture
         SupportsRecurringScheduler = true,
         SupportsCancellation = true,
         ReportsAttemptBudget = true,
+        ClosesCanceledNotification = true,
+        CanHoldQueuedJob = true,
     };
 
     public override int RetryBudget => 3;
@@ -83,6 +86,11 @@ public sealed class HangfireConformanceFixture : JobEngineConformanceFixture
         // The engine's GetStatus / Delete / expression enqueue use Hangfire's static JobStorage.Current; point it at
         // the same storage instance the DI-hosted server uses so they agree.
         JobStorage.Current = services.GetRequiredService<JobStorage>();
+
+        // This fixture never runs UseHangfire, which is where production installs the filters that need the container;
+        // register them from this fixture's provider, replacing any left by an earlier fixture in the process.
+        HangfireJobFilterRegistration.RegisterServiceFilters(services);
+
         await base.StartWorkerAsync(services, cancellationToken);
     }
 }
@@ -127,5 +135,83 @@ public class HangfireConformanceTests(HangfireConformanceFixture fixture)
         Assert.NotNull(last.Finished);
         Assert.Equal(total, last.TotalAttempts);
         Assert.Equal(last.TotalAttempts, last.Attempt);
+    }
+
+    // The Hangfire dashboard's Delete moves the job to Deleted through the client; no engine method is involved, so
+    // nothing but the executor's own read of the stored state can tell this cancel from a shutdown.
+    [Fact]
+    public async Task Running_Job_Deleted_Without_Engine_Closes_Canceled()
+    {
+        var title = Guid.NewGuid().ToString("N");
+        var correlationId = Guid.NewGuid().ToString("N");
+
+        var jobId = await EnqueueBlockingJobAsync(title, correlationId);
+        var notificationId = Fixture.ProgressNotifications.First(x => x.Title == title).Id;
+        await Fixture.Probe.WaitStartedAsync(correlationId, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+
+        Assert.True(
+            Fixture.Services.GetRequiredService<IBackgroundJobClient>().ChangeState(jobId, new DeletedState(), ProcessingState.StateName),
+            "Hangfire refused to move the running job to Deleted.");
+
+        var closing = await Fixture.WaitForProgressAsync(notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(JobOutcome.Canceled, closing.Outcome);
+        Assert.NotNull(closing.Finished);
+    }
+
+    // A requeue (the dashboard's Requeue button, or a worker lost to another server) trips the running job's token
+    // exactly as a cancel does, but Hangfire runs the job again: the notification must stay open for that second run.
+    [Fact]
+    public async Task Running_Job_Requeued_Stays_Open()
+    {
+        var title = Guid.NewGuid().ToString("N");
+        var correlationId = Guid.NewGuid().ToString("N");
+
+        var jobId = await EnqueueBlockingJobAsync(title, correlationId);
+        var notificationId = Fixture.ProgressNotifications.First(x => x.Title == title).Id;
+        await Fixture.Probe.WaitStartedAsync(correlationId, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+
+        try
+        {
+            Assert.True(Fixture.Services.GetRequiredService<IBackgroundJobClient>().Requeue(jobId), "Hangfire refused to requeue the running job.");
+
+            // A requeued job is picked up again at once, while the first run is still blocked: it is the first run's
+            // token tripping (Hangfire notices the state change on its next poll) that ends it, and that is the moment
+            // its state gets classified. So wait for the second execution and for the first to observe the cancel.
+            await WaitForExecutionCountAsync(correlationId, 2);
+            await Fixture.Probe.WaitCancelledAsync(correlationId, ConformanceConstants.CancellationTimeout, TestContext.Current.CancellationToken);
+
+            // Nothing signals that a send did not happen, so watch for a wrong close for a bounded time; the classifier
+            // runs right after the handler rethrows, well inside it.
+            await Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain(Fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);
+        }
+        finally
+        {
+            // Release the job still blocked in its second run, so it does not outlive the test.
+            Fixture.Services.GetRequiredService<IBackgroundJobClient>().Delete(jobId);
+        }
+    }
+
+    private async Task<string> EnqueueBlockingJobAsync(string title, string correlationId)
+    {
+        using var scope = Fixture.Services.CreateScope();
+        var jobs = scope.ServiceProvider.GetRequiredService<IBackgroundJob>();
+
+        return await jobs.Enqueue<RecordingConformanceHandler>(
+            new ConformancePayload { CorrelationId = correlationId, BlockUntilCancelled = true },
+            new EnqueueOptions { ReportProgress = true, Title = title },
+            TestContext.Current.CancellationToken);
+    }
+
+    private async Task WaitForExecutionCountAsync(string correlationId, int count)
+    {
+        var deadline = DateTime.UtcNow + ConformanceConstants.DefaultTimeout;
+        while (Fixture.Probe.ExecutionCount(correlationId) < count)
+        {
+            Assert.True(DateTime.UtcNow < deadline, $"Timed out waiting for execution {count} of the job; saw {Fixture.Probe.ExecutionCount(correlationId)}.");
+            await Task.Delay(TimeSpan.FromMilliseconds(25), TestContext.Current.CancellationToken);
+        }
     }
 }

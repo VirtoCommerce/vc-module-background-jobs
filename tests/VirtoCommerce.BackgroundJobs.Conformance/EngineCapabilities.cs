@@ -42,4 +42,14 @@ public sealed record EngineCapabilities
     /// closes it. When false the engine leaves <c>TotalAttempts</c> null and every attempt counts as final: the first
     /// failure closes the notification <c>Failed</c> (the documented fallback, asserted instead).</summary>
     public bool ReportsAttemptBudget { get; init; }
+
+    /// <summary>A requested cancel (<c>Delete</c>) of a running or queued job closes its notification with outcome
+    /// <c>Canceled</c>, because the engine can tell a requested cancel from a shutdown or a lost lock. When false the
+    /// notification stays open after a cancel (the documented fallback, asserted instead).</summary>
+    public bool ClosesCanceledNotification { get; init; }
+
+    /// <summary>The engine can keep a job queued without running it, so a scenario can cancel a job that never ran:
+    /// enqueued onto <see cref="JobEngineConformanceFixture.UnservedQueue"/>, which no worker drains. Skipped when
+    /// unsupported (an engine that runs a job at once, or has no queue to hold it in).</summary>
+    public bool CanHoldQueuedJob { get; init; }
 }

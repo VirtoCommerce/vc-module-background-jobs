@@ -62,6 +62,10 @@ public abstract class JobEngineConformanceFixture : IAsyncLifetime
     /// this value, so a scenario states its expectation as <c>RetryBudget + 1</c> and never as a literal.</summary>
     public virtual int RetryBudget => 3;
 
+    /// <summary>A queue no worker of the engine under test drains, so a job enqueued onto it stays queued. Used by
+    /// scenarios gated on <see cref="EngineCapabilities.CanHoldQueuedJob"/>.</summary>
+    public virtual string UnservedQueue => "conformance-unserved";
+
     /// <summary>The sends to one notification, in arrival order.</summary>
     public IReadOnlyList<JobProgressPushNotification> ProgressUpdates(string notificationId)
         => _progressUpdates.Where(x => x.Id == notificationId).ToList();

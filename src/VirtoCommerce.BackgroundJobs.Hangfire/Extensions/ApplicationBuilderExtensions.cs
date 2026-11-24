@@ -78,6 +78,8 @@ namespace VirtoCommerce.Platform.Hangfire.Extensions
                 GlobalJobFilters.Filters.Add(new HangfireUserContextMiddleware(userNameResolver));
             }
 
+            HangfireJobFilterRegistration.RegisterServiceFilters(appBuilder.ApplicationServices);
+
             var toolRegistrar = appBuilder.ApplicationServices.GetService<IDeveloperToolRegistrar>();
             toolRegistrar.RegisterDeveloperTool(new DeveloperToolDescriptor
             {
