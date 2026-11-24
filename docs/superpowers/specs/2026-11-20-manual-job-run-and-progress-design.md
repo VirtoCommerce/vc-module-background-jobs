@@ -89,7 +89,7 @@ but nothing in the admin lets a person start it, and once it runs there is no re
 | retry | an attempt after a failure | — |
 | retry limit | how many retries are allowed: the job's `MaxRetryAttempts`, else the engine default; a negative value counts as 0 | `JobEnvelope.MaxRetryAttempts` |
 | final attempt | `Attempt >= TotalAttempts`, or `TotalAttempts` unknown | derived in the dispatcher |
-| outcome | how the job ended: `Succeeded`, `Failed`, `Canceled` | new `JobOutcome` (module Core) |
+| outcome | how the job ended: `Succeeded`, `Failed`, `Canceled` | new static class `JobOutcome` of string constants (module Core) |
 | close the notification | set `Finished` and `Outcome`, so the UI stops showing it as running | completion seam §3.4 |
 | owned notification | the notification the facade created for this job (`CompletesProgressNotification` true) | `JobEnvelope.CompletesProgressNotification` |
 | shared notification | a notification several jobs report into (map/reduce batch) | `CompletesProgressNotification` false |
@@ -152,7 +152,8 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
 
 - **Completion seam.** New interface `IJobProgressComplete` in `BackgroundJobs.Core` (a separate interface, because
   `IJobProgress` is declared in Platform.Core, `VirtoCommerce.Platform.Core.Jobs`, and cannot change here):
-  `Task Complete(JobOutcome outcome, string? error)`. `PushNotificationJobProgress` and every progress wrapper
+  `Task Complete(string outcome, string? error)`, where `outcome` is one of the constants of the static class
+  `JobOutcome` (`Succeeded`, `Failed`, `Canceled`). `PushNotificationJobProgress` and every progress wrapper
   implement it. `DefaultJobDispatcher` tests the interface, not the concrete type (today
   `context.Progress is PushNotificationJobProgress`). The existing public `PushNotificationJobProgress.Complete`
   overloads stay for source compatibility.
@@ -189,6 +190,10 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   - `Complete` keeps the last progress message as the description and records the outcome in `Outcome` and
     `Finished`; the error goes to `Error`.
   - New fields: `JobId`, `Outcome`, `Attempt`, `TotalAttempts`, `Error`.
+  - `Outcome` is a `string` holding a `JobOutcome` constant, not a CLR enum: SignalR serializes outside MVC and has no
+    `StringEnumConverter` (vc-platform `Startup.cs:137,202`, `SignalRBuilderExtensions.cs:30`), so an enum would reach
+    the Admin Shell as a number on the live channel and as a string from storage, and a check for `"Failed"` would
+    show a failure as a success.
 - **State across attempts.** Counts and the current message belong to the attempt: a retry runs the work again, so
   its first report starts from that attempt's own counts. `Started`, `Created`, `JobId` and the title stay the same
   across attempts; `Attempt` and `TotalAttempts` show which attempt the counts belong to.
@@ -217,18 +222,24 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
     failure like any other exception.
 - **The engine closes the notification `Canceled` when the cancel was requested**, through the completion seam,
   because only the engine knows who tripped the token:
-  - Hangfire: an apply-state filter on `Deleted` records the cancel intent in `IJobCancellationStore` when the job
-    was `Processing`; the executor closes `Canceled` only on an `OperationCanceledException` with a recorded intent
-    for its job id. The filter sees every move to `Deleted`, so a cancel through the API and a delete from the Hangfire
-    dashboard are handled alike. `JobAbortedException` is not usable for this: Hangfire raises it outside the
-    executor, and also on an ownership change or requeue (`CoreBackgroundJobPerformer.HandleJobPerformanceException`,
-    v1.8.23).
+  - Hangfire: a cancel is a move to `Deleted` (`HangfireJobEngine.Delete`, or Delete in the Hangfire dashboard). The
+    worker trips a running job's token when it reads a state other than `Processing` on its own server and worker
+    from storage, and the same token is linked to host shutdown (`ServerJobCancellationToken.IsJobStateChanged`,
+    v1.8.23). So on an `OperationCanceledException` with the dispatch token cancelled, `HangfireJobExecutor` reads the
+    job's current state from Hangfire storage (`IStorageConnection.GetStateData`): `Deleted` → close `Canceled`;
+    anything else keeps the notification open — `Processing` here is a shutdown, `Processing` on another server or
+    worker is an ownership change, `Enqueued` is a requeue, and Hangfire runs the job again in each case. The storage
+    is shared by every instance, so a cancel accepted by one instance and a job run by another are classified alike,
+    with or without Redis. `JobAbortedException` is not usable for this: Hangfire raises it outside the executor, and
+    also on an ownership change or requeue (`CoreBackgroundJobPerformer.HandleJobPerformanceException`, v1.8.23).
   - RabbitMQ: the job's token was tripped by the cancellation store (`RabbitMqJobEngine.Delete` is its only writer).
   - InMemory: the job's own `CancellationTokenSource` was canceled by `Delete`.
   - An engine that does nothing keeps today's behaviour (the notification stays open).
 - **A job canceled before it runs, or while it waits for a retry**, is closed `Canceled` too:
-  - Hangfire: the same `Deleted` filter, for a job that was `Enqueued`, `Scheduled` or `Awaiting`, reads the envelope
-    from the job's first argument and closes its notification (a job already finished is left alone);
+  - Hangfire: an apply-state filter on `Deleted`, for a job that was `Enqueued`, `Scheduled` (a retry wait included)
+    or `Awaiting`, reads the envelope from the job's first argument and closes its notification with a synchronous
+    send; no executor will run for such a job. A job that was `Processing` is left to the executor, a finished one
+    is left alone;
   - RabbitMQ: the pre-dispatch discard of a cancelled message (`RabbitMqJobConsumer.OnReceivedAsync`) closes it;
   - InMemory: cancellation observed outside the attempt loop (before the first attempt or between attempts) closes it.
 - **Cancel of a finished job changes nothing.** Today `POST api/platform/jobs/{id}/cancel` on a Succeeded Hangfire job
@@ -316,7 +327,7 @@ Hangfire and RabbitMQ. This delivery only adds scenarios and capability flags to
 | Final attempt | engine supplies attempt and total, dispatcher derives "final" | engine supplies a final flag: cannot show "attempt N of M"; Hangfire state filter on `Failed`: Hangfire-only and loses counts and the last message |
 | Hangfire raise | filter applies a copy of the global `AutomaticRetryAttribute` with the job's limit, by decision table | re-implement scheduling and delays: duplicates Hangfire; a fresh attribute: wrong delays, and it only handles `FailedState` |
 | Cancel of a finished job | engine `Delete` refuses it (`false`) | hide Cancel in the UI only: the API still rewrites history for any other caller |
-| Hangfire cancel intent | apply-state filter on `Deleted` records it | `HangfireJobEngine.Delete` records it: misses a delete from the Hangfire dashboard |
+| Hangfire cancel of a running job | the executor reads the job's state from Hangfire storage on `OperationCanceledException` | a `Deleted` filter records the intent in `IJobCancellationStore`: without Redis that store lives in one process, so a cancel accepted by a web instance is invisible to the worker running the job and the notification stays open; the filter is synchronous while the store is asynchronous, and runs before the state is committed; `HangfireJobEngine.Delete` records it: misses a delete from the Hangfire dashboard |
 | User cancel vs shutdown | each engine classifies its own cancel and closes `Canceled` | any `OperationCanceledException` in the dispatcher: a lost lock or host shutdown would close a job the engine re-runs; `IJobCancellationStore.IsCancelRequested` in the dispatcher: only RabbitMQ writes that store today; Hangfire `JobAbortedException`: raised outside the executor and also on requeue |
 | Broadcast leak | host filter in `vc-module-admin-shell` | filter in this plugin: one filter per app, the plugin would overwrite the host's; stop broadcasting in the platform: breaks scale-out sync |
 
@@ -351,7 +362,7 @@ Each criterion names its check: `test` only where the failure is silent and harm
    full-precision decimals and date-like strings included. — test
 2. WHEN the enqueue request body is not valid JSON or its `payload` cannot be read, THEN the endpoint SHALL NOT
    enqueue a job — in particular not one with the default payload — and SHALL answer 400 naming the failing member.
-   — test (no enqueue); E2E (the message)
+   — E2E (the "no enqueue" half is supplied by the framework, see §8 item 2)
 3. WHEN an enqueue request carries `options.progressNotificationId`, THEN the endpoint SHALL answer 400 naming that
    field and SHALL NOT enqueue a job. — test
 4. WHERE the user has `background-jobs:access`, THE Admin Shell SHALL show a "Background jobs" menu item. — E2E
@@ -370,7 +381,8 @@ Each criterion names its check: `test` only where the failure is silent and harm
 10. WHEN the user cancels a job that is running, queued or waiting for a retry, THEN its notification SHALL be closed
     as `Canceled` on every engine that declares cancel support. WHEN an `OperationCanceledException` arises while the
     dispatch token is cancelled and no cancel was requested, THEN the notification SHALL stay open. WHEN it arises
-    while the dispatch token is not cancelled, THEN it SHALL be handled as a failure. — test
+    while the dispatch token is not cancelled, THEN it SHALL be handled as a failure. — test; E2E for a
+    retry-waiting job on engines other than Hangfire (§8 item 5)
 11. WHEN the dispatcher fails before the handler runs (payload, type or handler resolution), THEN the failure SHALL be
     handled like a handler failure: closed `Failed` on the final attempt, open while a retry is pending. — test
 12. FOR an owned notification, every update SHALL keep `Started`, `Created` and `JobId` unchanged, keep the last known
@@ -422,16 +434,21 @@ the same assertion; items an engine may not support are capability-gated with th
    without a stand-in for the 3.1100 global `JsonElementJsonConverter` (absent from Platform.Core 3.1097): a payload
    with a polymorphic member, a high-precision decimal and a date-like string reaches the handler unchanged. Data,
    wrong value. (AC 1)
-2. Body that is not valid JSON, and a payload the converter cannot read → no job enqueued (the engine receives
-   nothing). Data, a job run with the default payload. (AC 2)
+2. Dropped (2026-11-24): it cannot fail. On any deserialization error the Newtonsoft input formatter returns no
+   model (`NewtonsoftJsonInputFormatter`, aspnetcore v10.0.0, lines 176-205) or rethrows (500), the controller has
+   no `[ApiController]`, and `Enqueue` already answers 400 to a null request before anything is enqueued — with or
+   without the new `ModelState` check. AC 2 is checked by E2E. The number is kept so later items keep theirs.
 3. `options.progressNotificationId` on REST → 400, no enqueue. Security, another person's notification. (AC 3)
 4. Conformance: failing attempt with a retry pending leaves the notification open with attempt N of M; the final
    failure (`Attempt >= TotalAttempts`) closes it `Failed` with the error; success closes `Succeeded`. Lost message.
    (AC 8, 9; on the Hangfire fixture also AC 15 and the closing half of AC 17)
-5. Conformance: user cancel of a running, a queued and a retry-waiting job closes `Canceled` (on the Hangfire fixture
-   also a running job moved to `Deleted` without the engine, as the dashboard does); an
-   `OperationCanceledException` with the dispatch token cancelled and no request leaves it open; one with the token not
-   cancelled closes `Failed` on the final attempt. Wrong state. (AC 10)
+5. Conformance: user cancel of a running and a queued job closes `Canceled`; on the Hangfire fixture also a running
+   job moved to `Deleted` without the engine (as the dashboard does) closes `Canceled`, and a running job requeued
+   without a cancel stays open; an `OperationCanceledException` with the dispatch token cancelled and no request
+   leaves it open; one with the token not cancelled closes `Failed` on the final attempt. A retry-waiting job: a unit
+   test of the Hangfire `Deleted` filter with old state `Scheduled` closes its notification `Canceled`; no fixture can
+   hold a job in a retry wait (the Hangfire fixture retries instantly, InMemory has no pause), so other engines are
+   checked by E2E. Wrong state. (AC 10)
 6. Dispatcher: payload that does not deserialize, on final and non-final attempts. Item left in a wrong state. (AC 11)
 7. Notification builder: stable `Started`/`Created`/`JobId` across updates and attempts, counts kept within an
    attempt, last message kept on completion. Lost or wrong value. (AC 12)
@@ -455,9 +472,13 @@ the same assertion; items an engine may not support are capability-gated with th
 - **Every non-opted-out handler is triggerable**, recurring ones included (`AddRecurringJob` registers with
   `triggerable: true`): the platform's token and sign-in-log cleanups and auto lockout. Run will list and start them.
   Recorded, not changed.
-- **Hangfire cancel classification** rests on the `Deleted` state filter running before Hangfire notices the state
-  change and aborts the running job (read from Hangfire v1.8.23 source, not run). Proven by test 5 on the Hangfire
-  fixture.
+- **Hangfire cancel classification** rests on Hangfire tripping a running job's token only after it has read a
+  committed state other than `Processing` (`ServerJobCancellationToken.IsJobStateChanged`, v1.8.23, read from source,
+  not run), so the executor's own read sees `Deleted`. Proven by test 5 on the Hangfire fixture. A shutdown and a
+  cancel at the same moment read `Deleted` and close `Canceled`, which is what the user asked for.
+- **The `Deleted` filter for a job not yet running** runs inside Hangfire's state transition, before the commit. A
+  transition that fails after the filter has run leaves a notification closed `Canceled` for a job still queued.
+  Accepted: the filter does no storage work of its own, and a failed transition is loud in Hangfire's log.
 - **Hangfire raise** applies `AutomaticRetryAttribute` inside another filter's election; proven by test 9 on the
   Hangfire conformance fixture (MemoryStorage, instant retries) and by E2E on SQL storage.
 - **Progress page start state**: before the first worker update the page knows only the job id. A job that dies
@@ -497,3 +518,10 @@ the same assertion; items an engine may not support are capability-gated with th
   cancel intent is recorded by the `Deleted` state filter (covers the dashboard); new conformance flags default to
   `false`, the one-job-id scenario runs on every engine; a ticket for the search module is drafted (live
   `DeleteDocumentsJobHandler` surface, send-after-enqueue race). Spec accepted by the operator.
+- 2026-11-24 — Revised after plan review (two independent reviews), decisions by the operator: Hangfire classifies a
+  cancel of a running job by reading the job's state from Hangfire storage, not by an intent recorded in
+  `IJobCancellationStore` (lost across instances without Redis); the `Deleted` filter only closes jobs not yet
+  running; `Outcome` is a string from the static class `JobOutcome`, not an enum (SignalR sends enums as numbers);
+  test 2 dropped, AC 2 checked by E2E; the retry-waiting cancel is covered by a Hangfire filter unit test, other
+  engines by E2E, and test 5 gains the dashboard delete and requeue cases. If test 1 shows `PolymorphJsonConverter`
+  altering a decimal or a date-like string, implementation stops for a decision before `JobJsonSettings` changes.
