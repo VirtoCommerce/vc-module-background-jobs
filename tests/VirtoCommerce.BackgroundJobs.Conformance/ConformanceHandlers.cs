@@ -60,6 +60,14 @@ public sealed class RecordingConformanceHandler(ConformanceProbe probe, IUserNam
         // handler observed cancellation and rethrow so the engine sees the job as cancelled.
         if (payload.BlockUntilCancelled)
         {
+            // A blocked job that reports does so before it signals, so a scenario that saw the start also saw the update.
+            if (payload.ReportProgress)
+            {
+                await context.Progress.Report(
+                    new JobProgressInfo { Message = ConformanceConstants.ProgressMessage, ProcessedCount = 1, TotalCount = 1 },
+                    cancellationToken);
+            }
+
             probe.SignalStarted(payload.CorrelationId);
             try
             {

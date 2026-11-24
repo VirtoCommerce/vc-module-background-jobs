@@ -37,11 +37,9 @@ public sealed class HangfireJobExecutor(IJobDispatcher dispatcher, IPushNotifica
         // count and so counts as its last attempt, which is what makes a failure there close the notification.
         var enriched = performContext?.BackgroundJob is null
             ? envelope
-            : envelope with
-            {
-                Attempt = performContext.GetJobParameter<int>(PerJobRetryFilterAttribute.RetryCountParameter, allowStale: true) + 1,
-                TotalAttempts = HangfireGlobalRetry.AttemptsFor(envelope) + 1,
-            };
+            : HangfireGlobalRetry.WithAttemptBudget(
+                envelope,
+                performContext.GetJobParameter<int>(PerJobRetryFilterAttribute.RetryCountParameter, allowStale: true));
 
         // Shared factory builds the progress context, so the notification title is threaded consistently across engines.
         // The context and the dispatcher must see the same envelope: the notification shows the attempt the context was built with.

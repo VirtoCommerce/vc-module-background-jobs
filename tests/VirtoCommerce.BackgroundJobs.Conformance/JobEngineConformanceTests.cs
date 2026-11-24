@@ -336,7 +336,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         var id = NewId();
 
         var (jobId, notificationId) = await EnqueueWithNotificationAsync(
-            new ConformancePayload { CorrelationId = id, Value = "cancel-notification", BlockUntilCancelled = true });
+            new ConformancePayload { CorrelationId = id, Value = "cancel-notification", BlockUntilCancelled = true, ReportProgress = true });
         await fixture.Probe.WaitStartedAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
 
         var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
@@ -376,6 +376,26 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
             Assert.Equal(nameof(JobOutcome.Canceled), closing.Outcome);
             Assert.NotNull(closing.Finished);
             Assert.Null(closing.Error);
+
+            if (fixture.Capabilities.ReportsAttemptBudget)
+            {
+                // The close must not overwrite the attempt numbers earlier sends wrote: a running job closes with the
+                // numbers its last update carried; a job canceled before it ran shows the first attempt of the total.
+                if (observeHandlerCancel)
+                {
+                    // By reference: notifications of one id compare equal.
+                    var previous = fixture.ProgressUpdates(notificationId).TakeWhile(x => !ReferenceEquals(x, closing)).Last();
+
+                    Assert.NotNull(previous.TotalAttempts);
+                    Assert.Equal(previous.Attempt, closing.Attempt);
+                    Assert.Equal(previous.TotalAttempts, closing.TotalAttempts);
+                }
+                else
+                {
+                    Assert.Equal(1, closing.Attempt);
+                    Assert.Equal(fixture.RetryBudget + 1, closing.TotalAttempts);
+                }
+            }
         }
         else
         {

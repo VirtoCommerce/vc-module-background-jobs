@@ -39,6 +39,7 @@ public class CancelBeforeRunStateFilterTests
         Title = "Import",
         UserName = "tester",
         CompletesProgressNotification = true,
+        MaxRetryAttempts = 3,
         Headers = new Dictionary<string, string>
         {
             [JobHeaders.EnqueuedAt] = _enqueuedAt.Ticks.ToString(CultureInfo.InvariantCulture),
@@ -46,14 +47,18 @@ public class CancelBeforeRunStateFilterTests
     };
 
     // The state change of a job the engine enqueued: Execute(envelopeJson, context, token), as HangfireJobEngine builds it.
-    private static ApplyStateContext CreateDeleteContext(string oldStateName)
+    // storedRetryCount is what Hangfire keeps in the job's RetryCount parameter: serialized, and absent until a first failure.
+    private static ApplyStateContext CreateDeleteContext(string oldStateName, string? storedRetryCount)
     {
         var envelopeJson = JsonConvert.SerializeObject(CreateEnvelope());
         var job = Job.FromExpression<HangfireJobExecutor>(x => x.Execute(envelopeJson, null!, CancellationToken.None));
 
+        var connection = new Mock<IStorageConnection>();
+        connection.Setup(x => x.GetJobParameter(_hangfireJobId, "RetryCount")).Returns(storedRetryCount!);
+
         return new ApplyStateContext(
             new Mock<JobStorage>().Object,
-            new Mock<IStorageConnection>().Object,
+            connection.Object,
             new Mock<IWriteOnlyTransaction>().Object,
             new BackgroundJob(_hangfireJobId, job, DateTime.UtcNow),
             new DeletedState(),
@@ -71,21 +76,25 @@ public class CancelBeforeRunStateFilterTests
         return (new CancelBeforeRunStateFilter(manager.Object), sent);
     }
 
-    // A retry wait is Scheduled; a job not yet picked up is Enqueued. No executor will run for either.
+    // A retry wait is Scheduled (two retries spent: the canceled attempt is the third); a job not yet picked up is
+    // Enqueued (no RetryCount stored: the first attempt). The envelope allows 3 retries, so 4 attempts in all.
     [Theory]
-    [InlineData("Scheduled")]
-    [InlineData("Enqueued")]
-    public void Delete_Of_A_Job_That_Is_Not_Running_Closes_Its_Notification_Canceled(string oldState)
+    [InlineData("Scheduled", "2", 3)]
+    [InlineData("Enqueued", null, 1)]
+    public void Delete_Of_A_Job_That_Is_Not_Running_Closes_Its_Notification_Canceled(string oldState, string? storedRetryCount, int expectedAttempt)
     {
         var (filter, sent) = CreateFilter();
 
-        filter.OnStateApplied(CreateDeleteContext(oldState), new Mock<IWriteOnlyTransaction>().Object);
+        filter.OnStateApplied(CreateDeleteContext(oldState, storedRetryCount), new Mock<IWriteOnlyTransaction>().Object);
 
         var closing = Assert.Single(sent);
         Assert.Equal("notification-1", closing.Id);
         Assert.Equal(nameof(JobOutcome.Canceled), closing.Outcome);
         Assert.NotNull(closing.Finished);
         Assert.Equal(_hangfireJobId, closing.JobId);
+        Assert.Equal(_enqueuedAt, closing.Started);
+        Assert.Equal(expectedAttempt, closing.Attempt);
+        Assert.Equal(4, closing.TotalAttempts);
     }
 
     // AutomaticRetry's OnAttemptsExceeded = Delete moves a Processing job to Deleted after the dispatcher has closed
@@ -95,7 +104,7 @@ public class CancelBeforeRunStateFilterTests
     {
         var (filter, sent) = CreateFilter();
 
-        filter.OnStateApplied(CreateDeleteContext("Processing"), new Mock<IWriteOnlyTransaction>().Object);
+        filter.OnStateApplied(CreateDeleteContext("Processing", storedRetryCount: null), new Mock<IWriteOnlyTransaction>().Object);
 
         Assert.Empty(sent);
     }

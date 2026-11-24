@@ -42,4 +42,21 @@ internal static class HangfireGlobalRetry
 
         return Math.Max(0, envelope.MaxRetryAttempts ?? Current()?.Attempts ?? 0);
     }
+
+    /// <summary>
+    /// <paramref name="envelope"/> with the attempt a job with <paramref name="retryCount"/> spent retries is about to
+    /// run (<c>retryCount + 1</c>) and the number of attempts it gets in all. Hangfire keeps the retry bookkeeping, not
+    /// the envelope, so everything that shows the attempt of a job (the executor, and the state filter that closes a
+    /// canceled one) fills it through here.
+    /// </summary>
+    public static JobEnvelope WithAttemptBudget(JobEnvelope envelope, int retryCount)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+
+        return envelope with
+        {
+            Attempt = retryCount + 1,
+            TotalAttempts = AttemptsFor(envelope) + 1,
+        };
+    }
 }

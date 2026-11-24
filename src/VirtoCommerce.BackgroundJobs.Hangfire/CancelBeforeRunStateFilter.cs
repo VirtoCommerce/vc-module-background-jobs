@@ -53,9 +53,16 @@ public sealed class CancelBeforeRunStateFilter(IPushNotificationManager pushNoti
                 return;
             }
 
+            // The envelope does not know which attempt was waiting, and its defaults (attempt 1, no total) would
+            // overwrite the numbers earlier attempts wrote. The stored value is serialized, as PerformContext reads it;
+            // none is stored until the job has failed once.
+            var retryCount = SerializationHelper.Deserialize<int>(
+                context.Connection.GetJobParameter(backgroundJob.Id, PerJobRetryFilterAttribute.RetryCountParameter),
+                SerializationOption.User);
+
             // The reporter decides whether the notification is the job's to close (a shared map/reduce bar is not).
             // Carrying the Hangfire job id keeps the JobId earlier attempts wrote: storage replaces a notification by id.
-            new PushNotificationJobProgress(pushNotificationManager, envelope, backgroundJob.Id)
+            new PushNotificationJobProgress(pushNotificationManager, HangfireGlobalRetry.WithAttemptBudget(envelope, retryCount), backgroundJob.Id)
                 .Complete(JobOutcome.Canceled)
                 .GetAwaiter()
                 .GetResult();
