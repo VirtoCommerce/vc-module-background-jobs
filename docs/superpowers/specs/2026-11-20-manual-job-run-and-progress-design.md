@@ -105,6 +105,15 @@ but nothing in the admin lets a person start it, and once it runs there is no re
   type and the facade re-serializes that object. Members the payload type declares (polymorphic ones included, through
   the registered serializer's `PolymorphJsonConverter`) arrive unchanged, decimals at full precision and date-like
   strings as strings. JSON members the type does not declare are dropped, as today.
+- **The job serializer reads with `DateParseHandling.None` and `FloatParseHandling.Decimal`** (`JobJsonSettings`, both
+  the default instance and the one registered in DI). Without them a polymorphic member loses fidelity on every
+  engine, in-process enqueues included: `PolymorphJsonConverter.ReadJson` loads the member with `JObject.Load(reader)`,
+  which inherits the reader's defaults, so a nested decimal is cut to `double` precision and a nested date-like string
+  is parsed and re-formatted in the host's culture (observed by test 1: `1234567890.123456789` → `1234567890.12346`,
+  `"2026-11-20T10:00:00.000Z"` → `"11/20/2026 10:00:00"`). Members with a declared type are unchanged by the setting;
+  members typed `object`, `JToken` and the like now receive a `string` for a date-like value and a `decimal` for a
+  fractional number (§9). A fractional number outside the `decimal` range in such a member fails to read instead of
+  becoming a `double`.
 - `BackgroundJobsAdminController.Enqueue` checks `ModelState` **before** the name check. A body that is not valid JSON,
   or a payload the converter cannot read, makes model binding fail; the endpoint answers 400 naming the failing member
   (`payload`, or the body) instead of today's "A registered job 'name' is required.".
@@ -309,6 +318,9 @@ Hangfire and RabbitMQ. This delivery only adds scenarios and capability flags to
 - README REST section: `options.progressNotificationId` is refused (§3.2).
 - README and `JobEnvelope.UniqueKey` doc: no shipped engine (Hangfire, RabbitMQ, InMemory) de-duplicates by
   `UniqueKey`; correct `docs/benchmark-plan.md:100,109`.
+- README "Payload serialization": the job serializer keeps date-like strings and decimals as written; what changes
+  for members typed `object` / `JToken` (string instead of `DateTime`, decimal instead of `double`, a fractional number
+  outside the decimal range fails); the bulk-actions date-property shift on non-UTC hosts (§9).
 
 ### 3.10 Companion PR: Admin Shell broadcast filter (`vc-module-admin-shell`)
 
@@ -347,6 +359,7 @@ token. Rows still marked `read-from-code` are re-observed by the smoke call afte
 | Stored notification, `POST api/platform/pushnotifications` `{ take, skip }` | — | `{ totalCount, newCount, notifyEvents[] }`; the probe's item: `notifyType: "JobProgressPushNotification"`, `id`, `creator`, `title`, `description: "Completed"`, `started: null`, `finished`, `created` (= completion time), `isNew: true`, `processedCount: 0`, `totalCount: 0`, `progressLog: []`, `repeatCount: 0`, `serverId: null` | observed (MVC serialization of the stored copy) |
 | Platform storage, new notification equal to the previous one in title, type and description | — | folded into the previous notification (`PushNotificationInMemoryStorage.cs:36-48`) | read-from-code |
 | SignalR `Send` (creator) / `SendSystemEvents` (all) | — | same members; the hub protocol's serializer settings differ from MVC (camelCase, `$type` only in scale-out mode) | read-from-code |
+| Enum members of a notification, by channel | — | MVC (REST history): string (`StringEnumConverter`, platform `Startup.cs:202`); SignalR default protocol (System.Text.Json, `AddSignalR()` at `Startup.cs:137`, aspnetcore `JsonHubProtocol` defaults): number; SignalR scale-out (Newtonsoft, `SignalRBuilderExtensions.cs:30-34`): number. `ProgressMessage.Level`'s Newtonsoft-only attribute does not reach System.Text.Json. Hence `Outcome` is a string (§3.4) | read-from-code; E2E reads a SignalR frame |
 | `GET api/platform/jobs/{id}` | (`background_jobs:manage`) | 200 `{ state: "Succeeded", completed: true, id }`; unknown id → 200 `{ state: null, completed: true, id }` (never 404) | observed |
 | `POST api/platform/jobs/{id}/cancel` | (`background_jobs:manage`) | on a **finished** Hangfire job: 200, and the job's state becomes `Deleted` (`GET` then answers `state: "Deleted"`); 404 when the engine rejects, 501 when the engine cannot cancel | observed (finished job); read-from-code (404/501, `JobsController.cs:57-68`) |
 | Admin Shell notification store | — | `EXCLUDED_NOTIFICATION_TYPES = ["IndexProgressPushNotification"]` in `@vc-shell/framework` v2.12.0 (`framework/core/notifications/types.ts`), so `JobProgressPushNotification` is stored | read-from-code (framework source at the host's tag) |
@@ -476,6 +489,17 @@ the same assertion; items an engine may not support are capability-gated with th
   committed state other than `Processing` (`ServerJobCancellationToken.IsJobStateChanged`, v1.8.23, read from source,
   not run), so the executor's own read sees `Deleted`. Proven by test 5 on the Hangfire fixture. A shutdown and a
   cancel at the same moment read `Deleted` and close `Canceled`, which is what the user asked for.
+- **The job serializer change reaches other modules' untyped payload members** (§3.1; sweep of 38 local and 59
+  GitHub `VirtoCommerce` handlers, 2026-11-24). Two are affected:
+  - vc-module-task-management `WorkTask.Parameters` / `Result` (`JObject`): date and fractional tokens become string
+    and decimal tokens; the notifications handler does not read them (code search).
+  - vc-module-bulk-actions with vc-module-catalog: `PropertyValue.Value` (`object`) inside the polymorphic
+    `BulkActionContext` arrives as a `string` instead of a UTC `DateTime` for a date property. Catalog stores it with
+    `Convert.ToDateTime(value, CultureInfo.InvariantCulture)` (`PropertyValueEntity.SetValue`), which turns a "…Z"
+    string into local time: **on a host whose time zone is not UTC — local Windows stands among them — a bulk update
+    of a date property stores the value shifted by the host's UTC offset.** UTC hosts store the same value as today.
+    Number properties get the exact decimal instead of a double. Tracked by a separate vc-module-catalog ticket (the
+    same parsing affects any caller that passes a date string); stated in the README and the PR as a behaviour change.
 - **The `Deleted` filter for a job not yet running** runs inside Hangfire's state transition, before the commit. A
   transition that fails after the filter has run leaves a notification closed `Canceled` for a job still queued.
   Accepted: the filter does no storage work of its own, and a failed transition is loud in Hangfire's log.
@@ -525,3 +549,6 @@ the same assertion; items an engine may not support are capability-gated with th
   test 2 dropped, AC 2 checked by E2E; the retry-waiting cancel is covered by a Hangfire filter unit test, other
   engines by E2E, and test 5 gains the dashboard delete and requeue cases. If test 1 shows `PolymorphJsonConverter`
   altering a decimal or a date-like string, implementation stops for a decision before `JobJsonSettings` changes.
+- 2026-11-24 — Scope extended (operator), after test 1 stopped on the case above: `JobJsonSettings` reads with
+  `DateParseHandling.None` and `FloatParseHandling.Decimal` (§3.1), after a sweep of untyped payload members in other
+  modules; the bulk-actions date shift on non-UTC hosts is a risk (§9) with a separate vc-module-catalog ticket.
