@@ -263,11 +263,19 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
     run for such a job. A job that was `Processing` is left to the executor, a finished one is left alone. The filter
     builds `PushNotificationJobProgress` from the envelope and the Hangfire job id, so `JobId` stays what earlier
     attempts wrote (storage replaces a notification by id), and waits for `Complete` synchronously, as
-    `IPushNotificationManager.Send` itself does, because Hangfire state filters are synchronous. A retry-waiting
-    job's last message, counts and attempt are not in the envelope and are not kept: its closed notification shows
-    `Canceled` with the enqueue-time fields (AC 12, the one exception);
+    `IPushNotificationManager.Send` itself does, because Hangfire state filters are synchronous. It fills `Attempt`
+    and `TotalAttempts` the way `HangfireJobExecutor` does, through one shared helper: `RetryCount` from the job's
+    parameters (read through the state context's storage connection) + 1, and the retry limit §3.6 applies + 1. A
+    retry-waiting job's last message and counts are not in the envelope and are not kept (AC 12, the one exception);
   - RabbitMQ: the pre-dispatch discard of a cancelled message (`RabbitMqJobConsumer.OnReceivedAsync`) closes it;
   - InMemory: cancellation observed outside the attempt loop (before the first attempt or between attempts) closes it.
+  - **On every engine such a close shows the attempt that was canceled before it ran and the job's total**, never
+    the envelope's defaults (`Attempt` 1, `TotalAttempts` null), which would overwrite what earlier attempts wrote:
+    Hangfire as above; RabbitMQ the received message's `Attempt` (a retry is re-published with `Attempt + 1`) and the
+    total, computed **before** the discard check; InMemory and Reference the attempt the loop was about to start
+    and their total. The GoogleCloudTasks sample has no such close (its `Delete` removes the task, and the callback
+    runs through `IJobEnvelopeRunner` with the envelope as published), so it keeps the documented fallback of an
+    engine that does not set `TotalAttempts`.
 - **Cancel of a finished job changes nothing.** Today `POST api/platform/jobs/{id}/cancel` on a Succeeded Hangfire job
   answers 200 and moves it to `Deleted`, rewriting its history (observed, §5). `HangfireJobEngine.Delete` moves a job
   to `Deleted` only from `Enqueued`, `Scheduled`, `Awaiting` or `Processing`, and returns `false` for a finished job,
@@ -423,8 +431,8 @@ Each criterion names its check: `test` only where the failure is silent and harm
     handled like a handler failure: closed `Failed` on the final attempt, open while a retry is pending. — test
 12. FOR an owned notification, every update SHALL keep `Started`, `Created` and `JobId` unchanged, keep the last known
     counts within an attempt when a report omits them, and keep the job's last message as the description on
-    completion. The one exception: a Hangfire job canceled while it waits for a retry is closed with `JobId` and
-    `Started` kept but without its last message and counts (§3.5). — test
+    completion. The one exception: a Hangfire job canceled while it waits for a retry is closed with `JobId`,
+    `Started` and its attempt numbers kept but without its last message and counts (§3.5). — test
 13. WHEN a job reports into a shared notification, THEN its updates SHALL NOT close that notification — test; and
     SHALL carry the batch start time — E2E.
 14. WHEN a job enqueued with `MaxRetryAttempts = N` (N >= 0; a negative value counts as 0) fails every time, THEN every
@@ -594,3 +602,6 @@ the same assertion; items an engine may not support are capability-gated with th
   id, and the remaining loss (last message, counts) is the AC 12 exception in §3.5. Kept out of the platform PR: the
   attempt number on `IJobExecutionContext` (stays with VCST-6850; no handler reads its attempt today, and a Hangfire
   job requeued after failing would report its final attempt on a fresh run), and unifying the hub's enum shape (§9).
+- 2026-11-24 — Operator, after the Task R review: a cancel that closes a job before an attempt starts shows that
+  attempt and the job's total on every engine, not the envelope's defaults (§3.5); the AC 12 exception keeps the
+  attempt numbers. Checked across Hangfire, RabbitMQ, InMemory, Reference and the GoogleCloudTasks sample.
