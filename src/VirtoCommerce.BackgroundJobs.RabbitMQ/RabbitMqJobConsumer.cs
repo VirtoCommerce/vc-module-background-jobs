@@ -196,11 +196,20 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
         var jobId = eventArgs.BasicProperties.MessageId ?? string.Empty;
 
+        // The attempts the job gets in all, by the same rule HandleFailureAsync retries by. Only the copy handed to the
+        // dispatcher carries it: the envelope re-published for a retry stays as received. Built before the discard
+        // check so that a close without a run shows this message's Attempt and the total, not the envelope's defaults.
+        var maxRetries = Math.Max(0, envelope.MaxRetryAttempts ?? _jobsOptions.MaxRetryAttempts);
+        var attemptEnvelope = envelope with { TotalAttempts = maxRetries + 1 };
+        var context = JobExecutionContextFactory.Create(_pushNotificationManager, attemptEnvelope, jobId);
+
         // Not started: cancelled before this worker picked it up. RabbitMQ can't remove a specific queued message, so
-        // the cancellation is honored here, at dequeue — ack and discard without running the handler.
+        // the cancellation is honored here, at dequeue — close its notification Canceled, then ack and discard without
+        // running the handler.
         if (!string.IsNullOrEmpty(jobId) && await _cancellationStore.IsCancelRequested(jobId))
         {
             _logger.LogInformation("Job {JobId} ({JobType}) was cancelled before start; discarding.", jobId, envelope.JobType);
+            await CloseCanceledAsync(context, jobId);
             await TryAckAsync(channel, eventArgs.DeliveryTag);
             await _cancellationStore.Clear(jobId);
             return;
@@ -216,12 +225,6 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
         try
         {
-            // The attempts the job gets in all, by the same rule HandleFailureAsync retries by. Only the copy handed to the
-            // dispatcher carries it: the envelope re-published for a retry stays as received.
-            var maxRetries = Math.Max(0, envelope.MaxRetryAttempts ?? _jobsOptions.MaxRetryAttempts);
-            var attemptEnvelope = envelope with { TotalAttempts = maxRetries + 1 };
-            var context = JobExecutionContextFactory.Create(_pushNotificationManager, attemptEnvelope, jobId);
-
             _logger.LogDebug("Dispatching job {JobId} ({JobType})", jobId, envelope.JobType);
 
             await _dispatcher.Dispatch(attemptEnvelope, context, jobCts.Token);
@@ -232,9 +235,12 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         }
         catch (OperationCanceledException) when (jobCts.IsCancellationRequested)
         {
-            // Cancelled while running (cooperative cancel): ack and discard. Do NOT re-route to retry/DLQ — the
-            // cancellation was intentional, not a failure.
+            // Cancelled while running (cooperative cancel): the token was tripped by the cancellation store, whose only
+            // writer is RabbitMqJobEngine.Delete — a requested cancel, never a shutdown. The dispatcher leaves the
+            // notification open for a cancelled token, so close it Canceled here, then ack and discard. Do NOT re-route
+            // to retry/DLQ — the cancellation was intentional, not a failure.
             _logger.LogInformation("Job {JobId} ({JobType}) was cancelled while running; discarding.", jobId, envelope.JobType);
+            await CloseCanceledAsync(context, jobId);
             await TryAckAsync(channel, eventArgs.DeliveryTag);
         }
         catch (Exception ex) when (!dispatched)
@@ -317,6 +323,20 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         finally
         {
             _channelLock.Release();
+        }
+    }
+
+    // A failure to close the notification must not keep the message unacked: it would be redelivered and discarded
+    // again, so the notification stays open (the lesser harm), as when the engine does not close it at all.
+    private async Task CloseCanceledAsync(IJobExecutionContext context, string jobId)
+    {
+        try
+        {
+            await context.Progress.Complete(JobOutcome.Canceled);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not close the progress notification of the cancelled job {JobId}; it stays open.", jobId);
         }
     }
 

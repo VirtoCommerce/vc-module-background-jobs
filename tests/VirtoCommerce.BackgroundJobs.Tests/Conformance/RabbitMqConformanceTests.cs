@@ -31,6 +31,10 @@ public sealed class RabbitMqConformanceFixture : JobEngineConformanceFixture
         SupportsRecurringScheduler = true,
         SupportsCancellation = true,
         ReportsAttemptBudget = true,
+        ClosesCanceledNotification = true,
+        // An unserved queue is never consumed, so the pre-dispatch discard can never run for it: the queued-cancel
+        // scenario is skipped rather than asserted.
+        CanHoldQueuedJob = false,
     };
 
     public override int RetryBudget => 3;
