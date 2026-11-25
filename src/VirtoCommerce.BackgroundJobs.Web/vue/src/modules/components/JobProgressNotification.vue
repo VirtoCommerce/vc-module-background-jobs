@@ -26,9 +26,15 @@ const notification = computed(() => notificationRef.value as JobProgressPushNoti
 // outside a blade, openBlade opens on top of the active workspace
 const { openBlade } = useBlade();
 
+const outcomeColors: Record<string, string> = {
+  Failed: "var(--danger-500)",
+  Canceled: "var(--warning-500)",
+};
+
+// a finished entry with no outcome reads as Succeeded
 const color = computed(() => {
   if (!notification.value.finished) return "var(--primary-500)";
-  return notification.value.outcome === "Failed" ? "var(--danger-500)" : "var(--success-500)";
+  return outcomeColors[notification.value.outcome ?? ""] ?? "var(--success-500)";
 });
 
 // a queued job has no id yet, so there is nothing to follow

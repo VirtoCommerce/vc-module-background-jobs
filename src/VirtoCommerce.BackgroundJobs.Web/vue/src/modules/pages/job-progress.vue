@@ -15,9 +15,9 @@
               :variant="job?.totalCount ? 'default' : 'striped'"
             />
             <dl class="job-progress__facts">
-              <template v-if="job?.totalCount">
+              <template v-if="processedText">
                 <dt>{{ $t("BACKGROUND_JOBS.PAGES.PROGRESS.PROCESSED") }}</dt>
-                <dd>{{ job.processedCount ?? 0 }} / {{ job.totalCount }}</dd>
+                <dd>{{ processedText }}</dd>
               </template>
               <template v-if="attemptText">
                 <dt>{{ $t("BACKGROUND_JOBS.PAGES.PROGRESS.ATTEMPT") }}</dt>
@@ -82,6 +82,13 @@ const percent = computed(() =>
   job.value?.totalCount ? Math.min(100, Math.round(((job.value.processedCount ?? 0) / job.value.totalCount) * 100)) : 0,
 );
 
+// a job that reports no total still shows how many items it has processed
+const processedText = computed(() => {
+  const { processedCount, totalCount } = job.value ?? {};
+  if (totalCount) return `${processedCount ?? 0} / ${totalCount}`;
+  return processedCount ? String(processedCount) : undefined;
+});
+
 const attemptText = computed(() => {
   const { attempt, totalAttempts } = job.value ?? {};
   if (!attempt) return undefined;
@@ -103,7 +110,7 @@ const elapsed = computed(() => {
 });
 
 // cancelling a finished Hangfire job turns its state from Succeeded into Deleted, so the command is hidden once finished
-const { action: cancel } = useAsync(async () => {
+const { action: cancel, loading: cancelling } = useAsync(async () => {
   const client = await getApiClient();
   await client.cancel(options.value!.jobId);
 });
@@ -115,6 +122,8 @@ const bladeToolbar = ref<IBladeToolbar[]>([
     icon: "lucide-circle-x",
     permissions: "background_jobs:manage",
     isVisible: computed(() => !finished.value),
+    // a second click while the request is in flight would send a second cancel
+    disabled: computed(() => cancelling.value),
     clickHandler: () => cancel(),
   },
 ]);
