@@ -367,9 +367,14 @@ Hangfire and RabbitMQ. This delivery only adds scenarios and capability flags to
 
 ### 3.10 Companion PR: Admin Shell broadcast filter (`vc-module-admin-shell`)
 
-- The host `App.vue` installs `setBroadcastFilter(x => x.creator === <current user name>)`, matching the AngularJS
-  per-user behaviour and the vendor-portal and import apps. The platform keeps broadcasting (the scale-out synchronizer
-  and vendor-portal need it).
+- The host `App.vue` installs `setBroadcastFilter` keeping a broadcast only when its creator equals the current user
+  name, ignoring case (user names are unique by their normalized form), matching the AngularJS per-user behaviour and
+  the vendor-portal and import apps. The platform keeps broadcasting (the scale-out synchronizer and vendor-portal need
+  it).
+- The filter covers every notification type, because the platform broadcasts every notification that has a creator;
+  the user's own ones also arrive on the per-user channel, which is not filtered. A notification no user created (a
+  recurring job's `system:<id>`, a module install's `system`) is shown to nobody, as in AngularJS. Until the user name
+  is known every broadcast is dropped.
 
 ## 4. Approaches considered
 
