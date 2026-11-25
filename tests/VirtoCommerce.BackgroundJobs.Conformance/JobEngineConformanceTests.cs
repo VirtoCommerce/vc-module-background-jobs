@@ -503,6 +503,42 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Equal(limit + 1, fixture.Probe.ExecutionCount(id));
     }
 
+    // 24 — one job id: the worker's context carries the id Enqueue returned, so the progress page finds its job.
+    // An engine that passes a different id (a short name for a full one) breaks it with no error anywhere.
+    [Fact]
+    public async Task Worker_JobId_Equals_Enqueue_Result()
+    {
+        RequireEngine();
+        var id = NewId();
+
+        var jobId = await EnqueueAndWaitAsync(new ConformancePayload { CorrelationId = id, Value = "job-id" });
+
+        Assert.Equal(jobId, fixture.Probe.Job(id)!.JobId);
+    }
+
+    // 25 — the same id on every attempt: a retry re-runs the handler, and neither the context nor the worker's
+    // notification updates may switch to another id. The first send is the facade's "Queued" one, which carries no job
+    // id by design; every send after it comes from a worker.
+    [Fact]
+    public async Task Worker_JobId_Is_Stable_Across_Retries()
+    {
+        RequireEngine();
+        Assert.SkipUnless(fixture.Capabilities.SupportsRetry, "engine does not retry failed jobs.");
+        var id = NewId();
+
+        var (jobId, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "job-id-retry", FailAttempts = 1, ReportProgress = true });
+        await fixture.Probe.WaitAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+        await fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome == nameof(JobOutcome.Succeeded), ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal([jobId, jobId], fixture.Probe.ExecutionJobIds(id));
+
+        var workerUpdates = fixture.ProgressUpdates(notificationId).Skip(1).ToList();
+        Assert.NotEmpty(workerUpdates);
+        Assert.All(workerUpdates, x => Assert.Equal(jobId, x.JobId));
+    }
+
     private async Task AssertCancelOutcomeAsync(string correlationId, string notificationId, bool observeHandlerCancel)
     {
         if (fixture.Capabilities.ClosesCanceledNotification)

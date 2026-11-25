@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,6 +20,7 @@ public sealed class ConformanceProbe
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _cancelled = new();
     private readonly ConcurrentDictionary<string, JobObservation> _jobs = new();
     private readonly ConcurrentDictionary<string, int> _executions = new();
+    private readonly ConcurrentDictionary<string, List<string>> _executionJobIds = new();
     private readonly ConcurrentDictionary<string, ReduceObservation> _reduces = new();
 
     /// <summary>Records one handler execution for the correlation id and returns the running execution count
@@ -26,6 +28,12 @@ public sealed class ConformanceProbe
     public int RecordExecution(string correlationId, object payload, string? user, IReadOnlyDictionary<string, string> headers, string jobId)
     {
         var count = _executions.AddOrUpdate(correlationId, 1, (_, current) => current + 1);
+        var jobIds = _executionJobIds.GetOrAdd(correlationId, _ => []);
+        lock (jobIds)
+        {
+            jobIds.Add(jobId);
+        }
+
         _jobs[correlationId] = new JobObservation
         {
             Payload = payload,
@@ -66,6 +74,21 @@ public sealed class ConformanceProbe
     public JobObservation? Job(string correlationId) => _jobs.TryGetValue(correlationId, out var value) ? value : null;
 
     public int ExecutionCount(string correlationId) => _executions.TryGetValue(correlationId, out var value) ? value : 0;
+
+    /// <summary>The job id the context carried on every execution of the correlation id, in execution order — so a retry
+    /// scenario can assert the id stayed the same on each attempt, which the last-wins <see cref="Job"/> cannot show.</summary>
+    public IReadOnlyList<string> ExecutionJobIds(string correlationId)
+    {
+        if (!_executionJobIds.TryGetValue(correlationId, out var jobIds))
+        {
+            return [];
+        }
+
+        lock (jobIds)
+        {
+            return jobIds.ToList();
+        }
+    }
 
     public ReduceObservation? Reduce(string correlationId) => _reduces.TryGetValue(correlationId, out var value) ? value : null;
 

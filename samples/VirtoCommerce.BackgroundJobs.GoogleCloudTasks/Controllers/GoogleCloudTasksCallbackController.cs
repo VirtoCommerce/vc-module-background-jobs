@@ -3,12 +3,14 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Google.Cloud.Tasks.V2;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
-using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Core.Models;
 
 namespace VirtoCommerce.BackgroundJobs.GoogleCloudTasks.Controllers;
 
@@ -23,18 +25,22 @@ namespace VirtoCommerce.BackgroundJobs.GoogleCloudTasks.Controllers;
 [Route("api/background-jobs/google-cloud-tasks")]
 public sealed class GoogleCloudTasksCallbackController : ControllerBase
 {
-    // Header Cloud Tasks sets with the full task resource name; used as the job id for the execution context.
+    // Header Cloud Tasks sets with the task id only (the last segment of the resource name). The job id is the full
+    // resource name Enqueue returned, so the callback rebuilds it from the options.
     private const string TaskNameHeader = "X-CloudTasks-TaskName";
 
+    private readonly GoogleCloudTasksOptions _options;
     private readonly IJobEnvelopeRunner _runner;
     private readonly IGoogleCloudTasksTokenValidator _tokenValidator;
     private readonly ILogger<GoogleCloudTasksCallbackController> _logger;
 
     public GoogleCloudTasksCallbackController(
+        IOptions<GoogleCloudTasksOptions> options,
         IJobEnvelopeRunner runner,
         IGoogleCloudTasksTokenValidator tokenValidator,
         ILogger<GoogleCloudTasksCallbackController> logger)
     {
+        _options = options.Value;
         _runner = runner;
         _tokenValidator = tokenValidator;
         _logger = logger;
@@ -72,8 +78,9 @@ public sealed class GoogleCloudTasksCallbackController : ControllerBase
             return BadRequest();
         }
 
-        var jobId = Request.Headers.TryGetValue(TaskNameHeader, out var taskName)
-            ? taskName.ToString()
+        // The worker must see the id Enqueue returned: the full task resource name, not the short id from the header.
+        var jobId = Request.Headers.TryGetValue(TaskNameHeader, out var taskId) && !string.IsNullOrEmpty(taskId.ToString())
+            ? TaskName.FromProjectLocationQueueTask(_options.ProjectId, _options.LocationId, _options.QueueId, taskId.ToString()).ToString()
             : string.Empty;
 
         try
