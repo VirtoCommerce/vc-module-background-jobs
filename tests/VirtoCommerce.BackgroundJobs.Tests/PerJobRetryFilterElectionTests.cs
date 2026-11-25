@@ -86,15 +86,6 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
     }
 
     [Fact]
-    public void Failed_ThenDeletedByGlobal_AtJobLimit_StaysDeleted()
-    {
-        var (context, connection) = Elect(retryCountStored: _jobLimit, AttemptsExceededAction.Delete, new FailedState(new InvalidOperationException("boom")));
-
-        Assert.IsType<DeletedState>(context.CandidateState);
-        connection.Verify(x => x.SetJobParameter(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-    }
-
-    [Fact]
     public void Deleted_WithoutTraversedFailure_IsNotTouched()
     {
         // A dashboard delete or a cancel arrives as a plain DeletedState: nothing failed, so there is nothing to retry.

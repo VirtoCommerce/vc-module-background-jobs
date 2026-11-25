@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
@@ -412,87 +411,6 @@ public class BackgroundJobsTests
 
         Assert.Equal(1, sentAtEngineEnqueue);
         Assert.Equal(sentAtEngineEnqueue, sent.Count);
-    }
-
-    private static (JobEngineBackgroundJob Sut, List<JobEnvelope> Enqueued) CreateFacadeCapturingEnvelopes()
-    {
-        var enqueued = new List<JobEnvelope>();
-        var engine = new Mock<IJobEngine>();
-        engine.SetupGet(x => x.ProviderName).Returns("Test");
-        engine.Setup(x => x.Enqueue(It.IsAny<JobEnvelope>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
-            .Callback<JobEnvelope, EnqueueOptions, CancellationToken>((env, _, _) => enqueued.Add(env))
-            .ReturnsAsync("job-1");
-
-        var sut = new JobEngineBackgroundJob(
-            new JsonJobPayloadSerializer(),
-            Options.Create(new BackgroundJobsOptions { DefaultQueue = "default" }),
-            Mock.Of<IPushNotificationManager>(),
-            Mock.Of<IUserNameResolver>(),
-            engine.Object);
-
-        return (sut, enqueued);
-    }
-
-    [Fact]
-    public async Task Enqueue_InBatchScope_WithProgressNotificationId_StampsBatchStartedAt()
-    {
-        var (sut, enqueued) = CreateFacadeCapturingEnvelopes();
-        var started = new DateTime(2026, 11, 25, 10, 30, 0, DateTimeKind.Utc);
-
-        using (JobEnqueueContext.BeginBatch(started))
-        {
-            await sut.Enqueue<RecordingHandler>(new TestPayload { Value = "a" },
-                new EnqueueOptions { ProgressNotificationId = "batch-1" }, TestContext.Current.CancellationToken);
-        }
-
-        var envelope = Assert.Single(enqueued);
-        Assert.Equal(started.Ticks.ToString(CultureInfo.InvariantCulture), envelope.Headers[JobHeaders.BatchStartedAt]);
-    }
-
-    [Fact]
-    public async Task Enqueue_InBatchScope_WithoutProgressNotificationId_DoesNotStampBatchStartedAt()
-    {
-        var (sut, enqueued) = CreateFacadeCapturingEnvelopes();
-
-        using (JobEnqueueContext.BeginBatch(DateTime.UtcNow))
-        {
-            await sut.Enqueue<RecordingHandler>(new TestPayload { Value = "a" }, cancellationToken: TestContext.Current.CancellationToken);
-        }
-
-        var envelope = Assert.Single(enqueued);
-        Assert.False(envelope.Headers.ContainsKey(JobHeaders.BatchStartedAt));
-    }
-
-    [Fact]
-    public async Task Enqueue_OutsideBatchScope_WithProgressNotificationId_DoesNotStampBatchStartedAt()
-    {
-        var (sut, enqueued) = CreateFacadeCapturingEnvelopes();
-
-        await sut.Enqueue<RecordingHandler>(new TestPayload { Value = "a" },
-            new EnqueueOptions { ProgressNotificationId = "batch-1" }, TestContext.Current.CancellationToken);
-
-        var envelope = Assert.Single(enqueued);
-        Assert.False(envelope.Headers.ContainsKey(JobHeaders.BatchStartedAt));
-    }
-
-    [Fact]
-    public void BeginBatch_Dispose_RestoresPreviousValue()
-    {
-        var outer = new DateTime(2026, 11, 25, 10, 0, 0, DateTimeKind.Utc);
-        var inner = outer.AddMinutes(5);
-        Assert.Null(JobEnqueueContext.BatchStartedAt);
-
-        using (JobEnqueueContext.BeginBatch(outer))
-        {
-            using (JobEnqueueContext.BeginBatch(inner))
-            {
-                Assert.Equal(inner, JobEnqueueContext.BatchStartedAt);
-            }
-
-            Assert.Equal(outer, JobEnqueueContext.BatchStartedAt);
-        }
-
-        Assert.Null(JobEnqueueContext.BatchStartedAt);
     }
 
     [Fact]

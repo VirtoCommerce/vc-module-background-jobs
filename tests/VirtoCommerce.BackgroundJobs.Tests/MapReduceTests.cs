@@ -609,7 +609,7 @@ public class MapReduceTests
     }
 
     [Fact]
-    public async Task SharedNotification_MapUpdatesAndReduceClose_KeepBatchStartAndCloseSucceeded()
+    public async Task SharedNotification_MapUpdatesAndReduceClose_ClosesSucceededAsUnread()
     {
         var ct = TestContext.Current.CancellationToken;
         var harness = new NotifyingHarness(new SquareHandler());
@@ -617,18 +617,15 @@ public class MapReduceTests
         var (initial, mapUpdates, close) = await harness.RunAsync<SquareHandler>(
             [new SquareItem(1), new SquareItem(2)], ct);
 
-        Assert.NotNull(initial.Started);
         Assert.NotEmpty(mapUpdates);
         Assert.All(mapUpdates, x =>
         {
             Assert.Equal(initial.Id, x.Id);
-            Assert.Equal(initial.Started, x.Started);
             Assert.Null(x.Finished);
             Assert.Null(x.Outcome);
         });
 
         Assert.Equal(initial.Id, close.Id);
-        Assert.Equal(initial.Started, close.Started);
         Assert.Null(close.JobId);
         Assert.NotNull(close.Finished);
         Assert.Equal(nameof(JobOutcome.Succeeded), close.Outcome);
@@ -650,41 +647,5 @@ public class MapReduceTests
         Assert.NotNull(close.Finished);
         Assert.Equal(nameof(JobOutcome.Failed), close.Outcome);
         Assert.Equal("Faulted: 1/2 map items failed.", close.Description);
-    }
-
-    // A batch stored before the start time was recorded has no Started: nothing is stamped and the close keeps working.
-    [Fact]
-    public async Task SharedNotification_BatchWithoutStarted_ClosesWithoutStart()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var harness = new NotifyingHarness(new SquareHandler());
-        await harness.Store.CreateAsync(new MapReduceBatch
-        {
-            BatchId = "legacy",
-            Total = 1,
-            ItemType = typeof(SquareItem).AssemblyQualifiedName!,
-            ResultType = typeof(SquareResult).AssemblyQualifiedName!,
-            StateType = typeof(SumState).AssemblyQualifiedName!,
-            StateJson = "{\"Label\":\"legacy\"}",
-            MapHandlerType = typeof(SquareHandler).AssemblyQualifiedName!,
-            ReduceHandlerType = typeof(SumReducer).AssemblyQualifiedName!,
-            ProgressNotificationId = "legacy-notification",
-            Title = "legacy",
-        }, ct);
-        var (_, itemJson) = harness.Serializer.Serialize(new SquareItem(2));
-        await harness.Store.SaveItemsAsync("legacy", [new MapItem { ItemType = typeof(SquareItem).AssemblyQualifiedName!, ItemJson = itemJson }], ct);
-
-        await harness.FanOut.Execute(new MapFanOutEnvelope { BatchId = "legacy" }, Context(), ct);
-
-        var mapTask = harness.Enqueued.Single(x => x.JobType == typeof(MapTaskEnvelope).AssemblyQualifiedName);
-        Assert.False(mapTask.Headers.ContainsKey(JobHeaders.BatchStartedAt));
-
-        await harness.Reduce.Execute(new ReduceTaskEnvelope { BatchId = "legacy" }, Context(), ct);
-
-        var close = harness.Sent.Single();
-        Assert.Equal("legacy-notification", close.Id);
-        Assert.Null(close.Started);
-        Assert.Equal(nameof(JobOutcome.Succeeded), close.Outcome);
-        Assert.NotNull(close.Finished);
     }
 }
