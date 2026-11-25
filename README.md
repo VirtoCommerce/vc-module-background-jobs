@@ -241,7 +241,7 @@ Ready-made Kusto queries (throughput, p95 duration, queue latency, failure rate 
 | GET | `api/background-jobs/registered` | List registered handlers (name, handler type, payload type). Requires `background-jobs:read`. |
 | GET | `api/background-jobs/recurring` | List recurring jobs with effective cron, enabled, last/next run. Requires `background-jobs:read`. |
 | POST | `api/background-jobs/enqueue` | Trigger a registered job by name — body `{ name, payload, options? }` → engine job id. `options.progressNotificationId` is refused with `400`. Requires `background-jobs:execute`. |
-| POST | `api/platform/jobs/{id}/cancel` | Request cancellation of a job. `501` when the active engine can't cancel, `404` when nothing was cancelled (an unknown job, or one that already finished). Requires `background_jobs:manage`. |
+| POST | `api/platform/jobs/{id}/cancel` | Request cancellation of a job. `501` when the active engine can't cancel, `404` when the engine reports nothing was cancelled (an unknown job, or one that already finished, on an engine that reports status: Hangfire, InMemory). RabbitMQ only records the request for any id and answers `200`. Requires `background_jobs:manage`. |
 
 ## Usage
 
@@ -299,7 +299,7 @@ default queue. Pass `EnqueueOptions` only when you need one of these behaviors:
 | Option | Why you'd set it | Notes / engine support |
 |---|---|---|
 | `Queue` | **Isolate workloads.** Route heavy or slow jobs (catalog indexing, bulk export) to a dedicated queue/worker pool so they don't starve short interactive jobs — e.g. `Queue = "indexing"`. | Honored by **Hangfire** and **RabbitMQ** (the worker drains the configured queues). Google Cloud Tasks is single-queue and ignores it. Falls back to `VirtoCommerce:BackgroundJobs:DefaultQueue` when unset. |
-| `ReportProgress` | **The user is watching.** For long jobs, stream `context.Progress.Report(...)` to the admin UI over SignalR (progress bar + log). Skip it for fire-and-forget work to avoid needless notifications. | The engine creates a progress push-notification and returns its id via the notification stream. Works on every engine. |
+| `ReportProgress` | **The user is watching.** For long jobs, stream `context.Progress.Report(...)` to the admin UI over SignalR (progress bar + log). Skip it for fire-and-forget work to avoid needless notifications. | The `IBackgroundJob` facade creates the job's progress push-notification at enqueue (before the engine takes the job), and the worker updates and closes it. Works on every engine. |
 | `ProgressNotificationId` | **Report into an existing notification** instead of a new one — e.g. a parent operation, or one shared bar across several jobs (this is how map/reduce shows an aggregate bar). | When set you don't also need `ReportProgress`; updates flow to that id. The caller owns that notification: a job reporting into it never closes it. In-process callers only — `POST api/background-jobs/enqueue` refuses it (see [Admin & integration API](#admin--integration-api)). |
 | `UniqueKey` | **De-duplicate re-enqueues.** Collapse repeated triggers of the "same" work (a debounce/idempotency key) into a single job. | **No shipped engine de-duplicates by it** — Hangfire, RabbitMQ and InMemory ignore the key, so do not rely on it to prevent duplicate runs; make handlers idempotent. Only the [Google Cloud Tasks sample](samples/VirtoCommerce.BackgroundJobs.GoogleCloudTasks/README.md) honors it (task-name dedup). |
 
@@ -880,8 +880,10 @@ only when `VC_CONFORMANCE_RABBITMQ` is set and skips otherwise; CI sets none, so
 RabbitMQ. Capability-gated scenarios assert the documented fallback (or skip) for features your engine doesn't
 provide, so it's never penalized for them. The capability flags added for the engine duties above
 (`ReportsAttemptBudget`, `ClosesCanceledNotification`, `CanHoldQueuedJob`) default to `false`, so a fixture written
-against an earlier version of the kit keeps passing after an upgrade, on the fallback or with the scenario skipped,
-until it declares them.
+against an earlier version of the kit passes a gated scenario after an upgrade, on the fallback or skipped, until it
+declares them. The scenarios with no flag run on every engine and fail an engine that breaks them whatever its
+fixture declares: one job id (`Worker_JobId_Equals_Enqueue_Result`), `Final_Failure_Closes_Notification_Failed` and
+`Success_Closes_Notification_Succeeded`.
 
 ## Documentation
 

@@ -58,7 +58,7 @@ modules; nothing is subscribed by default). Broker/store depth: RabbitMQ managem
 | Cold start | warm (~queue latency) | poll + schedule + warmup + connect | activation p50/p95 |
 | Burst of K | fixed N drains | ramps to maxReplicas | drain time, ramp curve |
 | Sustained X/s | right-sized N | KEDA holds N | throughput, p95, CPU/1k |
-| Scale-down | n/a | drain mid-scale-down | 0 lost, dedup verified |
+| Scale-down | n/a | drain mid-scale-down | 0 lost, duplicates harmless (idempotent handlers) |
 
 Pull steady-state + knob tuning ≈ local; Push cold-start/ramp/scale-to-zero = cloud-only. Hangfire is Pull-only.
 

@@ -14,10 +14,10 @@ The suite drives the real enqueue → dispatch path (`IBackgroundJob` → `IJobE
 completion **signal** from the handler (not a `Task.Delay` guess), so it is deterministic regardless of how your
 engine schedules work.
 
-Scenarios are numbered by the comment above each test. `JobEngineConformanceTests.cs` holds 1–8 and 10–25; the map/reduce
-and recurring scenarios live in two more files of the same partial class (`MapReduceConformanceTests.cs`,
-`RecurringJobSchedulerConformanceTests.cs`) and carry their own comment numbers, which overlap 13–16 below, so refer to
-those four by test name. The test file is the source of truth for the numbers.
+Scenarios are numbered by the comment above each test in `JobEngineConformanceTests.cs`; that comment is the source of
+truth for the numbers. The map/reduce and recurring scenarios live in two more files of the same partial class
+(`MapReduceConformanceTests.cs`, `RecurringJobSchedulerConformanceTests.cs`) and carry comment numbers of their own,
+which overlap the numbers of the first file, so refer to them by test name.
 
 **Core and delivery**
 
@@ -77,8 +77,11 @@ second in the cancel scenarios, two in 8.
 ## Capability flags
 
 `EngineCapabilities` declares which optional parts of the standard an engine supports. **Every flag defaults to
-`false`**, so a fixture written against an earlier version of the kit keeps passing after a package upgrade — on the
-fallback, or with the scenario skipped — until it declares the new flag.
+`false`**, so a gated scenario of a fixture written against an earlier version of the kit passes after a package
+upgrade — on the fallback, or skipped — until it declares the new flag. Three scenarios have no flag and run on every
+engine, so an engine that breaks them fails after the upgrade whatever its fixture declares:
+`Worker_JobId_Equals_Enqueue_Result` (one job id), `Final_Failure_Closes_Notification_Failed` and
+`Success_Closes_Notification_Succeeded`.
 
 | Flag | Declare `true` when | Scenarios |
 |---|---|---|
@@ -87,7 +90,7 @@ fallback, or with the scenario skipped — until it declares the new flag.
 | `SupportsUniqueKeyDedup` | re-enqueuing with the same `UniqueKey` collapses to one execution. **No shipped engine does**; keep it false unless yours truly does | 8 |
 | `SupportsQueueRouting` | a job on a non-default queue is processed on this instance | 10 |
 | `SupportsRetry` | a handler that throws is retried up to `MaxRetryAttempts` | 11, 14, 19, 22, 23, 25 |
-| `SupportsRecurringScheduler` | the engine registers an `IRecurringJobScheduler` (native, or the in-process one) | 15 |
+| `SupportsRecurringScheduler` | the engine registers an `IRecurringJobScheduler` (native, or the in-process one) | `Recurring_Scheduler_AddOrUpdate_Then_Remove_DoNotThrow` |
 | `SupportsCancellation` | `IJobEngine.SupportsCancellation` is true and a running job can be cancelled on demand | 7, 13, 17, 19, 20 |
 | `ReportsAttemptBudget` | the engine fills `Attempt` and `TotalAttempts` on the envelope before `Dispatch`. False: `TotalAttempts` stays null and every attempt counts as final | 14, 15, 17, 18, 19, 20, 22, 23 |
 | `ClosesCanceledNotification` | a requested cancel (`Delete`) closes the job's notification `Canceled`, because the engine can tell a requested cancel from a shutdown or a lost lock. False: the notification stays open after a cancel | 17, 18, 19, 20 |
@@ -131,7 +134,7 @@ instead of making the test guess when it finished. A payload mode is a public me
 | `Value` | A string the handler records; scenario 1 asserts it arrived intact. | 1 |
 | `FailAttempts` | Throw on the first N executions of the correlation id, then succeed. `0` = never throw. | 5 (`int.MaxValue`, a poison job), 11, 14, 25 |
 | `FailAlways` | Throw on every execution — drives the exhausted-retries (final failure) path. Checked before `FailAttempts`. | 15, 22, 23 |
-| `ReportProgress` | Report one progress update (`ConformanceConstants.ProgressMessage`) from the handler. | 12, 14–20, 22, 23, 25 |
+| `ReportProgress` | Report one progress update (`ConformanceConstants.ProgressMessage`) from the handler. | 12, 14, 15, 16, 17, 19, 20, 22, 23, 25 |
 | `BlockUntilCancelled` | Signal "started", then block until the handler's `CancellationToken` trips; on cancel, signal "cancelled" and rethrow the cancellation. With `ReportProgress` the update is sent before "started" is signalled, so a scenario that saw the start also saw the update. | 13, 17, 19, 20 |
 | `FailOnCancel` | With `BlockUntilCancelled`: once the token trips, throw an `InvalidOperationException` instead of rethrowing the cancellation — a handler that fails after it was cancelled. False = rethrow. | 19, 20 |
 
@@ -141,11 +144,13 @@ instead of making the test guess when it finished. A payload mode is a public me
 The fixture and probe give a scenario the waits it needs, so a new scenario never has to poll by hand:
 
 - `Probe.WaitAsync`, `WaitStartedAsync`, `WaitCancelledAsync` — completion, "the handler is running" and "the handler
-  saw the cancel" (a `TimeoutException` names what was awaited); `Probe.ExecutionCount`, `Probe.ExecutionJobIds`, `Probe.Job`.
+  saw the cancel". They are plain timed waits on the probe's signal: on timeout they throw a `TimeoutException` with the
+  framework's generic message, which does not say what was awaited. `Probe.ExecutionCount`, `Probe.ExecutionJobIds`
+  and `Probe.Job` read what the handler recorded.
 - `Fixture.WaitForProgressAsync(notificationId, predicate, timeout)` — the first send to a notification that satisfies
-  the predicate; on timeout it names the notification, the predicate and every update that did arrive.
-- `Fixture.WaitForStatusAsync(jobId, predicate, timeout)` — polls `GetStatus` until the predicate holds, and names the
-  last state read on timeout.
+  the predicate; on timeout the `TimeoutException` names the notification, the predicate and every update that did arrive.
+- `Fixture.WaitForStatusAsync(jobId, predicate, timeout)` — polls `GetStatus` until the predicate holds; on timeout the
+  `TimeoutException` names the job, the predicate and the last state read.
 - `Fixture.ProgressUpdates(notificationId)` — the sends to one notification in arrival order; `LastProgressUpdate(title)`.
 - `ConformanceConstants.DefaultTimeout` and `CancellationTimeout` (30 s each; cooperative engines poll the shared store
   on an interval).
@@ -212,7 +217,7 @@ the engine and its worker.
 - **`InMemoryEngineConformanceTests`** — the shippable `InMemoryJobEngine` (the `Provider=InMemory` local/testing
   engine) with no infrastructure. Always runs.
 - **`HangfireConformanceTests`** — the real Hangfire engine + a real Hangfire server, in-process (in-memory storage
-  by default; point `VirtoCommerce:Hangfire:JobStorageType` at a database to certify persistent storage). It adds three
+  by default; point `VirtoCommerce:Hangfire:JobStorageType` at a database to certify persistent storage). It adds
   Hangfire-only scenarios: a requeued job whose retries are spent closes `Failed`, a running job moved to `Deleted`
   without the engine (the dashboard's Delete) closes `Canceled`, and a running job that is requeued stays open.
 - **`RabbitMqConformanceTests`** — the real RabbitMQ engine + consumer against a real broker. Set
