@@ -49,17 +49,23 @@ public sealed class HangfireJobExecutor(IJobDispatcher dispatcher, IPushNotifica
         {
             await dispatcher.Dispatch(enriched, context, cancellationToken);
         }
-        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested && (ex is OperationCanceledException || !IsFinalAttempt(enriched)))
         {
             // The dispatcher keeps the notification open here: a requested cancel, a host shutdown and an ownership
             // change all trip this token, and only Hangfire's stored state tells them apart. Any exception counts, not
             // only OperationCanceledException: a handler may fail with another one once its token trips, and the failed
             // attempt then looks like a retry is pending although the job was deleted and no retry will follow.
+            // On the final attempt that holds only for OperationCanceledException: any other exception was already
+            // closed Failed with its error by the dispatcher, and that error is the only record of why the job ended.
             await CloseIfDeleted(performContext, context, jobId);
 
             throw;
         }
     }
+
+    // The dispatcher's own rule (DefaultJobDispatcher.ReportFailedAttempt): an unknown budget counts as final.
+    private static bool IsFinalAttempt(JobEnvelope envelope)
+        => envelope.TotalAttempts is null || envelope.Attempt >= envelope.TotalAttempts;
 
     // A cancel is a move to Deleted, and Hangfire trips a running job's token only after it has read a state other
     // than Processing, so a cancel reads Deleted here. A shutdown still reads Processing, an ownership change reads

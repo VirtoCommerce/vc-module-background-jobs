@@ -403,7 +403,40 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Equal(1, fixture.Probe.ExecutionCount(id));
     }
 
-    // 20 — a cancel of a job that already finished changes nothing: the engine refuses it and the job keeps its state,
+    // 20 — the same on the final attempt is a failure: no retry was pending for the cancel to stop, so the error the
+    // dispatcher closed Failed with is the only record of why the job ended and no engine replaces it with Canceled.
+    [Fact]
+    public async Task Running_Job_Cancel_Then_Handler_Failure_On_Final_Attempt_Closes_Failed()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            fixture.Capabilities.SupportsCancellation && fixture.Capabilities.ClosesCanceledNotification && fixture.Capabilities.ReportsAttemptBudget,
+            "engine cannot cancel a job, close it Canceled or report its attempt budget.");
+        var id = NewId();
+
+        // No retries: attempt 1 is the final attempt.
+        var jobId = await EnqueueAsync(
+            new ConformancePayload { CorrelationId = id, Value = "cancel-then-fail-final", BlockUntilCancelled = true, FailOnCancel = true, ReportProgress = true },
+            new EnqueueOptions { ReportProgress = true, Title = id, MaxRetryAttempts = 0 });
+        var notificationId = NotificationIdOf(id);
+        await fixture.Probe.WaitStartedAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+
+        var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
+        Assert.True(accepted, "the engine must accept the cancellation request for a known, running job.");
+
+        var closing = await fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome == nameof(JobOutcome.Failed) && !string.IsNullOrEmpty(x.Error), ConformanceConstants.DefaultTimeout);
+
+        Assert.NotNull(closing.Finished);
+
+        // Nothing replaces the Failed close with Canceled afterwards: the absence of an update has no signal, so the check can only wait.
+        await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(fixture.ProgressUpdates(notificationId), x => x.Outcome == nameof(JobOutcome.Canceled));
+        Assert.Equal(1, fixture.Probe.ExecutionCount(id));
+    }
+
+    // 21 — a cancel of a job that already finished changes nothing: the engine refuses it and the job keeps its state,
     // so a late cancel cannot rewrite a finished job's history.
     [Fact]
     public async Task Delete_Of_Succeeded_Job_Returns_False_And_Keeps_State()
@@ -423,7 +456,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Equal("Succeeded", status.State);
     }
 
-    // 21 — a per-job retry limit above the engine's global count runs the job limit + 1 times. Hangfire has no per-job
+    // 22 — a per-job retry limit above the engine's global count runs the job limit + 1 times. Hangfire has no per-job
     // retry count, so this is the case its filter has to make work: the global filter gives up first. The wait is for
     // the notification's closing Failed, which an engine that does not report its attempt budget sends at the first failure.
     [Fact]
@@ -447,7 +480,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Equal(fixture.RetryBudget + 3, fixture.Probe.ExecutionCount(id));
     }
 
-    // 22 — a per-job retry limit below the engine's global count stops the job early: limit + 1 runs.
+    // 23 — a per-job retry limit below the engine's global count stops the job early: limit + 1 runs.
     [Fact]
     public async Task MaxRetryAttempts_Below_Global_Runs_N_Plus_One()
     {
