@@ -98,8 +98,11 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
     public void Deleted_WithoutTraversedFailure_IsNotTouched()
     {
         // A dashboard delete or a cancel arrives as a plain DeletedState: nothing failed, so there is nothing to retry.
+        // The global retry filter is registered, as it always is in production, and the stored count is below the job
+        // limit: without the traversed-failure check the filter would reach for a failure that was never traversed.
+        RegisterGlobalRetry(AttemptsExceededAction.Delete);
         var deleted = new DeletedState();
-        var context = CreateContext(deleted, retryCountStored: 0, out var connection);
+        var context = CreateContext(deleted, retryCountStored: _globalAttempts, out var connection);
 
         new PerJobRetryFilterAttribute().OnStateElection(context);
 
@@ -136,6 +139,18 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
     // reaches it: Failed candidate, then Deleted with the failure traversed) and then through the per-job filter.
     private (ElectStateContext Context, Mock<IStorageConnection> Connection) Elect(int retryCountStored, AttemptsExceededAction onExceeded, FailedState failure)
     {
+        var global = RegisterGlobalRetry(onExceeded);
+
+        var context = CreateContext(failure, retryCountStored, out var connection);
+
+        global.OnStateElection(context);
+        new PerJobRetryFilterAttribute().OnStateElection(context);
+
+        return (context, connection);
+    }
+
+    private static AutomaticRetryAttribute RegisterGlobalRetry(AttemptsExceededAction onExceeded)
+    {
         var global = new AutomaticRetryAttribute
         {
             Attempts = _globalAttempts,
@@ -145,12 +160,7 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
         };
         GlobalJobFilters.Filters.Add(global);
 
-        var context = CreateContext(failure, retryCountStored, out var connection);
-
-        global.OnStateElection(context);
-        new PerJobRetryFilterAttribute().OnStateElection(context);
-
-        return (context, connection);
+        return global;
     }
 
     // The state change of a job the engine enqueued: Execute(envelopeJson, context, token), as HangfireJobEngine builds it.
