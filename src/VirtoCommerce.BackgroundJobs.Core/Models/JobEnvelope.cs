@@ -34,7 +34,12 @@ public sealed record JobEnvelope
     /// </summary>
     public int? MaxRetryAttempts { get; init; }
 
-    /// <summary>De-duplication key.</summary>
+    /// <summary>
+    /// De-duplication key, taken from <c>EnqueueOptions.UniqueKey</c>. No shipped engine (Hangfire, RabbitMQ, InMemory)
+    /// de-duplicates by it: they carry the key on the envelope and ignore it, so it does not prevent a duplicate run.
+    /// Only an engine that implements de-duplication itself honors it (the Google Cloud Tasks sample maps it to a
+    /// task name).
+    /// </summary>
     public string? UniqueKey { get; init; }
 
     /// <summary>Push-notification id to report progress against, or null for fire-and-forget without progress.</summary>
