@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.Platform.Core.Jobs;
@@ -76,16 +79,22 @@ public class DispatcherTests
         public List<JobProgressInfo> Reports { get; } = [];
         public List<(JobOutcome Outcome, string Error)> Completions { get; } = [];
 
+        // Sends that fail the way a down push channel does; the attempt is still recorded before it throws.
+        public Func<int, bool> ThrowOnReport { get; set; } = _ => false;
+        public Func<JobOutcome, bool> ThrowOnComplete { get; set; } = _ => false;
+
         public Task Report(JobProgressInfo progress, CancellationToken cancellationToken = default)
         {
             Reports.Add(progress);
-            return Task.CompletedTask;
+
+            return ThrowOnReport(Reports.Count) ? throw new InvalidOperationException("push channel down") : Task.CompletedTask;
         }
 
         public Task Complete(JobOutcome outcome, string error = null, CancellationToken cancellationToken = default)
         {
             Completions.Add((outcome, error));
-            return Task.CompletedTask;
+
+            return ThrowOnComplete(outcome) ? throw new InvalidOperationException("push channel down") : Task.CompletedTask;
         }
     }
 
@@ -145,7 +154,7 @@ public class DispatcherTests
     public async Task Dispatch_UndeserializablePayload_FinalAttempt_ClosesFailed()
     {
         var serializer = new JsonJobPayloadSerializer();
-        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 1, payloadJson: "{");
+        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 1, payloadJson: "{", completesProgressNotification: true);
 
         var (progress, thrown) = await Dispatch(envelope, serializer, new HandlerBehavior(), TestContext.Current.CancellationToken);
 
@@ -213,7 +222,7 @@ public class DispatcherTests
     public async Task Dispatch_OperationCanceledWithoutCancelledToken_FinalAttempt_ClosesFailed()
     {
         var serializer = new JsonJobPayloadSerializer();
-        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 1);
+        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 1, completesProgressNotification: true);
         var behavior = new HandlerBehavior { Run = _ => throw new OperationCanceledException("handler timeout") };
 
         var (progress, thrown) = await Dispatch(envelope, serializer, behavior, TestContext.Current.CancellationToken);
@@ -238,5 +247,119 @@ public class DispatcherTests
         Assert.IsType<OperationCanceledException>(thrown);
         Assert.Empty(progress.Completions);
         Assert.Empty(progress.Reports);
+    }
+
+    // The notification is a display channel: its failure must not change what the job does.
+    [Fact]
+    public async Task Dispatch_StartReportFails_HandlerStillRuns()
+    {
+        var serializer = new JsonJobPayloadSerializer();
+        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 1, completesProgressNotification: true);
+        var progress = new RecordingProgress { ThrowOnReport = count => count == 1 };
+        var ran = false;
+        var behavior = new HandlerBehavior { Run = _ => { ran = true; return Task.CompletedTask; } };
+
+        var (_, thrown) = await Dispatch(envelope, serializer, behavior, TestContext.Current.CancellationToken, progress);
+
+        Assert.Null(thrown);
+        Assert.True(ran);
+    }
+
+    [Fact]
+    public async Task Dispatch_SuccessCloseFails_DoesNotFailTheAttempt()
+    {
+        // An engine would run a finished handler again if the attempt failed here.
+        var serializer = new JsonJobPayloadSerializer();
+        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 3, completesProgressNotification: true);
+        var progress = new RecordingProgress { ThrowOnComplete = outcome => outcome == JobOutcome.Succeeded };
+
+        var (_, thrown) = await Dispatch(envelope, serializer, new HandlerBehavior(), TestContext.Current.CancellationToken, progress);
+
+        Assert.Null(thrown);
+        Assert.Single(progress.Completions);
+    }
+
+    [Fact]
+    public async Task Dispatch_FailureReportFails_StillThrowsTheHandlerException()
+    {
+        var serializer = new JsonJobPayloadSerializer();
+        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 1, completesProgressNotification: true);
+        var progress = new RecordingProgress { ThrowOnComplete = _ => true };
+        var expected = new ArgumentException("handler failed");
+        var behavior = new HandlerBehavior { Run = _ => throw expected };
+
+        var (_, thrown) = await Dispatch(envelope, serializer, behavior, TestContext.Current.CancellationToken, progress);
+
+        Assert.Same(expected, thrown);
+    }
+
+    // A reporter built with the legacy four-argument PushNotificationJobProgress constructor owns its notification
+    // whatever the envelope says, so the dispatcher must not call Complete for an envelope that does not own it.
+    [Fact]
+    public async Task Dispatch_SharedNotification_NeverCompletes()
+    {
+        var serializer = new JsonJobPayloadSerializer();
+        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 1, completesProgressNotification: false);
+
+        var succeeded = new RecordingProgress();
+        await Dispatch(envelope, serializer, new HandlerBehavior(), TestContext.Current.CancellationToken, succeeded);
+
+        var failed = new RecordingProgress();
+        var behavior = new HandlerBehavior { Run = _ => throw new InvalidOperationException("boom") };
+        var (_, thrown) = await Dispatch(envelope, serializer, behavior, TestContext.Current.CancellationToken, failed);
+
+        Assert.NotNull(thrown);
+        Assert.Empty(succeeded.Completions);
+        Assert.Empty(failed.Completions);
+    }
+
+    // The production registration must bind the constructor that takes the logger, and a failed send must be logged
+    // with the job id and handler so an operator can see that a notification was lost.
+    [Fact]
+    public async Task Dispatch_ResolvedFromDi_LogsFailedSendWithJobId()
+    {
+        var logs = new CapturingLoggerProvider();
+        var serializer = new JsonJobPayloadSerializer();
+        var services = new ServiceCollection();
+        services.AddLogging(x => x.AddProvider(logs));
+        services.AddSingleton<IJobPayloadSerializer>(serializer);
+        services.AddSingleton<JobTelemetry>();
+        services.AddOptions<BackgroundJobsOptions>();
+        services.AddSingleton(new HandlerBehavior());
+        services.AddTransient<IBackgroundJobHandler<UserPayload>, ConfigurableHandler>();
+        services.AddSingleton<IJobDispatcher, DefaultJobDispatcher>();
+        using var provider = services.BuildServiceProvider();
+
+        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 1, completesProgressNotification: true);
+        var progress = new RecordingProgress { ThrowOnComplete = _ => true };
+        var context = new JobExecutionContext("job-42", progress, new Dictionary<string, string>());
+
+        await provider.GetRequiredService<IJobDispatcher>().Dispatch(envelope, context, TestContext.Current.CancellationToken);
+
+        var entry = Assert.Single(logs.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.Contains("job-42", entry.Message);
+        Assert.Contains("UserPayload", entry.Message);
+    }
+
+    private sealed class CapturingLoggerProvider : ILoggerProvider
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Entries);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class CapturingLogger(List<(LogLevel Level, string Message)> entries) : ILogger
+        {
+            public IDisposable BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
+                => entries.Add((logLevel, formatter(state, exception)));
+        }
     }
 }
