@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 using VirtoCommerce.Platform.Core.Security;
@@ -71,7 +71,8 @@ public sealed class MapReduceJob : IMapReduceJob
         var title = $"Map/reduce: {itemType.Name}";
         var (_, stateJson) = _serializer.Serialize(state);
 
-        var progressNotificationId = await TryCreateProgressNotificationAsync(options, itemList.Count, userName, title);
+        var started = DateTime.UtcNow;
+        var progressNotificationId = await TryCreateProgressNotificationAsync(options, itemList.Count, userName, title, started);
 
         var batch = new MapReduceBatch
         {
@@ -88,6 +89,7 @@ public sealed class MapReduceJob : IMapReduceJob
             ProgressNotificationId = progressNotificationId,
             Title = title,
             UserName = userName,
+            Started = started,
         };
 
         await _store.CreateAsync(batch, CancellationToken.None);
@@ -125,20 +127,28 @@ public sealed class MapReduceJob : IMapReduceJob
         return batchId;
     }
 
-    private async Task<string?> TryCreateProgressNotificationAsync(MapReduceOptions? options, int total, string? userName, string title)
+    private async Task<string?> TryCreateProgressNotificationAsync(MapReduceOptions? options, int total, string? userName, string title, DateTime started)
     {
         if (options?.ReportProgress != true)
         {
             return null;
         }
 
-        var notification = new JobProgressPushNotification(userName ?? "system")
-        {
-            Title = title,
-            Description = "Queued",
-            Started = DateTime.UtcNow,
-            TotalCount = total,
-        };
+        var notification = JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
+            Guid.NewGuid().ToString(),
+            userName ?? "system",
+            title,
+            started,
+            "Queued",
+            ProcessedCount: 0,
+            TotalCount: total,
+            JobId: null,
+            Attempt: null,
+            TotalAttempts: null,
+            Outcome: null,
+            Error: null,
+            Finished: null,
+            IsNew: true));
         await _pushNotificationManager.SendAsync(notification);
 
         return notification.Id;

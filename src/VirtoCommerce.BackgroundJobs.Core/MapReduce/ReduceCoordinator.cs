@@ -7,8 +7,8 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 
@@ -60,7 +60,7 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
         {
             _logger.LogError("Map/reduce batch {BatchId} faulted: {Failures}/{Total} map items failed (FailFast); reduce skipped.",
                 envelope.BatchId, failures, batch.Total);
-            await MarkFinishedAsync(batch, $"Faulted: {failures}/{batch.Total} map items failed.");
+            await MarkFinishedAsync(batch, $"Faulted: {failures}/{batch.Total} map items failed.", JobOutcome.Failed);
             await _store.CompleteAsync(envelope.BatchId, cancellationToken);
             return;
         }
@@ -102,30 +102,37 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             ExceptionDispatchInfo.Throw(ex.InnerException);
         }
 
-        await MarkFinishedAsync(batch, $"Completed ({batch.Total} items, {failures} failed).");
+        await MarkFinishedAsync(batch, $"Completed ({batch.Total} items, {failures} failed).", JobOutcome.Succeeded);
         await _store.CompleteAsync(envelope.BatchId, cancellationToken);
         _logger.LogInformation("Map/reduce batch {BatchId} reduced ({Total} items, {Failures} failed).",
             envelope.BatchId, batch.Total, failures);
     }
 
-    // Closes the shared progress notification (sets Finished) once the batch settles, since individual map tasks
-    // intentionally don't close the aggregate bar. Preserves the title so the notification isn't reset.
-    private async Task MarkFinishedAsync(MapReduceBatch batch, string description)
+    // Closes the shared progress notification (sets Finished and Outcome) once the batch settles, since individual map
+    // tasks intentionally don't close the aggregate bar. Built through the notification builder so the replacement keeps
+    // the title and the batch start time; a batch stored before the start time was recorded closes without one.
+    private async Task MarkFinishedAsync(MapReduceBatch batch, string description, JobOutcome outcome)
     {
         if (string.IsNullOrEmpty(batch.ProgressNotificationId))
         {
             return;
         }
 
-        await _pushNotificationManager.SendAsync(new JobProgressPushNotification(batch.UserName ?? "system")
-        {
-            Id = batch.ProgressNotificationId,
-            Title = batch.Title,
-            Description = description,
-            ProcessedCount = batch.Total,
-            TotalCount = batch.Total,
-            Finished = DateTime.UtcNow,
-        });
+        await _pushNotificationManager.SendAsync(JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
+            batch.ProgressNotificationId,
+            batch.UserName ?? "system",
+            batch.Title,
+            batch.Started,
+            description,
+            ProcessedCount: batch.Total,
+            TotalCount: batch.Total,
+            JobId: null,
+            Attempt: null,
+            TotalAttempts: null,
+            outcome.ToString(),
+            Error: null,
+            Finished: DateTime.UtcNow,
+            IsNew: false)));
     }
 
     // Re-hydrate the type-erased records into a List<MapResult<TResult>> the reduce handler can accept as

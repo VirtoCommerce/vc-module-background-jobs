@@ -101,6 +101,14 @@ public sealed class JobEngineBackgroundJob(
             headers[JobHeaders.RunId] = runId;
         }
 
+        // A map task of a shared (map/reduce) notification cannot learn the batch start time from its own envelope, so the
+        // fan-out passes it through the ambient scope. Only an enqueue that reports into an existing notification needs it.
+        var batchStartedAt = JobEnqueueContext.BatchStartedAt;
+        if (batchStartedAt.HasValue && !string.IsNullOrEmpty(options?.ProgressNotificationId))
+        {
+            headers[JobHeaders.BatchStartedAt] = batchStartedAt.Value.Ticks.ToString(CultureInfo.InvariantCulture);
+        }
+
         var envelope = new JobEnvelope
         {
             JobType = payloadContractType.AssemblyQualifiedName!,
