@@ -209,14 +209,21 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             _logger.LogInformation("Job {JobId} ({JobType}) was cancelled before start; discarding.", jobId, envelope.JobType);
             await context.Progress.TryCompleteCanceledAsync(_logger, jobId);
             await TryAckAsync(channel, eventArgs.DeliveryTag);
-            await _cancellationStore.Clear(jobId);
+
+            // The flag stays, even though this delivery is settled. It belongs to the job, not to the delivery: the
+            // message just discarded may be redelivered (the ack can fail, a redelivery can already be in flight), and
+            // a retry of the job may exist behind it — each of those has to find the flag to be discarded as well.
+            // The store's TTL removes it once nothing can read it any more.
             return;
         }
 
         var dispatched = false;
 
-        // Set once the failed attempt's retry is re-published and the original acked. The retry is a new message of the
-        // same job, so a cancel requested meanwhile must outlive this one: the retry's pre-dispatch discard reads it.
+        // The cancellation flag belongs to the job, so it may be cleared only when no later delivery of the job can need
+        // it: this delivery was acked, so the broker will not redeliver it, and no retry of the job was published.
+        // Both are set as the facts become true, not at the end: a retry is a new message of the same job and can be
+        // consumed before this method returns, and an ack that then fails leaves the original to be redelivered.
+        var acked = false;
         var retryPublished = false;
 
         // Per-job cancellation: the handler runs under jobCts.Token; a watch loop polls the shared store and trips it
@@ -233,6 +240,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             dispatched = true;
 
             await RunChannelOpAsync(async () => await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false));
+            acked = true;
             _logger.LogDebug("Completed and acked job {JobId} ({JobType})", jobId, envelope.JobType);
         }
         catch (OperationCanceledException) when (jobCts.IsCancellationRequested)
@@ -243,7 +251,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             // to retry/DLQ — the cancellation was intentional, not a failure.
             _logger.LogInformation("Job {JobId} ({JobType}) was cancelled while running; discarding.", jobId, envelope.JobType);
             await context.Progress.TryCompleteCanceledAsync(_logger, jobId);
-            await TryAckAsync(channel, eventArgs.DeliveryTag);
+            acked = await TryAckAsync(channel, eventArgs.DeliveryTag);
         }
         catch (Exception ex) when (!dispatched)
         {
@@ -251,9 +259,9 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             // succeeds, otherwise leave it unacked so the broker redelivers it (no silent loss).
             try
             {
-                var requeued = await HandleFailureAsync(channel, envelope, jobId, ex);
+                retryPublished = await HandleFailureAsync(channel, envelope, jobId, ex);
                 await RunChannelOpAsync(async () => await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false));
-                retryPublished = requeued;
+                acked = true;
             }
             catch (Exception failureEx)
             {
@@ -268,9 +276,10 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         }
         finally
         {
-            // Stop the watch loop and clear the cancellation flag now that the job has settled — except after a retry
-            // was re-published: the retry is a new message of the same job and can be consumed before this block runs,
-            // so a cancel requested meanwhile stays for its pre-dispatch discard, which clears it.
+            // Stop the watch loop, and clear the cancellation flag only when the job has settled for good: this delivery
+            // acked and no retry published. Otherwise a delivery of the job is still to come (the broker redelivers an
+            // unacked message; a retry is a message of its own) and its pre-dispatch discard needs the flag. A flag left
+            // behind expires with the store's TTL.
             await watchStop.CancelAsync();
             try
             {
@@ -281,7 +290,7 @@ public sealed class RabbitMqJobConsumer : BackgroundService
                 // expected when the watch loop is stopped
             }
 
-            if (!string.IsNullOrEmpty(jobId) && !retryPublished)
+            if (!string.IsNullOrEmpty(jobId) && acked && !retryPublished)
             {
                 await _cancellationStore.Clear(jobId);
             }
@@ -331,15 +340,20 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         }
     }
 
-    private async Task TryAckAsync(IChannel channel, ulong deliveryTag)
+    // Returns whether the broker was told: a failed ack leaves the delivery to be redelivered.
+    private async Task<bool> TryAckAsync(IChannel channel, ulong deliveryTag)
     {
         try
         {
             await RunChannelOpAsync(async () => await channel.BasicAckAsync(deliveryTag, multiple: false));
+
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to acknowledge RabbitMQ delivery {DeliveryTag}", deliveryTag);
+
+            return false;
         }
     }
 
