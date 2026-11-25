@@ -342,7 +342,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
         Assert.True(accepted, "the engine must accept the cancellation request for a known, running job.");
 
-        await AssertCancelOutcomeAsync(jobId, id, notificationId, observeHandlerCancel: true);
+        await AssertCancelOutcomeAsync(id, notificationId, observeHandlerCancel: true);
     }
 
     // 18 — the same for a job that never ran: it is canceled while still queued, so no worker will ever close it.
@@ -362,11 +362,11 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
         Assert.True(accepted, "the engine must accept the cancellation request for a known, queued job.");
 
-        await AssertCancelOutcomeAsync(jobId, id, notificationId, observeHandlerCancel: false);
+        await AssertCancelOutcomeAsync(id, notificationId, observeHandlerCancel: false);
         Assert.Equal(0, fixture.Probe.ExecutionCount(id));
     }
 
-    private async Task AssertCancelOutcomeAsync(string jobId, string correlationId, string notificationId, bool observeHandlerCancel)
+    private async Task AssertCancelOutcomeAsync(string correlationId, string notificationId, bool observeHandlerCancel)
     {
         if (fixture.Capabilities.ClosesCanceledNotification)
         {
@@ -404,17 +404,8 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
                 await fixture.Probe.WaitCancelledAsync(correlationId, ConformanceConstants.CancellationTimeout, TestContext.Current.CancellationToken);
             }
 
-            if (fixture.Capabilities.SupportsStatusQuery)
-            {
-                // The job's own status says when the cancel has taken effect, so the check needs no fixed wait.
-                await fixture.WaitForStatusAsync(
-                    jobId, x => x.Completed || x.State is "Cancelled" or "Deleted", ConformanceConstants.CancellationTimeout);
-            }
-            else
-            {
-                // No ledger to read: nothing signals the absence of a close, so the check can only wait.
-                await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
-            }
+            // An absence of a close has no engine-agnostic signal, so the check can only wait.
+            await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
 
             Assert.DoesNotContain(fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);
         }
