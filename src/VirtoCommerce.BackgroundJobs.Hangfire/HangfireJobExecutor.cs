@@ -2,7 +2,6 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Hangfire.Logging;
 using Hangfire.Server;
 using Hangfire.States;
 using Hangfire.Storage;
@@ -27,8 +26,6 @@ public sealed class HangfireJobExecutor(
     IPushNotificationManager pushNotificationManager,
     ILogger<HangfireJobExecutor> logger)
 {
-    private static readonly ILog _logger = LogProvider.For<HangfireJobExecutor>();
-
     public HangfireJobExecutor(IJobDispatcher dispatcher, IPushNotificationManager pushNotificationManager)
         : this(dispatcher, pushNotificationManager, NullLogger<HangfireJobExecutor>.Instance)
     {
@@ -106,7 +103,7 @@ public sealed class HangfireJobExecutor(
     // Processing on another server and a requeue reads Enqueued: Hangfire runs the job again in each case, so the
     // notification stays open. A failure to read the state is treated as "not deleted": an open notification for a
     // canceled job is the lesser harm than a Canceled one for a job that runs again.
-    private static async Task CloseIfDeleted(PerformContext? performContext, IJobExecutionContext context, string jobId)
+    private async Task CloseIfDeleted(PerformContext? performContext, IJobExecutionContext context, string jobId)
     {
         try
         {
@@ -128,7 +125,7 @@ public sealed class HangfireJobExecutor(
         }
         catch (Exception ex)
         {
-            _logger.WarnException($"Could not close the progress notification of the canceled job '{jobId}'; it stays open.", ex);
+            logger.LogWarning(ex, "Could not close the progress notification of the canceled job {JobId}; it stays open.", jobId);
         }
     }
 }

@@ -88,8 +88,9 @@ public class BackgroundJobsAdminController(
             return BadRequest($"Background job '{descriptor.Name}' is internal and cannot be triggered on demand.");
         }
 
-        // Bind the request payload JSON to the handler's payload type. Missing/empty payload ⇒ default instance.
-        var payloadJson = request.Payload is null || request.Payload.Type == JTokenType.Null
+        // Bind the request payload JSON to the handler's payload type. A missing payload and an explicit "payload": null both
+        // arrive as null (the model binder does not hand a JSON null over as a JToken of type Null) ⇒ default instance.
+        var payloadJson = request.Payload is null
             ? "{}"
             : request.Payload.ToString(Formatting.None);
 

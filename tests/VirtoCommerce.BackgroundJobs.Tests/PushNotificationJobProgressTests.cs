@@ -77,10 +77,16 @@ public class PushNotificationJobProgressTests
         Assert.Equal(1, a.Attempt);
         Assert.Equal(2, b.Attempt);
         Assert.Equal(3, b.TotalAttempts);
-        Assert.Equal(a.Started, b.Started);
-        Assert.Equal(a.Created, b.Created);
-        Assert.Equal(a.JobId, b.JobId);
-        Assert.Equal(a.Title, b.Title);
+
+        // Against the expected values, not against each other: two sends that both lost the start time, the job id or the
+        // title would still be equal to one another.
+        Assert.All(new[] { a, b }, x =>
+        {
+            Assert.Equal(_enqueuedAt, x.Started);
+            Assert.Equal(_enqueuedAt, x.Created);
+            Assert.Equal("job-1", x.JobId);
+            Assert.Equal("Import", x.Title);
+        });
         Assert.Equal(5, b.ProcessedCount);
         Assert.Equal(0, b.TotalCount);
     }

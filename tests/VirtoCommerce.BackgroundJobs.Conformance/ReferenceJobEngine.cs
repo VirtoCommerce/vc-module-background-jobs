@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
@@ -75,7 +76,9 @@ public sealed class ReferenceJobEngine(
                     // The job's own token has no writer but Delete, so this is a requested cancel — terminal, never
                     // retried. The dispatcher leaves the notification open for a cancelled token: close it Canceled here.
                     _states[jobId] = "Cancelled";
-                    await CloseCanceledAsync(context);
+                    // A failure to close the notification must not turn a requested cancel into a failure: it stays open. The shared
+                    // helper does that; the kit has no logger of its own, so the warning it would write goes nowhere.
+                    await context.Progress.TryCompleteCanceledAsync(NullLogger.Instance, jobId);
                     return;
                 }
                 catch
@@ -94,19 +97,6 @@ public sealed class ReferenceJobEngine(
             {
                 cts.Dispose();
             }
-        }
-    }
-
-    // A failure to close the notification must not turn a requested cancel into a failure: it stays open.
-    private static async Task CloseCanceledAsync(IJobExecutionContext context)
-    {
-        try
-        {
-            await context.Progress.Complete(JobOutcome.Canceled, null);
-        }
-        catch
-        {
-            // The notification stays open (the lesser harm), as for an engine that does not close it at all.
         }
     }
 

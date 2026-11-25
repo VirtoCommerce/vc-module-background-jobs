@@ -342,7 +342,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
         Assert.True(accepted, "the engine must accept the cancellation request for a known, running job.");
 
-        await AssertCancelOutcomeAsync(id, notificationId, observeHandlerCancel: true);
+        await AssertCancelOutcomeAsync(id, jobId, notificationId, observeHandlerCancel: true);
     }
 
     // 18 — the same for a job that never ran: it is canceled while still queued, so no worker will ever close it.
@@ -362,7 +362,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
         Assert.True(accepted, "the engine must accept the cancellation request for a known, queued job.");
 
-        await AssertCancelOutcomeAsync(id, notificationId, observeHandlerCancel: false);
+        await AssertCancelOutcomeAsync(id, jobId, notificationId, observeHandlerCancel: false);
         Assert.Equal(0, fixture.Probe.ExecutionCount(id));
     }
 
@@ -395,7 +395,10 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         if (fixture.Capabilities.ReportsAttemptBudget)
         {
             Assert.Equal(fixture.RetryBudget + 1, closing.TotalAttempts);
-            Assert.True(closing.Attempt >= 1, "the close carries the attempt it was made at.");
+            // The close is made at the failed attempt (1) or at the one after it (2), as the comment above says per engine;
+            // any other number, or none, is a close that lost the attempt it was made at.
+            Assert.NotNull(closing.Attempt);
+            Assert.InRange(closing.Attempt.Value, 1, 2);
         }
 
         // No further attempt runs the handler: the absence of a run has no signal, so the check can only wait.
@@ -478,7 +481,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
 
         Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
         Assert.Equal(limit + 1, closing.TotalAttempts);
-        Assert.Equal(fixture.RetryBudget + 3, fixture.Probe.ExecutionCount(id));
+        Assert.Equal(limit + 1, fixture.Probe.ExecutionCount(id));
     }
 
     // 23 — a per-job retry limit below the engine's global count stops the job early: limit + 1 runs.
@@ -540,7 +543,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.All(workerUpdates, x => Assert.Equal(jobId, x.JobId));
     }
 
-    private async Task AssertCancelOutcomeAsync(string correlationId, string notificationId, bool observeHandlerCancel)
+    private async Task AssertCancelOutcomeAsync(string correlationId, string jobId, string notificationId, bool observeHandlerCancel)
     {
         if (fixture.Capabilities.ClosesCanceledNotification)
         {
@@ -550,6 +553,11 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
             Assert.Equal(nameof(JobOutcome.Canceled), closing.Outcome);
             Assert.NotNull(closing.Finished);
             Assert.Null(closing.Error);
+
+            // The close replaces the whole notification, so it must carry what the job's own sends carried: the job id the
+            // progress page finds the job by, and the start time the elapsed display counts from.
+            Assert.Equal(jobId, closing.JobId);
+            Assert.NotNull(closing.Started);
 
             if (fixture.Capabilities.ReportsAttemptBudget)
             {
@@ -566,7 +574,10 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
                 }
                 else
                 {
-                    Assert.Equal(1, closing.Attempt);
+                    // The close is made at the failed attempt (1) or at the one after it (2), as the comment above says per engine;
+            // any other number, or none, is a close that lost the attempt it was made at.
+            Assert.NotNull(closing.Attempt);
+            Assert.InRange(closing.Attempt.Value, 1, 2);
                     Assert.Equal(fixture.RetryBudget + 1, closing.TotalAttempts);
                 }
             }

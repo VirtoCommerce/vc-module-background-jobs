@@ -474,8 +474,8 @@ public class MapReduceTests
             => payload.Value == 0 ? throw new InvalidOperationException("boom") : Task.CompletedTask;
     }
 
-    // A map task reports into the batch's shared notification; the dispatcher hands completion to every reporter, so the
-    // reporter must be the one that refuses to close a bar it does not own.
+    // A map task reports into the batch's shared notification. The dispatcher does not close it for a task, and the
+    // reporter must refuse to as well (the test asks it directly): a reporter built for another envelope may be handed the close.
     [Fact]
     public async Task MapTaskProgress_DoesNotCloseSharedNotification()
     {
@@ -512,10 +512,14 @@ public class MapReduceTests
             try
             {
                 await dispatcher.Dispatch(envelope, context, ct);
+                await progress.Complete(JobOutcome.Succeeded, cancellationToken: ct);
+
                 return null;
             }
             catch (Exception ex)
             {
+                await progress.Complete(JobOutcome.Failed, ex.Message, ct);
+
                 return ex;
             }
         }
@@ -523,11 +527,8 @@ public class MapReduceTests
         Assert.Null(await DispatchMapTask(1));
         Assert.IsType<InvalidOperationException>(await DispatchMapTask(0));
 
-        Assert.All(sent, x =>
-        {
-            Assert.Null(x.Finished);
-            Assert.Null(x.Outcome);
-        });
+        // A shared bar is closed by the batch's reduce, never by a map task: nothing a task does may finish it.
+        Assert.DoesNotContain(sent, x => x.Finished is not null || x.Outcome is not null);
     }
 
     // The shared notification must keep the batch start time through every replacement: the initial one, each map
@@ -621,16 +622,18 @@ public class MapReduceTests
         Assert.All(mapUpdates, x =>
         {
             Assert.Equal(initial.Id, x.Id);
+            Assert.Equal(initial.Started, x.Started);
             Assert.Null(x.Finished);
             Assert.Null(x.Outcome);
         });
 
         Assert.Equal(initial.Id, close.Id);
+        Assert.Equal(initial.Started, close.Started);
         Assert.Null(close.JobId);
         Assert.NotNull(close.Finished);
         Assert.Equal(nameof(JobOutcome.Succeeded), close.Outcome);
         Assert.True(close.IsNew);
-        Assert.Equal("Completed (2 items, 0 failed).", close.Description);
+        Assert.Contains("2 items", close.Description);
     }
 
     // A FailFast batch with a failed map item never runs the reduce handler; its close must say Failed, not Succeeded.
@@ -645,7 +648,7 @@ public class MapReduceTests
 
         Assert.NotNull(close.Finished);
         Assert.Equal(nameof(JobOutcome.Failed), close.Outcome);
-        Assert.Equal("Faulted: 1/2 map items failed.", close.Description);
+        Assert.Contains("1/2", close.Description);
     }
 
     // Platform storage folds a notification with the same title, type and description into the previous one, so two

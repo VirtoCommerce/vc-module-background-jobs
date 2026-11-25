@@ -250,4 +250,21 @@ public class EnqueueEndpointTests
         Assert.Contains("progressNotificationId", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         Assert.Equal(0, recorder.Enqueued);
     }
+
+    // The controller has no separate case for a JSON null: the binder hands it over as no payload at all, and the
+    // handler must still get a default instance rather than null.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Enqueue_ExplicitNullPayload_RunsHandlerWithDefaultPayload(bool withJsonElementConverter)
+    {
+        var (app, client, recorder) = await StartAsync(withJsonElementConverter);
+        await using var _ = app;
+        using var __ = client;
+
+        var response = await PostEnqueueAsync(client, """{ "name": "ProbeHandler", "payload": null }""");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(Assert.Single(recorder.Received));
+    }
 }
