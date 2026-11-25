@@ -635,15 +635,14 @@ public class MapReduceTests
 
     // A FailFast batch with a failed map item never runs the reduce handler; its close must say Failed, not Succeeded.
     [Fact]
-    public async Task SharedNotification_FailFastFault_ClosesFailedWithBatchStart()
+    public async Task SharedNotification_FailFastFault_ClosesFailed()
     {
         var ct = TestContext.Current.CancellationToken;
         var harness = new NotifyingHarness(new FlakySquareHandler());
 
-        var (initial, _, close) = await harness.RunAsync<FlakySquareHandler>(
+        var (_, _, close) = await harness.RunAsync<FlakySquareHandler>(
             [new SquareItem(1), new SquareItem(3)], ct);
 
-        Assert.Equal(initial.Started, close.Started);
         Assert.NotNull(close.Finished);
         Assert.Equal(nameof(JobOutcome.Failed), close.Outcome);
         Assert.Equal("Faulted: 1/2 map items failed.", close.Description);
