@@ -5,6 +5,9 @@ import { markRaw } from "vue";
 import JobProgressNotification from "./components/JobProgressNotification.vue";
 import type { JobProgressPushNotification } from "./types/job-progress-notification";
 
+// a canceled job is neither a success nor a failure; any other finished outcome reads as success
+const completedTypes: Partial<Record<string, "error" | "warning">> = { Failed: "error", Canceled: "warning" };
+
 export default defineAppModule({
   blades,
   locales,
@@ -15,7 +18,7 @@ export default defineAppModule({
       toast: {
         mode: "progress",
         isComplete: (m) => !!(m as JobProgressPushNotification).finished,
-        completedType: (m) => ((m as JobProgressPushNotification).outcome === "Failed" ? "error" : "success"),
+        completedType: (m) => completedTypes[(m as JobProgressPushNotification).outcome ?? ""] ?? "success",
       },
     },
   },

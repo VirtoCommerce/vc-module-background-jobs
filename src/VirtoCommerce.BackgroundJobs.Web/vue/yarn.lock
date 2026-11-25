@@ -2129,9 +2129,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@vc-shell/framework@npm:2.13.0":
-  version: 2.13.0
-  resolution: "@vc-shell/framework@npm:2.13.0"
+"@vc-shell/framework@npm:2.13.0-pr419.8250e7a":
+  version: 2.13.0-pr419.8250e7a
+  resolution: "@vc-shell/framework@npm:2.13.0-pr419.8250e7a"
   dependencies:
     "@floating-ui/dom": "npm:^1.7.4"
     "@floating-ui/vue": "npm:^1.0.6"
@@ -2197,7 +2197,7 @@ __metadata:
       optional: false
   bin:
     vc-check-locales: dist/scripts/check-locales.cjs
-  checksum: 10/4ba713629a4e5c6555fc62e1338c9de1fb811c4507c80285aff32794cee015ab1cebd313103ae8e8391428215a8d8a4f184093f4b0dc2d81c0fadcc445aa3d35
+  checksum: 10/76691b641ad0181c2c7d105aa5ed7fb49dd1a3a97e0808149986c8fed83f67a30ee12ecea36be7476c255979609c0bd65a28a37e3c1027402fd11d74e698ae59
   languageName: node
   linkType: hard
 
@@ -2889,7 +2889,7 @@ __metadata:
     "@types/node": "npm:^20.10.5"
     "@vc-shell/api-client-generator": "npm:2.13.0"
     "@vc-shell/config-generator": "npm:2.13.0"
-    "@vc-shell/framework": "npm:2.13.0"
+    "@vc-shell/framework": "npm:2.13.0-pr419.8250e7a"
     "@vc-shell/mf-module": "npm:2.13.0"
     "@vc-shell/ts-config": "npm:2.13.0"
     "@vitejs/plugin-vue": "npm:^5.2.4"
