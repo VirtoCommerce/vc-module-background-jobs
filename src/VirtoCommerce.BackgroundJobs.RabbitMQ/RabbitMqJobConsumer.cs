@@ -217,6 +217,10 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
         var dispatched = false;
 
+        // Set once the failed attempt's retry is re-published and the original acked. The retry is a new message of the
+        // same job, so a cancel requested meanwhile must outlive this one: the retry's pre-dispatch discard reads it.
+        var retryPublished = false;
+
         // Per-job cancellation: the handler runs under jobCts.Token; a watch loop polls the shared store and trips it
         // when a cancel is requested for this job. watchStop ends the watch loop once the job settles.
         using var jobCts = new CancellationTokenSource();
@@ -249,8 +253,9 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             // succeeds, otherwise leave it unacked so the broker redelivers it (no silent loss).
             try
             {
-                await HandleFailureAsync(channel, envelope, jobId, ex);
+                var requeued = await HandleFailureAsync(channel, envelope, jobId, ex);
                 await RunChannelOpAsync(async () => await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false));
+                retryPublished = requeued;
             }
             catch (Exception failureEx)
             {
@@ -265,7 +270,10 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         }
         finally
         {
-            // Stop the watch loop and clear the cancellation flag now that the job has settled.
+            // Stop the watch loop and clear the cancellation flag now that the job has settled — except when the message
+            // settled by re-publishing a retry while a cancel is requested: the request stays for the retry to find, and
+            // its pre-dispatch discard closes the notification Canceled and clears the request. Clearing it here would let
+            // the retry run, since it can be consumed before this block does.
             await watchStop.CancelAsync();
             try
             {
@@ -278,7 +286,11 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
             if (!string.IsNullOrEmpty(jobId))
             {
-                await _cancellationStore.Clear(jobId);
+                var keepForRetry = retryPublished && await _cancellationStore.IsCancelRequested(jobId);
+                if (!keepForRetry)
+                {
+                    await _cancellationStore.Clear(jobId);
+                }
             }
         }
     }
@@ -356,8 +368,9 @@ public sealed class RabbitMqJobConsumer : BackgroundService
     /// Re-routes a failed job: requeue (incremented attempt) until <see cref="BackgroundJobsOptions.MaxRetryAttempts"/>,
     /// then dead-letter (or drop). Does NOT ack — the caller acks the original only after this succeeds, so a failure
     /// here leaves the original unacked for redelivery rather than losing it.
+    /// Returns <c>true</c> when a retry was re-published, <c>false</c> when the job was dead-lettered or dropped.
     /// </summary>
-    private async Task HandleFailureAsync(IChannel channel, JobEnvelope envelope, string jobId, Exception ex)
+    private async Task<bool> HandleFailureAsync(IChannel channel, JobEnvelope envelope, string jobId, Exception ex)
     {
         // MaxRetryAttempts counts retries: the first run is Attempt 1, so requeue while Attempt <= MaxRetryAttempts
         // (e.g. default 3 → up to 3 re-publications), then dead-letter. Floor at 0 (not 1) so MaxRetryAttempts = 0
@@ -413,6 +426,8 @@ public sealed class RabbitMqJobConsumer : BackgroundService
                         mandatory: false, basicProperties: properties, body: body);
                 });
             }
+
+            return true;
         }
         else if (_rabbitMqOptions.UseDeadLetterQueue)
         {
@@ -426,6 +441,8 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             _logger.LogError(ex, "Job {JobId} ({JobType}) failed on final attempt {Attempt}/{MaxAttempts}; dropping (dead-letter queue disabled)",
                 jobId, envelope.JobType, envelope.Attempt, maxAttempts);
         }
+
+        return false;
     }
 
     private async Task PublishToDeadLetterAsync(IChannel channel, JobEnvelope envelope, string jobId, Exception ex)
