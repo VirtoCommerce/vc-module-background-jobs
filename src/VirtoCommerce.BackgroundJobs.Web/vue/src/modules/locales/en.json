@@ -13,6 +13,9 @@
           "PAYLOAD_TYPE": "Payload type",
           "TRIGGERABLE": "Triggerable"
         },
+        "FILTERS": {
+          "TRIGGERABLE_ONLY": "Triggerable only"
+        },
         "TOOLBAR": {
           "REFRESH": "Refresh",
           "RUN": "Run"
