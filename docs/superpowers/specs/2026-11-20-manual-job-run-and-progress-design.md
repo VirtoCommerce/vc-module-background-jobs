@@ -158,7 +158,11 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
     Hangfire job answers 200 and turns its state from `Succeeded` into `Deleted` (observed, §5), which rewrites the
     job's history.
 - **Notification template** for `JobProgressPushNotification` registered through `defineAppModule({ notifications })`
-  with toast mode `progress`; the toast completes with the outcome (`Failed` → error toast).
+  with toast mode `progress`; the toast completes with the outcome by its kind: `Failed` → error, `Canceled` →
+  warning, `Succeeded` → success. The toast's text stays the job title. `completedType` is typed `"success" | "error"`
+  in `@vc-shell/framework` 2.13.0 while its toast runtime already renders `"warning"` (every 2.x release), so a
+  companion vc-shell PR widens the type and the plugin pins that PR's preview build for type-checking only; the host
+  Admin Shell needs no change. The bell entry uses the same three colours.
 
 ### 3.4 Completion seam, job id and the notification builder
 
@@ -222,6 +226,13 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
 - **Shared notifications** (map/reduce): a child envelope cannot carry stable `Started`/`JobId` for the batch.
   `Started` = the batch start time recorded on `MapReduceBatch`; `JobId` stays null; the description is the latest map
   message. A map task's update never closes the notification.
+  - The batch start reaches the map children as the `JobHeaders.BatchStartedAt` header. `FanOutCoordinator` opens an
+    ambient scope with `MapReduceBatch.Started` around its child enqueue loop through a public
+    `JobEnqueueContext` member beside `BeginRun` (the same `AsyncLocal` shape), and `EnqueueCore` stamps the header only
+    on an enqueue that carries a `ProgressNotificationId`. The platform `EnqueueOptions` has no header slot.
+  - The reduce close is built through the notification builder with `MapReduceBatch.Started` and the reduce's outcome,
+    so the closing replacement keeps the batch start time. A batch stored before the upgrade has no `Started` and
+    behaves as before.
 
 ### 3.5 Attempts and outcome on every engine
 
@@ -314,6 +325,13 @@ elected and the `RetryCount` that election wrote:
 | a retry | `RetryCount > L` | restore `Failed` (the lowering case, today's behaviour, now also for zero-delay retries) |
 | `FailedState` (global attempts exhausted) | `RetryCount < L` | apply a copy of the global attribute with `Attempts = L` to the election, from `Failed` only, so Hangfire's own delay formula and `RetryCount` bookkeeping schedule the retry |
 | `FailedState` | `RetryCount >= L` | keep `Failed` |
+| `DeletedState` reached from a `FailedState` (a global attribute with `OnAttemptsExceeded = Delete` gave up) | `RetryCount < L` | put the traversed `Failed` back as the candidate and apply the copy as in the `FailedState` row; on the final attempt the global `Delete` stands |
+| `DeletedState` reached from a `FailedState` | `RetryCount >= L` | keep `Deleted` |
+
+A `DeletedState` with no traversed `FailedState` (a dashboard delete, a cancel) is never touched: in Hangfire.Core
+v1.8.23 only `AutomaticRetryAttribute` turns a `Failed` candidate into `Deleted`. Each extended attempt under `Delete`
+leaves a "Deleted" row in the job's history and Hangfire's "automatically deleted" warning in the log; the job itself
+is not deleted until the per-job limit is spent.
 
 - Jobs without a per-job value and non-envelope jobs keep the global filter's decision.
 - The copy is built from the registered global attribute (same delays, same `OnAttemptsExceeded`), not a fresh
@@ -440,7 +458,8 @@ Each criterion names its check: `test` only where the failure is silent and harm
    "attempt N" when the total is unknown), the job's current message and elapsed time, updated as the job reports, including a
    job that finished before the page opened. — E2E
 8. WHEN a job ends, THEN its owned notification SHALL be closed with outcome `Succeeded`, `Failed` with the error, or
-   `Canceled`, and the progress page and toast SHALL show that outcome. — test (dispatcher, all engines); E2E (UI)
+   `Canceled`, and the progress page SHALL show that outcome and the toast SHALL show it by its kind (icon and
+   colour). — test (dispatcher, all engines); E2E (UI)
 9. WHEN an attempt fails and `Attempt < TotalAttempts`, THEN the notification SHALL stay open with "attempt N of M
    failed, retrying" and SHALL NOT be closed as failed, on every engine. — test
 10. WHEN the user cancels a job that is running, queued or waiting for a retry, THEN its notification SHALL be closed
@@ -650,3 +669,10 @@ the same assertion; items an engine may not support are capability-gated with th
   replaced the dispatcher's final `Failed` close with `Canceled`, dropping the error, while InMemory and RabbitMQ
   ended `Failed`. Chosen over `Canceled` everywhere because no retry was pending for the cancel to stop and the error
   is the only record of why the job ended.
+- 2026-11-25 — Operator, after the Task 7, 9 and 11b reviews and a reworked question round: (1) the Hangfire per-job
+  retry filter also continues when a global `OnAttemptsExceeded = Delete` gave up (§3.6 rows); the gap came from
+  this branch (the per-job total now drives the notification), and no local VirtoCommerce code registers `Delete`.
+  (2) The batch start time reaches map children through an ambient `JobEnqueueContext` scope (§3.4); the platform
+  `EnqueueOptions` has no header slot, and `InternalsVisibleTo` stays removed, so the member is public. (3) A
+  canceled job's toast is a warning (§3.3, AC 8 reworded: the toast shows the outcome by its kind, not as text),
+  through a type-only vc-shell PR and a preview pin.
