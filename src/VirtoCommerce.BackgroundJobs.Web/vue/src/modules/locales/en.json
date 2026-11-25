@@ -27,6 +27,26 @@
         "TOOLBAR": {
           "RUN": "Run"
         }
+      },
+      "PROGRESS": {
+        "TITLE": "Background job",
+        "STATE": {
+          "QUEUED": "Queued",
+          "RUNNING": "Running",
+          "SUCCEEDED": "Succeeded",
+          "FAILED": "Failed",
+          "CANCELED": "Canceled"
+        },
+        "QUEUED_MESSAGE": "Waiting for a worker to pick the job up",
+        "PROCESSED": "Processed",
+        "ATTEMPT": "Attempt",
+        "ATTEMPT_OF": "{attempt} of {total}",
+        "ATTEMPT_N": "{attempt}",
+        "ELAPSED": "Elapsed",
+        "ERROR": "Error",
+        "TOOLBAR": {
+          "CANCEL": "Cancel"
+        }
       }
     }
   }
