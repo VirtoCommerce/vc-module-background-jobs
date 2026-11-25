@@ -125,7 +125,7 @@ const bladeToolbar = ref<IBladeToolbar[]>([
     title: t("BACKGROUND_JOBS.PAGES.PROGRESS.TOOLBAR.CANCEL"),
     icon: "lucide-circle-x",
     permissions: "background_jobs:manage",
-    // cancelling a finished Hangfire job turns its state from Succeeded into Deleted, so the command is hidden once finished
+    // a finished job has nothing left to cancel, so the command is hidden once it finishes
     isVisible: computed(() => !finished.value),
     disabled: computed(() => cancelling.value || cancelRequested.value),
     clickHandler: () => cancel(),
