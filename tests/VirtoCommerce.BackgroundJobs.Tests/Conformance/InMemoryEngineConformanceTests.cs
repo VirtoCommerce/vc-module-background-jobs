@@ -24,6 +24,8 @@ public sealed class InMemoryEngineConformanceFixture : JobEngineConformanceFixtu
         SupportsRecurringScheduler = true,
         SupportsCancellation = true,
         ReportsAttemptBudget = true,
+        ClosesCanceledNotification = true,
+        CanHoldQueuedJob = false,
     };
 
     public override int RetryBudget => 3;

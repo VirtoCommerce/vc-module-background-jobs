@@ -25,43 +25,84 @@ public sealed class ReferenceJobEngine(
     IOptions<BackgroundJobsOptions> options) : IJobEngine
 {
     private readonly ConcurrentDictionary<string, string> _states = new();
+    // Per-job cancellation sources, so Delete can trip a running job's token. Added on enqueue, removed when the job settles.
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _running = new();
 
     public string ProviderName => "Reference";
+
+    public bool SupportsCancellation => true;
 
     public Task<string> Enqueue(JobEnvelope envelope, EnqueueOptions enqueueOptions, CancellationToken cancellationToken = default)
     {
         var jobId = Guid.NewGuid().ToString("N");
         _states[jobId] = "Enqueued";
-        _ = Task.Run(() => RunAsync(jobId, envelope, enqueueOptions), CancellationToken.None);
+        var cts = new CancellationTokenSource();
+        _running[jobId] = cts;
+        _ = Task.Run(() => RunAsync(jobId, envelope, enqueueOptions, cts.Token), CancellationToken.None);
         return Task.FromResult(jobId);
     }
 
-    private async Task RunAsync(string jobId, JobEnvelope envelope, EnqueueOptions enqueueOptions)
+    private async Task RunAsync(string jobId, JobEnvelope envelope, EnqueueOptions enqueueOptions, CancellationToken cancellationToken)
     {
         // The envelope's per-job value rides to whichever worker runs the job; the enqueue option is the same value for
         // a caller that did not go through the facade.
         var maxRetries = Math.Max(0, envelope.MaxRetryAttempts ?? enqueueOptions.MaxRetryAttempts ?? options.Value.MaxRetryAttempts);
 
-        for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
+        try
         {
-            try
+            for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
             {
-                _states[jobId] = "Processing";
-                using var scope = scopeFactory.CreateScope();
-                var dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcher>();
-
                 // Fill the attempt and the attempts the job gets in all, and build the context from that same envelope, so
-                // the dispatcher can tell a failure with a retry pending from the final one.
+                // the dispatcher can tell a failure with a retry pending from the final one. Built before the cancellation
+                // check so that a cancel observed before this attempt starts closes the notification with the attempt that
+                // was about to run and the job's total, not the envelope's defaults.
                 var attemptEnvelope = envelope with { Attempt = attempt, TotalAttempts = maxRetries + 1 };
                 var context = JobExecutionContextFactory.Create(pushNotificationManager, attemptEnvelope, jobId);
-                await dispatcher.Dispatch(attemptEnvelope, context, CancellationToken.None);
-                _states[jobId] = "Succeeded";
-                return;
+
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    _states[jobId] = "Processing";
+                    using var scope = scopeFactory.CreateScope();
+                    var dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcher>();
+
+                    await dispatcher.Dispatch(attemptEnvelope, context, cancellationToken);
+                    _states[jobId] = "Succeeded";
+                    return;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    // The job's own token has no writer but Delete, so this is a requested cancel — terminal, never
+                    // retried. The dispatcher leaves the notification open for a cancelled token: close it Canceled here.
+                    _states[jobId] = "Cancelled";
+                    await CloseCanceledAsync(context);
+                    return;
+                }
+                catch
+                {
+                    _states[jobId] = "Failed"; // retry until the attempt budget is exhausted
+                }
             }
-            catch
+        }
+        finally
+        {
+            if (_running.TryRemove(jobId, out var cts))
             {
-                _states[jobId] = "Failed"; // retry until the attempt budget is exhausted
+                cts.Dispose();
             }
+        }
+    }
+
+    // A failure to close the notification must not turn a requested cancel into a failure: it stays open.
+    private static async Task CloseCanceledAsync(IJobExecutionContext context)
+    {
+        try
+        {
+            await context.Progress.Complete(JobOutcome.Canceled, null);
+        }
+        catch
+        {
+            // The notification stays open (the lesser harm), as for an engine that does not close it at all.
         }
     }
 
@@ -71,5 +112,13 @@ public sealed class ReferenceJobEngine(
             : null);
 
     public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default)
-        => Task.FromResult(_states.TryRemove(jobId, out _));
+    {
+        // Trip a running job's token; RunAsync removes and disposes the source when it settles.
+        if (_running.TryGetValue(jobId, out var cts))
+        {
+            cts.Cancel();
+        }
+
+        return Task.FromResult(_states.TryRemove(jobId, out _));
+    }
 }

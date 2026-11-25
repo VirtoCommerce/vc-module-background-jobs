@@ -23,7 +23,10 @@ public sealed class ReferenceEngineConformanceFixture : JobEngineConformanceFixt
         SupportsQueueRouting = true,
         SupportsRetry = true,
         SupportsRecurringScheduler = true,
+        SupportsCancellation = true,
         ReportsAttemptBudget = true,
+        ClosesCanceledNotification = true,
+        CanHoldQueuedJob = false,
     };
 
     public override int RetryBudget => 3;

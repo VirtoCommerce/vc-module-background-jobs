@@ -67,6 +67,13 @@ public sealed class InMemoryJobEngine(
         {
             for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
             {
+                // The context and the dispatcher see the same envelope: the notification shows the attempt the context
+                // was built with, and the dispatcher decides from the same numbers whether a failure is final. Built
+                // before the cancellation check so that a cancel observed before this attempt starts closes the
+                // notification with the attempt that was about to run and the job's total, not the envelope's defaults.
+                var attemptEnvelope = envelope with { Attempt = attempt, TotalAttempts = maxRetries + 1 };
+                var context = JobExecutionContextFactory.Create(pushNotificationManager, attemptEnvelope, jobId);
+
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -77,11 +84,6 @@ public sealed class InMemoryJobEngine(
                     using var scope = scopeFactory.CreateScope();
                     var dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcher>();
 
-                    // The context and the dispatcher see the same envelope: the notification shows the attempt the
-                    // context was built with, and the dispatcher decides from the same numbers whether a failure is final.
-                    var attemptEnvelope = envelope with { Attempt = attempt, TotalAttempts = maxRetries + 1 };
-                    var context = JobExecutionContextFactory.Create(pushNotificationManager, attemptEnvelope, jobId);
-
                     await dispatcher.Dispatch(attemptEnvelope, context, cancellationToken);
 
                     _states[jobId] = "Succeeded";
@@ -89,9 +91,12 @@ public sealed class InMemoryJobEngine(
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    // Cancelled via Delete — a terminal outcome, not a failure; don't retry.
+                    // Cancelled via Delete — the job's own token has no other writer, so this is a requested cancel: a
+                    // terminal outcome, not a failure; don't retry. The dispatcher leaves the notification open for a
+                    // cancelled token, so it is closed Canceled here.
                     _states[jobId] = "Cancelled";
                     logger.LogInformation("In-memory job {JobId} ({JobType}) was cancelled.", jobId, envelope.JobType);
+                    await CloseCanceledAsync(context, jobId);
                     return;
                 }
                 catch (Exception ex)
@@ -116,6 +121,20 @@ public sealed class InMemoryJobEngine(
             {
                 cts.Dispose();
             }
+        }
+    }
+
+    // A failure to close the notification must not turn a requested cancel into a failure: the notification stays open
+    // (the lesser harm), as when the engine does not close it at all.
+    private async Task CloseCanceledAsync(IJobExecutionContext context, string jobId)
+    {
+        try
+        {
+            await context.Progress.Complete(JobOutcome.Canceled, null);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not close the progress notification of the cancelled in-memory job {JobId}; it stays open.", jobId);
         }
     }
 
