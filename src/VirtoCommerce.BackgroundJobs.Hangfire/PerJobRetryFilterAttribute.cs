@@ -18,9 +18,10 @@ namespace VirtoCommerce.BackgroundJobs.Hangfire;
 /// <list type="bullet">
 /// <item><description><b>Lower</b>: the global filter rescheduled the job (a <see cref="ScheduledState"/>, or an
 /// <see cref="EnqueuedState"/> when the retry has no delay) past the job's limit — the original failure is put back.</description></item>
-/// <item><description><b>Raise</b>: the global filter gave up (<see cref="FailedState"/>) before the job's limit — a copy
-/// of the global attribute with the job's limit is applied, so Hangfire's own delay formula and <c>RetryCount</c>
-/// bookkeeping schedule the retry.</description></item>
+/// <item><description><b>Raise</b>: the global filter gave up before the job's limit — it left the
+/// <see cref="FailedState"/>, or deleted the job after one (<c>OnAttemptsExceeded = Delete</c>). A copy of the global
+/// attribute with the job's limit is applied to the failure, so Hangfire's own delay formula and <c>RetryCount</c>
+/// bookkeeping schedule the retry. On the job's final attempt the global decision, delete included, stands.</description></item>
 /// </list>
 /// <para>
 /// Only jobs enqueued by this engine (whose body is <see cref="HangfireJobExecutor"/>) are inspected, and only those
@@ -52,8 +53,12 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
             || (context.CandidateState is EnqueuedState && context.TraversedStates.Any(x => x is FailedState));
         var failed = context.CandidateState is FailedState;
 
-        // Anything else (Succeeded, Deleted, Processing, ...) is not a retry decision.
-        if (!retryElected && !failed)
+        // A Deleted candidate is the global filter giving up only when a failure was traversed to reach it: in Hangfire
+        // that is the one place a Failed becomes Deleted. A plain delete (the dashboard, a cancel) traversed nothing.
+        var deletedAfterFailure = context.CandidateState is DeletedState && context.TraversedStates.Any(x => x is FailedState);
+
+        // Anything else (Succeeded, a plain Deleted, Processing, ...) is not a retry decision.
+        if (!retryElected && !failed && !deletedAfterFailure)
         {
             return;
         }
@@ -69,7 +74,8 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
 
         // allowStale: false on purpose. When AutomaticRetryAttribute elected a retry it wrote the incremented count
         // through the storage connection moments ago; the job's parameter snapshot still holds the value from before
-        // this failure. When it gave up it wrote nothing, and storage and snapshot agree.
+        // this failure. When it gave up, whether it left Failed or deleted the job, it wrote nothing, and storage and
+        // snapshot agree.
         var retryCount = context.GetJobParameter<int>(RetryCountParameter, allowStale: false);
 
         if (retryElected)
@@ -81,6 +87,7 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
         }
         else if (retryCount < limit)
         {
+            // Failed or Deleted-after-failure: the global filter gave up before this job's limit.
             RaiseRetryLimit(context, limit);
         }
     }
@@ -101,7 +108,8 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
     /// <summary>
     /// The global filter gave up before this job's limit: elect the retry it would have elected had its count been the
     /// job's. A copy of the registered attribute does it, from the failure alone, so the delays, the exception filters
-    /// and the <c>RetryCount</c> bookkeeping are Hangfire's own.
+    /// and the <c>RetryCount</c> bookkeeping are Hangfire's own. When the global filter gave up by deleting the job,
+    /// the traversed failure is put back as the candidate first, since the copy acts on a <see cref="FailedState"/> only.
     /// </summary>
     private static void RaiseRetryLimit(ElectStateContext context, int limit)
     {
@@ -110,6 +118,12 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
         {
             // No retry filter is registered, so there is no backoff to copy: the failure stands.
             return;
+        }
+
+        if (context.CandidateState is DeletedState)
+        {
+            // The last failure traversed is the one the global filter deleted the job for.
+            context.CandidateState = context.TraversedStates.OfType<FailedState>().Last();
         }
 
         // Every settable member of the attribute (Hangfire 1.8.23) is copied explicitly: a member left out would fall
