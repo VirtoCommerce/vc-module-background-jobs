@@ -134,21 +134,10 @@ public sealed class MapReduceJob : IMapReduceJob
             return null;
         }
 
-        var notification = JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
-            Guid.NewGuid().ToString(),
-            userName ?? "system",
-            title,
-            started,
-            "Queued",
-            ProcessedCount: 0,
-            TotalCount: total,
-            JobId: null,
-            Attempt: null,
-            TotalAttempts: null,
-            Outcome: null,
-            Error: null,
-            Finished: null,
-            IsNew: true));
+        // The same queued notification a single job gets: its description carries the start time, so two batches of one
+        // handler never share a description (platform storage folds a notification with the same title, type and
+        // description into the previous one).
+        var notification = JobProgressPushNotification.CreateQueued(userName ?? "system", title, started, total);
         await _pushNotificationManager.SendAsync(notification);
 
         return notification.Id;

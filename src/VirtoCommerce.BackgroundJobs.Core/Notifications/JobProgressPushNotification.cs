@@ -19,9 +19,10 @@ public class JobProgressPushNotification : PushNotification
     /// The notification a job gets when it is enqueued: new, titled, and not yet picked up. <paramref name="enqueuedAt"/>
     /// is both its start and creation time, and is written into the description so two enqueues of the same job never
     /// share a description (platform storage folds a notification with the same title, type and description into the
-    /// previous one).
+    /// previous one). <paramref name="totalCount"/> is the work the job already knows it has (a map/reduce batch knows its
+    /// item count; a single job, 0, does not).
     /// </summary>
-    public static JobProgressPushNotification CreateQueued(string creator, string title, DateTime enqueuedAt)
+    public static JobProgressPushNotification CreateQueued(string creator, string title, DateTime enqueuedAt, long totalCount)
     {
         return JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
             Guid.NewGuid().ToString(),
@@ -30,7 +31,7 @@ public class JobProgressPushNotification : PushNotification
             enqueuedAt,
             $"Queued at {enqueuedAt:O}",
             ProcessedCount: 0,
-            TotalCount: 0,
+            TotalCount: totalCount,
             JobId: null,
             Attempt: null,
             TotalAttempts: null,

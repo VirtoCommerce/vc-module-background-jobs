@@ -647,4 +647,22 @@ public class MapReduceTests
         Assert.Equal(nameof(JobOutcome.Failed), close.Outcome);
         Assert.Equal("Faulted: 1/2 map items failed.", close.Description);
     }
+
+    // Platform storage folds a notification with the same title, type and description into the previous one, so two
+    // batches of one handler started in a row must not open with the same description.
+    [Fact]
+    public async Task Enqueue_TwoBatches_InitialNotificationsDiffer()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new NotifyingHarness(new SquareHandler());
+        var options = new MapReduceOptions { ReportProgress = true };
+
+        await harness.Facade.Enqueue<SquareHandler, SumReducer>([new SquareItem(1)], new SumState("squares"), options, ct);
+        await harness.Facade.Enqueue<SquareHandler, SumReducer>([new SquareItem(1)], new SumState("squares"), options, ct);
+
+        Assert.Equal(2, harness.Sent.Count);
+        Assert.NotEqual(harness.Sent[0].Id, harness.Sent[1].Id);
+        Assert.NotEqual(harness.Sent[0].Description, harness.Sent[1].Description);
+        Assert.All(harness.Sent, x => Assert.Equal(1, x.TotalCount));
+    }
 }

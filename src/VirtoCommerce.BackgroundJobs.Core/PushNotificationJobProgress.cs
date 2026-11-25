@@ -64,8 +64,11 @@ public sealed class PushNotificationJobProgress : IJobProgress
         _owned = envelope.CompletesProgressNotification;
         _jobId = _owned ? jobId : null;
         _started = ReadTicks(envelope, _owned ? JobHeaders.EnqueuedAt : JobHeaders.BatchStartedAt);
-        _attempt = envelope.Attempt;
-        _totalAttempts = envelope.TotalAttempts;
+
+        // The attempt is the job's own: a map task of a shared notification would write its attempt into the batch's bar,
+        // whose attempt is the batch's, not any one task's.
+        _attempt = _owned ? envelope.Attempt : null;
+        _totalAttempts = _owned ? envelope.TotalAttempts : null;
     }
 
     public Task Report(JobProgressInfo progress, CancellationToken cancellationToken = default)
