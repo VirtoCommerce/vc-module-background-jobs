@@ -27,6 +27,10 @@ public class ConformancePayload
 
     /// <summary>Block in the handler until the <c>CancellationToken</c> trips — drives the cancellation scenario.</summary>
     public bool BlockUntilCancelled { get; set; }
+
+    /// <summary>With <see cref="BlockUntilCancelled"/>: once the token trips, throw an <see cref="InvalidOperationException"/>
+    /// instead of rethrowing the cancellation — a handler that fails after it was cancelled. False = rethrow, as before.</summary>
+    public bool FailOnCancel { get; set; }
 }
 
 /// <summary>An <c>AbstractTypeFactory</c>-derived payload, used to prove the engine round-trips the
@@ -76,6 +80,12 @@ public sealed class RecordingConformanceHandler(ConformanceProbe probe, IUserNam
             catch (OperationCanceledException)
             {
                 probe.SignalCancelled(payload.CorrelationId);
+
+                if (payload.FailOnCancel)
+                {
+                    throw new InvalidOperationException("Conformance-induced failure after the cancellation was observed.");
+                }
+
                 throw;
             }
         }

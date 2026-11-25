@@ -366,7 +366,44 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Equal(0, fixture.Probe.ExecutionCount(id));
     }
 
-    // 19 — a cancel of a job that already finished changes nothing: the engine refuses it and the job keeps its state,
+    // 19 — a cancel survives a handler that then fails with another exception: the failed attempt has a retry pending,
+    // but the job was canceled, so the notification closes Canceled and the handler does not run again. In-process
+    // engines and RabbitMQ close at the attempt after the failed one, Hangfire at the failed one (the job is already Deleted).
+    [Fact]
+    public async Task Running_Job_Cancel_Then_Handler_Failure_Closes_Canceled()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            fixture.Capabilities.SupportsCancellation && fixture.Capabilities.SupportsRetry && fixture.Capabilities.ClosesCanceledNotification,
+            "engine cannot cancel a retryable job and close it Canceled.");
+        var id = NewId();
+
+        var (jobId, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "cancel-then-fail", BlockUntilCancelled = true, FailOnCancel = true, ReportProgress = true });
+        await fixture.Probe.WaitStartedAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+
+        var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
+        Assert.True(accepted, "the engine must accept the cancellation request for a known, running job.");
+
+        var closing = await fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome == nameof(JobOutcome.Canceled), ConformanceConstants.DefaultTimeout);
+
+        Assert.NotNull(closing.Finished);
+        Assert.Null(closing.Error);
+
+        if (fixture.Capabilities.ReportsAttemptBudget)
+        {
+            Assert.Equal(fixture.RetryBudget + 1, closing.TotalAttempts);
+            Assert.True(closing.Attempt >= 1, "the close carries the attempt it was made at.");
+        }
+
+        // No further attempt runs the handler: the absence of a run has no signal, so the check can only wait.
+        await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, fixture.Probe.ExecutionCount(id));
+    }
+
+    // 20 — a cancel of a job that already finished changes nothing: the engine refuses it and the job keeps its state,
     // so a late cancel cannot rewrite a finished job's history.
     [Fact]
     public async Task Delete_Of_Succeeded_Job_Returns_False_And_Keeps_State()

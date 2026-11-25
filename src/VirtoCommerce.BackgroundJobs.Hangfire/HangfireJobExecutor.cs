@@ -49,10 +49,12 @@ public sealed class HangfireJobExecutor(IJobDispatcher dispatcher, IPushNotifica
         {
             await dispatcher.Dispatch(enriched, context, cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
         {
             // The dispatcher keeps the notification open here: a requested cancel, a host shutdown and an ownership
-            // change all trip this token, and only Hangfire's stored state tells them apart.
+            // change all trip this token, and only Hangfire's stored state tells them apart. Any exception counts, not
+            // only OperationCanceledException: a handler may fail with another one once its token trips, and the failed
+            // attempt then looks like a retry is pending although the job was deleted and no retry will follow.
             await CloseIfDeleted(performContext, context, jobId);
 
             throw;
