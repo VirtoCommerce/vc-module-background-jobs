@@ -110,6 +110,9 @@ public sealed record ConformanceMapResult(int Square);
 public sealed class ConformanceReduceState
 {
     public string CorrelationId { get; set; } = string.Empty;
+
+    /// <summary>Throw on every execution of the reduce step — drives the reduce-failure scenario.</summary>
+    public bool FailAlways { get; set; }
 }
 
 public sealed class ConformanceMapHandler : IMapJobHandler<ConformanceMapItem, ConformanceMapResult>
@@ -124,6 +127,13 @@ public sealed class ConformanceReduceHandler(ConformanceProbe probe) : IReduceJo
 {
     public Task Reduce(ConformanceReduceState state, IReadOnlyCollection<MapResult<ConformanceMapResult>> results, IJobExecutionContext context, CancellationToken cancellationToken = default)
     {
+        if (state.FailAlways)
+        {
+            var executions = probe.RecordExecution(state.CorrelationId, state, user: null, context.Headers, context.JobId);
+
+            throw new InvalidOperationException($"Conformance-induced reduce failure (execution {executions}).");
+        }
+
         var total = results.Where(r => r.Succeeded).Sum(r => r.Value!.Square);
         probe.RecordReduce(state.CorrelationId, total, results.Count, results.Count(r => !r.Succeeded));
         probe.SignalCompleted(state.CorrelationId);

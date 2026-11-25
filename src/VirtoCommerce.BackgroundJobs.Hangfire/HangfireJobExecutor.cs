@@ -54,14 +54,12 @@ public sealed class HangfireJobExecutor(
 
         // Shared factory builds the progress context, so the notification title is threaded consistently across engines.
         // The context and the dispatcher must see the same envelope: the notification shows the attempt the context was built with.
-        var innerContext = JobExecutionContextFactory.Create(pushNotificationManager, enriched, jobId);
-
         // The console wrapper sits around the push-notification progress and NoOpJobProgress alike, so the dispatcher's
-        // outcome and the cancel close below both reach the console and the wrapped progress through it.
-        var context = new JobExecutionContext(
-            innerContext.JobId,
-            new ConsoleJobProgress(innerContext.Progress, performContext, logger),
-            innerContext.Headers);
+        // outcome and the cancel close below both reach the console and the wrapped progress through it. The wrapping goes
+        // through the factory rather than a second context built here, which would drop what the factory knows about the
+        // attempt (that it is the final one).
+        var context = JobExecutionContextFactory.Create(
+            pushNotificationManager, enriched, jobId, x => new ConsoleJobProgress(x, performContext, logger));
 
         try
         {

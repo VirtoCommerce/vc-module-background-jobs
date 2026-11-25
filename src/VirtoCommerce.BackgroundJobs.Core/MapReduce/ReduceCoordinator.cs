@@ -95,17 +95,43 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
         {
             await (Task)reduceMethod.Invoke(handler, [state, mapResults, context, cancellationToken])!;
         }
-        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        catch (Exception ex)
         {
             // A synchronous throw from the reduce handler is wrapped by Invoke — surface the real exception (with its
             // stack) so the engine retries/dead-letters on the actual cause, not the reflection wrapper.
-            ExceptionDispatchInfo.Throw(ex.InnerException);
+            var actual = ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
+
+            // The batch bar is shared, so the dispatcher never closes it for this job: with nobody else to do it, a reduce
+            // that fails for the last time would leave the bar running forever. A failure with a retry pending leaves it
+            // open (the retry may finish the batch), and so does a cancel (the engine decides what a cancel means).
+            // The batch stays in the store, as for a failure with a retry pending: a retry or a requeue reads it again.
+            var canceled = actual is OperationCanceledException && cancellationToken.IsCancellationRequested;
+            if (context is JobExecutionContext { IsFinalAttempt: true } && !canceled)
+            {
+                await TryMarkFailedAsync(batch, actual);
+            }
+
+            ExceptionDispatchInfo.Throw(actual);
         }
 
         await MarkFinishedAsync(batch, $"Completed ({batch.Total} items, {failures} failed).", JobOutcome.Succeeded);
         await _store.CompleteAsync(envelope.BatchId, cancellationToken);
         _logger.LogInformation("Map/reduce batch {BatchId} reduced ({Total} items, {Failures} failed).",
             envelope.BatchId, batch.Total, failures);
+    }
+
+    // Best effort: the failure being reported is the reduce handler's, and it must reach the engine whatever happens to
+    // the notification, so a failed send is logged and not thrown.
+    private async Task TryMarkFailedAsync(MapReduceBatch batch, Exception failure)
+    {
+        try
+        {
+            await MarkFinishedAsync(batch, $"Reduce failed: {failure.Message}", JobOutcome.Failed);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not close the progress notification of map/reduce batch {BatchId} as failed; it stays open.", batch.BatchId);
+        }
     }
 
     // Closes the shared progress notification (sets Finished and Outcome) once the batch settles, since individual map

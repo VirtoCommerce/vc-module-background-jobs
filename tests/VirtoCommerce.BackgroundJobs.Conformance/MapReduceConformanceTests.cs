@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using VirtoCommerce.Platform.Core.Jobs;
@@ -13,6 +14,9 @@ namespace VirtoCommerce.BackgroundJobs.Conformance;
 /// </summary>
 public abstract partial class JobEngineConformanceTests<TFixture>
 {
+    // The title MapReduceJob gives the batch's shared notification; the scenario finds its notification by it.
+    private static readonly string _mapReduceTitle = $"Map/reduce: {nameof(ConformanceMapItem)}";
+
     private async Task<ConformanceProbe.ReduceObservation> RunBatchAsync(string correlationId, ConformanceMapItem[] items, MapReduceOptions? options)
     {
         using var scope = Fixture.Services.CreateScope();
@@ -60,5 +64,42 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         Assert.Equal(3, reduce.ResultCount);
         Assert.Equal(1, reduce.FailureCount);
         Assert.Equal(4 + 16, reduce.Total); // failed item excluded from the aggregate
+    }
+
+    // 17 — a reduce step that fails on its final attempt closes the batch's shared progress notification Failed: the map
+    // tasks never close the bar and the dispatcher does not close it for the reduce job, so nobody else would, and
+    // the bar would run forever. Attempts before the last leave it open.
+    [Fact]
+    public async Task MapReduce_Reduce_Failure_On_Final_Attempt_Closes_Notification_Failed()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            Fixture.Capabilities.SupportsRetry && Fixture.Capabilities.ReportsAttemptBudget,
+            "engine does not retry failed jobs or does not report its attempt budget.");
+        var id = NewId();
+
+        using (var scope = Fixture.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IMapReduceJob>().Enqueue<ConformanceMapHandler, ConformanceReduceHandler>(
+                [new ConformanceMapItem(1), new ConformanceMapItem(2)],
+                new ConformanceReduceState { CorrelationId = id, FailAlways = true },
+                new MapReduceOptions { ReportProgress = true },
+                TestContext.Current.CancellationToken);
+        }
+
+        // The batch's notification is the only one with this title: the other map/reduce scenarios do not report progress.
+        var notificationId = Fixture.ProgressNotifications.First(x => x.Title == _mapReduceTitle).Id;
+        var closing = await Fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.NotNull(closing.Finished);
+        Assert.Contains("Conformance-induced reduce failure", closing.Description);
+
+        // The close came with the last attempt, not an earlier one, and nothing closes the bar a second time. The
+        // absence of a second close has no signal, so the check can only wait.
+        Assert.Equal(Fixture.RetryBudget + 1, Fixture.Probe.ExecutionCount(id));
+        await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+        Assert.Single(Fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);
     }
 }
