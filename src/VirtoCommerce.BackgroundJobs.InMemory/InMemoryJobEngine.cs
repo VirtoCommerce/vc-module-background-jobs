@@ -101,14 +101,15 @@ public sealed class InMemoryJobEngine(
                 }
                 catch (Exception ex)
                 {
-                    _states[jobId] = "Failed";
                     if (attempt <= maxRetries)
                     {
+                        // A retry is pending, so the job is still Processing: Failed is a terminal state.
                         logger.LogWarning(ex, "In-memory job {JobId} ({JobType}) failed on attempt {Attempt}; retrying (max {MaxRetries}).",
                             jobId, envelope.JobType, attempt, maxRetries);
                     }
                     else
                     {
+                        _states[jobId] = "Failed";
                         logger.LogError(ex, "In-memory job {JobId} ({JobType}) failed on final attempt {Attempt}.",
                             jobId, envelope.JobType, attempt);
                     }
@@ -140,20 +141,34 @@ public sealed class InMemoryJobEngine(
 
     public Task<Job?> GetStatus(string jobId, CancellationToken cancellationToken = default)
         => Task.FromResult(_states.TryGetValue(jobId, out var state)
-            ? new Job { Id = jobId, State = state, Completed = state is "Succeeded" or "Failed" }
+            ? new Job { Id = jobId, State = state, Completed = IsTerminal(state) }
             : null);
 
     public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default)
     {
-        // Signal a running job to stop (its handler's token trips); RunAsync removes and disposes the source when it
-        // settles. A not-yet-started or already-finished job just has its state removed.
-        var known = _states.ContainsKey(jobId);
-        if (_running.TryGetValue(jobId, out var cts))
+        // Unknown or finished: nothing to cancel, and a finished job keeps the state it ended in.
+        if (!_states.TryGetValue(jobId, out var state) || IsTerminal(state))
         {
-            cts.Cancel();
+            return Task.FromResult(false);
         }
 
-        _states.TryRemove(jobId, out _);
-        return Task.FromResult(known);
+        // Signal the job to stop (its handler's token trips); RunAsync then records Cancelled and removes and disposes
+        // the source. The entry stays, so the cancel shows in the job's status.
+        if (_running.TryGetValue(jobId, out var cts))
+        {
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The job settled between the lookup and the cancel, so it is decided from its state as for any finished job.
+                return Task.FromResult(_states.TryGetValue(jobId, out var settled) && !IsTerminal(settled));
+            }
+        }
+
+        return Task.FromResult(true);
     }
+
+    private static bool IsTerminal(string state) => state is "Succeeded" or "Failed" or "Cancelled";
 }

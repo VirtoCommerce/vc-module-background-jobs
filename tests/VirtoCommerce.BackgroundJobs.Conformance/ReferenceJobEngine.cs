@@ -80,7 +80,11 @@ public sealed class ReferenceJobEngine(
                 }
                 catch
                 {
-                    _states[jobId] = "Failed"; // retry until the attempt budget is exhausted
+                    // Failed is terminal: while an attempt is left to retry, the job is still Processing.
+                    if (attempt > maxRetries)
+                    {
+                        _states[jobId] = "Failed";
+                    }
                 }
             }
         }
@@ -108,17 +112,33 @@ public sealed class ReferenceJobEngine(
 
     public Task<Job?> GetStatus(string jobId, CancellationToken cancellationToken = default)
         => Task.FromResult(_states.TryGetValue(jobId, out var state)
-            ? new Job { Id = jobId, State = state, Completed = state is "Succeeded" or "Failed" }
+            ? new Job { Id = jobId, State = state, Completed = IsTerminal(state) }
             : null);
 
     public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default)
     {
-        // Trip a running job's token; RunAsync removes and disposes the source when it settles.
-        if (_running.TryGetValue(jobId, out var cts))
+        // Unknown or finished: nothing to cancel, and a finished job keeps the state it ended in.
+        if (!_states.TryGetValue(jobId, out var state) || IsTerminal(state))
         {
-            cts.Cancel();
+            return Task.FromResult(false);
         }
 
-        return Task.FromResult(_states.TryRemove(jobId, out _));
+        // Trip the job's token; RunAsync then records Cancelled and removes and disposes the source. The entry stays.
+        if (_running.TryGetValue(jobId, out var cts))
+        {
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The job settled between the lookup and the cancel, so it is decided from its state as for any finished job.
+                return Task.FromResult(_states.TryGetValue(jobId, out var settled) && !IsTerminal(settled));
+            }
+        }
+
+        return Task.FromResult(true);
     }
+
+    private static bool IsTerminal(string state) => state is "Succeeded" or "Failed" or "Cancelled";
 }

@@ -366,6 +366,26 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Equal(0, fixture.Probe.ExecutionCount(id));
     }
 
+    // 19 — a cancel of a job that already finished changes nothing: the engine refuses it and the job keeps its state,
+    // so a late cancel cannot rewrite a finished job's history.
+    [Fact]
+    public async Task Delete_Of_Succeeded_Job_Returns_False_And_Keeps_State()
+    {
+        RequireEngine();
+        Assert.SkipUnless(fixture.Capabilities.SupportsStatusQuery && fixture.Capabilities.SupportsDelete, "engine cannot report status or delete.");
+        var engine = fixture.Services.GetRequiredService<IJobEngine>();
+
+        var jobId = await EnqueueAndWaitAsync(new ConformancePayload { CorrelationId = NewId(), Value = "delete-finished" });
+        await fixture.WaitForStatusAsync(jobId, x => x.State == "Succeeded", ConformanceConstants.DefaultTimeout);
+
+        var deleted = await engine.Delete(jobId, TestContext.Current.CancellationToken);
+
+        Assert.False(deleted, "a finished job has nothing left to cancel.");
+        var status = await engine.GetStatus(jobId, TestContext.Current.CancellationToken);
+        Assert.NotNull(status);
+        Assert.Equal("Succeeded", status.State);
+    }
+
     private async Task AssertCancelOutcomeAsync(string correlationId, string notificationId, bool observeHandlerCancel)
     {
         if (fixture.Capabilities.ClosesCanceledNotification)
