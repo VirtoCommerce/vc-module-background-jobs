@@ -89,6 +89,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         RequireEngine();
         var jobId = await EnqueueAndWaitAsync(new ConformancePayload { CorrelationId = NewId(), Value = "id" });
 
+        Assert.False(string.IsNullOrEmpty(jobId));
     }
 
     // 5 — a handler that always throws must not stop the worker: a subsequent good job still runs.
