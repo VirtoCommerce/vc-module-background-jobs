@@ -101,6 +101,19 @@ public class PushNotificationJobProgressTests
     }
 
     [Fact]
+    public async Task Report_WithoutMessage_KeepsLastMessage()
+    {
+        var (progress, sent) = CreateProgress(CreateEnvelope());
+
+        await progress.Report(new JobProgressInfo { Message = "Importing products" }, TestContext.Current.CancellationToken);
+        await progress.Report(new JobProgressInfo { ProcessedCount = 7, TotalCount = 20 }, TestContext.Current.CancellationToken);
+
+        var last = sent.Last();
+        Assert.Equal("Importing products", last.Description);
+        Assert.Equal(7, last.ProcessedCount);
+    }
+
+    [Fact]
     public async Task Complete_Succeeded_KeepsLastMessageAsDescription()
     {
         var (progress, sent) = CreateProgress(CreateEnvelope());

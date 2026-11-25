@@ -216,8 +216,8 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
     notification it already holds, so an open tab is not changed; the stored flag shows after a reload.
   - `ProcessedCount`/`TotalCount` keep their last known values when a `Report` omits them.
   - The description is the job's current message, and a `Report` that carries no message keeps it (a count-only
-    update does not blank it); `ProgressLog` keeps today's content (the current message, plus the
-    error entry on failure). Messages are not accumulated: the current message and the counts carry the state, as in
+    update does not blank it); `ProgressLog` keeps today's content (the message of an update that carries one,
+    plus the error entry on failure). Messages are not accumulated: the current message and the counts carry the state, as in
     the import module's notification ("Imported 900 of 1000, 100 errors").
   - `Complete` keeps the last progress message as the description and records the outcome in `Outcome` and
     `Finished`; the error goes to `Error`.
@@ -557,16 +557,18 @@ the same assertion; items an engine may not support are capability-gated with th
    without a cancel stays open; an `OperationCanceledException` with the dispatch token cancelled and no request
    leaves it open; one with the token not cancelled closes `Failed` on the final attempt. A cancel during a
    non-final attempt whose handler then throws another exception: the handler does not run again and the
-   notification closes `Canceled`, its description carrying no retry announcement — on every fixture that supports cancellation and retries (InMemory and Reference
-   in CI; RabbitMQ with a broker via `VC_CONFORMANCE_RABBITMQ`, which CI does not run). The same on the final
-   attempt closes `Failed` with the error on those fixtures and on Hangfire. A retry-waiting job: a unit
+   notification closes `Canceled`, its description carrying no retry announcement — on every fixture that supports
+   cancellation and retries (Hangfire, InMemory and Reference in CI; RabbitMQ with a broker via
+   `VC_CONFORMANCE_RABBITMQ`, which CI does not run). The description half can fail only on Hangfire, the one engine
+   that closes from the attempt's own reporter; the others close from a fresh one. The same on the final attempt
+   closes `Failed` with the error on those fixtures. A retry-waiting job: a unit
    test of the Hangfire `Deleted` filter with old state `Scheduled` closes its notification `Canceled`. A queued
    RabbitMQ message: no fixture can hold one (an unserved queue is never consumed, so a test there could not fail),
    so its discard close is checked by E2E on a stand with a broker, one consumer slot held by a blocking job. Wrong
    state. (AC 10)
 6. Dispatcher: payload that does not deserialize, on final and non-final attempts. Item left in a wrong state. (AC 11)
 7. Notification builder: stable `Started`/`Created`/`JobId` across updates and attempts, counts kept within an
-   attempt, last message kept on completion; `IsNew` false on progress updates and true on the close (owned
+   attempt, the current message kept by a count-only update and on completion; `IsNew` false on progress updates and true on the close (owned
    `Complete` and the shared reduce close). Lost or wrong value: a finished job stored as read is missed silently.
    (AC 12, §3.4)
 8. Shared notification: a map task's update does not close it. Wrong state. (AC 13)
