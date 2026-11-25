@@ -208,8 +208,12 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   assembly needs access to Core internals.
 - **One builder produces every `JobProgressPushNotification`** (today built in `PushNotificationJobProgress.Report`/
   `Complete`, `MapReduceJob.cs:131-142`, `ReduceCoordinator.cs:120-127`). For an **owned** notification:
-  - `Started` and `Created` come from the envelope's `JobHeaders.EnqueuedAt` and stay the same on every update;
-    `IsNew` is not raised again by updates.
+  - `Started` and `Created` come from the envelope's `JobHeaders.EnqueuedAt` and stay the same on every update.
+  - Progress updates send `IsNew = false`, so the notification is not raised again while the job runs and one the
+    user has read stays read. The closing update (`Complete` of an owned notification, the reduce close of a shared
+    one) sends `IsNew = true`: platform storage keeps the flag of the last send, so a finished job is unread until the
+    user marks it read, including when the user read it while it ran. The Admin Shell keeps its own flag for a
+    notification it already holds, so an open tab is not changed; the stored flag shows after a reload.
   - `ProcessedCount`/`TotalCount` keep their last known values when a `Report` omits them.
   - The description is the job's current message; `ProgressLog` keeps today's content (the current message, plus the
     error entry on failure). Messages are not accumulated: the current message and the counts carry the state, as in
@@ -550,7 +554,9 @@ the same assertion; items an engine may not support are capability-gated with th
    state. (AC 10)
 6. Dispatcher: payload that does not deserialize, on final and non-final attempts. Item left in a wrong state. (AC 11)
 7. Notification builder: stable `Started`/`Created`/`JobId` across updates and attempts, counts kept within an
-   attempt, last message kept on completion. Lost or wrong value. (AC 12)
+   attempt, last message kept on completion; `IsNew` false on progress updates and true on the close (owned
+   `Complete` and the shared reduce close). Lost or wrong value: a finished job stored as read is missed silently.
+   (AC 12, §3.4)
 8. Shared notification: a map task's update does not close it. Wrong state. (AC 13)
 9. Conformance: `MaxRetryAttempts = N` above the global default gives N + 1 runs on every engine; on Hangfire also with
    zero-delay retries, and lowering below the global default. Data, a job given up early or retried too often. (AC 14)
@@ -683,3 +689,8 @@ the same assertion; items an engine may not support are capability-gated with th
 - 2026-11-25 — Operator, during E2E: the jobs page opens filtered to triggerable jobs (§3.3, AC 5 reworded); a list
   of jobs a person cannot run is noise on a page made for running them. Schedule columns (cron, next and last run)
   were asked for too and go to a separate work item: they need a Hangfire last-run read the module does not have.
+- 2026-11-25 — Operator, after an E2E finding: the closing update sends `IsNew = true` (§3.4). Observed: with every
+  update and the close sent as `IsNew = false`, storage kept finished jobs as read (`newCount: 0`), and the Admin
+  Shell badge disappeared on reload; on dev the stored close was unread. Chosen over raising it on every update
+  (dev), which marks a read notification unread again on each report. Whether the close should also move `Created`
+  to the completion time (the Admin Shell reloads only the 10 most recent by `Created`) is left to pass 2.
