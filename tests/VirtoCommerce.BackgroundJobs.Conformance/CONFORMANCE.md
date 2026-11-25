@@ -78,10 +78,10 @@ second in the cancel scenarios, two in 8.
 
 `EngineCapabilities` declares which optional parts of the standard an engine supports. **Every flag defaults to
 `false`**, so a gated scenario of a fixture written against an earlier version of the kit passes after a package
-upgrade — on the fallback, or skipped — until it declares the new flag. Three scenarios have no flag and run on every
-engine, so an engine that breaks them fails after the upgrade whatever its fixture declares:
+upgrade — on the fallback, or skipped — until it declares the new flag. A scenario with no flag runs on every engine,
+so an engine that breaks it fails after the upgrade whatever its fixture declares. That includes
 `Worker_JobId_Equals_Enqueue_Result` (one job id), `Final_Failure_Closes_Notification_Failed` and
-`Success_Closes_Notification_Succeeded`.
+`Success_Closes_Notification_Succeeded`, which an engine written before them may not satisfy.
 
 | Flag | Declare `true` when | Scenarios |
 |---|---|---|

@@ -881,9 +881,9 @@ RabbitMQ. Capability-gated scenarios assert the documented fallback (or skip) fo
 provide, so it's never penalized for them. The capability flags added for the engine duties above
 (`ReportsAttemptBudget`, `ClosesCanceledNotification`, `CanHoldQueuedJob`) default to `false`, so a fixture written
 against an earlier version of the kit passes a gated scenario after an upgrade, on the fallback or skipped, until it
-declares them. The scenarios with no flag run on every engine and fail an engine that breaks them whatever its
-fixture declares: one job id (`Worker_JobId_Equals_Enqueue_Result`), `Final_Failure_Closes_Notification_Failed` and
-`Success_Closes_Notification_Succeeded`.
+declares them. A scenario with no flag runs on every engine and fails an engine that breaks it whatever its fixture
+declares. That includes one job id (`Worker_JobId_Equals_Enqueue_Result`), `Final_Failure_Closes_Notification_Failed`
+and `Success_Closes_Notification_Succeeded`, which an engine written before them may not satisfy.
 
 ## Documentation
 
