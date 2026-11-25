@@ -74,7 +74,6 @@ const { getApiClient } = useApiClient(BackgroundJobsAdminClient);
 const items = ref<RegisteredJobInfo[]>([]);
 // single selection mode hands back the row itself; an array is tolerated
 const selection = ref<RegisteredJobInfo | RegisteredJobInfo[]>();
-const selected = computed(() => (Array.isArray(selection.value) ? selection.value[0] : selection.value));
 
 const keyword = ref("");
 // true matches the default search view, so the first render is already filtered, before any filter event
@@ -83,6 +82,13 @@ const triggerableOnly = ref(true);
 const visible = computed(() => {
   const text = keyword.value.trim().toLowerCase();
   return items.value.filter((x) => (!triggerableOnly.value || x.triggerable) && (!text || x.name?.toLowerCase().includes(text)));
+});
+
+// a row the search hides stays selected in the table; Run must not start a job the list no longer shows
+const selected = computed(() => {
+  const row = Array.isArray(selection.value) ? selection.value[0] : selection.value;
+
+  return row && visible.value.includes(row) ? row : undefined;
 });
 
 // GlobalFilterConfig does not list the toggle filter, SearchBarField does; the data table accepts both (as the host's tableFilters does)
