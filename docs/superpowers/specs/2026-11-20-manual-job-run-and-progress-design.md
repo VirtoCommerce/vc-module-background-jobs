@@ -215,7 +215,8 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
     user marks it read, including when the user read it while it ran. The Admin Shell keeps its own flag for a
     notification it already holds, so an open tab is not changed; the stored flag shows after a reload.
   - `ProcessedCount`/`TotalCount` keep their last known values when a `Report` omits them.
-  - The description is the job's current message; `ProgressLog` keeps today's content (the current message, plus the
+  - The description is the job's current message, and a `Report` that carries no message keeps it (a count-only
+    update does not blank it); `ProgressLog` keeps today's content (the current message, plus the
     error entry on failure). Messages are not accumulated: the current message and the counts carry the state, as in
     the import module's notification ("Imported 900 of 1000, 100 errors").
   - `Complete` keeps the last progress message as the description and records the outcome in `Outcome` and
@@ -253,9 +254,16 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   - An engine that does not set `TotalAttempts` leaves it null: every attempt is treated as final (today's behaviour,
     so a notification never stays open forever).
 - **The dispatcher closes or keeps the notification:**
+  - attempt starts → before the handler runs, one update to an **owned** notification carrying the job id and the
+    attempt, with no message and no counts, so the page shows a running job even when the handler never reports
+    (the queued notification has no job id, and the page finds its job by job id);
   - handler returned → close `Succeeded`;
   - exception on the final attempt → close `Failed` with the error;
-  - exception with a retry pending → keep open, message "attempt N of M failed, retrying" with the error;
+  - exception with a retry pending → keep open, message "attempt N of M failed, retrying" with the error — only on an
+    **owned** notification (a map task's failure writes nothing to the shared bar, which carries the batch, not one
+    task's attempt), and only while the dispatch token is **not** cancelled: with the token cancelled, whether a
+    retry follows is the engine's to decide (a cancel closes `Canceled`, a shutdown runs the job again), so the
+    dispatcher announces nothing;
   - `OperationCanceledException` while the dispatch token is cancelled → keep open (requested cancel, host shutdown
     or a lost distributed lock — the dispatcher cannot tell them apart; the engine decides, below);
   - `OperationCanceledException` while the dispatch token is **not** cancelled (a timeout inside the handler) → a
@@ -276,8 +284,8 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   - InMemory: the job's own `CancellationTokenSource` was canceled by `Delete`.
   - An engine that does nothing keeps today's behaviour (the notification stays open).
 - **A requested cancel whose handler then fails with another exception** (not `OperationCanceledException`) on a
-  non-final attempt is still a cancel. The dispatcher sees a failure with a retry pending and keeps the notification
-  open ("retrying"); the engine then honours the cancel: no further attempt runs the handler, and the notification
+  non-final attempt is still a cancel. The dispatcher sees a failure with the dispatch token cancelled and keeps the
+  notification open without announcing a retry; the engine then honours the cancel: no further attempt runs the handler, and the notification
   closes `Canceled`.
   - InMemory and Reference: the cancellation check before the next attempt closes it, with that attempt's number
     (below).
@@ -468,8 +476,9 @@ Each criterion names its check: `test` only where the failure is silent and harm
 8. WHEN a job ends, THEN its owned notification SHALL be closed with outcome `Succeeded`, `Failed` with the error, or
    `Canceled`, and the progress page SHALL show that outcome and the toast SHALL show it by its kind (icon and
    colour). — test (dispatcher, all engines); E2E (UI)
-9. WHEN an attempt fails and `Attempt < TotalAttempts`, THEN the notification SHALL stay open with "attempt N of M
-   failed, retrying" and SHALL NOT be closed as failed, on every engine. — test
+9. WHEN an attempt fails, `Attempt < TotalAttempts` and the dispatch token is not cancelled, THEN the job's owned
+   notification SHALL stay open with "attempt N of M failed, retrying" and SHALL NOT be closed as failed, on every
+   engine. — test
 10. WHEN the user cancels a job that is running, queued or waiting for a retry, THEN its notification SHALL be closed
     as `Canceled` on every engine that declares cancel support. WHEN an `OperationCanceledException` arises while the
     dispatch token is cancelled and no cancel was requested, THEN the notification SHALL stay open. WHEN it arises
@@ -515,6 +524,9 @@ Each criterion names its check: `test` only where the failure is silent and harm
     finished. — E2E
 24. WHEN a cancel is requested for a job that has already finished, THEN an engine that reports status SHALL refuse it
     and SHALL leave the job's state unchanged. — test
+25. WHEN a worker starts an attempt of a job that owns its notification, THEN before the handler runs the
+    notification SHALL carry the job id and the attempt, so the progress page shows the job as running even when the
+    handler never reports; a notification the job does not own SHALL NOT be written. — test (dispatcher); E2E (page)
 
 ## 7. Testing rule
 
@@ -545,7 +557,7 @@ the same assertion; items an engine may not support are capability-gated with th
    without a cancel stays open; an `OperationCanceledException` with the dispatch token cancelled and no request
    leaves it open; one with the token not cancelled closes `Failed` on the final attempt. A cancel during a
    non-final attempt whose handler then throws another exception: the handler does not run again and the
-   notification closes `Canceled` — on every fixture that supports cancellation and retries (InMemory and Reference
+   notification closes `Canceled`, its description carrying no retry announcement — on every fixture that supports cancellation and retries (InMemory and Reference
    in CI; RabbitMQ with a broker via `VC_CONFORMANCE_RABBITMQ`, which CI does not run). The same on the final
    attempt closes `Failed` with the error on those fixtures and on Hangfire. A retry-waiting job: a unit
    test of the Hangfire `Deleted` filter with old state `Scheduled` closes its notification `Canceled`. A queued
@@ -567,6 +579,9 @@ the same assertion; items an engine may not support are capability-gated with th
     user. Privacy. (AC 19)
 13. Conformance (`SupportsStatusQuery` and `SupportsDelete`): `Delete` of a succeeded job returns `false` and its
     status stays `Succeeded`. Data, a finished job's history rewritten. (AC 24)
+14. Dispatcher: for a job that owns its notification, an update carrying the job id and the attempt reaches the
+    reporter before the handler runs; for a map task (shared notification) none does. Wrong state: a running job
+    shown as waiting for a worker invites a second Run. (AC 25)
 
 ## 9. Risks and open points
 
@@ -597,9 +612,9 @@ the same assertion; items an engine may not support are capability-gated with th
   Accepted: the filter does no storage work of its own, and a failed transition is loud in Hangfire's log.
 - **Hangfire raise** applies `AutomaticRetryAttribute` inside another filter's election; proven by test 9 on the
   Hangfire conformance fixture (MemoryStorage, instant retries) and by E2E on SQL storage.
-- **Progress page start state**: before the first worker update the page knows only the job id. A job that dies
-  before any worker update and before the dispatcher runs (an envelope that does not deserialize in the executor)
-  leaves the page at "queued". E2E (AC 7).
+- **Progress page start state**: before the dispatcher's attempt-start update (AC 25) the page knows only the job id.
+  A job that dies before the dispatcher runs (an envelope that does not deserialize in the executor) leaves the page
+  at "queued". E2E (AC 7).
 - **The vc-module-search controller has the race this design avoids** (`SearchIndexationModuleController.IndexDocuments`
   sends its notification after `EnqueueAsync`). Outside this repo; recorded for the search module.
 - **Scale-out** (read-from-code, not run): with `PushNotifications:ScalabilityMode` set, the hub protocol serializes
@@ -694,3 +709,17 @@ the same assertion; items an engine may not support are capability-gated with th
   Shell badge disappeared on reload; on dev the stored close was unread. Chosen over raising it on every update
   (dev), which marks a read notification unread again on each report. Whether the close should also move `Created`
   to the completion time (the Admin Shell reloads only the 10 most recent by `Created`) is left to pass 2.
+- 2026-11-25 — Whole-branch behaviour review, operator decisions:
+  (1) The dispatcher sends an attempt-start update to an owned notification before the handler runs (§3.5, new
+  AC 25, test 14). Observed on the stand: a job that never reports stayed "Queued — Waiting for a worker" for its
+  whole run, because the queued notification has no job id and the page finds its job by job id.
+  (2) The "retrying" announcement goes only to an owned notification and only while the dispatch token is not
+  cancelled (§3.5, AC 9 reworded, test 5). Before, a map task's failure wrote one task's attempt and zero counts into
+  the shared bar, and on Hangfire a canceled job closed `Canceled` with "attempt N of M failed, retrying" as its
+  description; with the token cancelled the dispatcher cannot know whether a retry follows.
+  (3) A `Report` without a message keeps the current one (§3.4); a count-only update blanked the progress page's
+  message.
+  (4) The close keeps `Created` at the enqueue time (AC 12 unchanged). The Admin Shell reloads the most recent
+  notifications by `Created` while its badge counts every unread one, so a long job's unread close can fall outside
+  the reloaded list; that is the shell's list window, not this notification's data, and is taken up there.
+  (5) Tests that pinned only the batch start time (E2E by AC 13) are removed under §7.
