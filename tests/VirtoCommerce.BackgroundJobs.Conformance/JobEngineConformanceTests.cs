@@ -575,9 +575,9 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
                 else
                 {
                     // The close is made at the failed attempt (1) or at the one after it (2), as the comment above says per engine;
-            // any other number, or none, is a close that lost the attempt it was made at.
-            Assert.NotNull(closing.Attempt);
-            Assert.InRange(closing.Attempt.Value, 1, 2);
+                    // any other number, or none, is a close that lost the attempt it was made at.
+                    Assert.NotNull(closing.Attempt);
+                    Assert.InRange(closing.Attempt.Value, 1, 2);
                     Assert.Equal(fixture.RetryBudget + 1, closing.TotalAttempts);
                 }
             }
