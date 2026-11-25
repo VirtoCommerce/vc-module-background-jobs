@@ -1,0 +1,33 @@
+{
+  "BACKGROUND_JOBS": {
+    "MENU": {
+      "TITLE": "Background jobs"
+    },
+    "PAGES": {
+      "LIST": {
+        "EMPTY": "No registered jobs",
+        "YES": "Yes",
+        "NO": "No",
+        "COLUMNS": {
+          "NAME": "Name",
+          "PAYLOAD_TYPE": "Payload type",
+          "TRIGGERABLE": "Triggerable"
+        },
+        "TOOLBAR": {
+          "REFRESH": "Refresh",
+          "RUN": "Run"
+        }
+      },
+      "RUN": {
+        "TITLE": "Run {name}",
+        "PAYLOAD": "Payload (JSON)",
+        "PAYLOAD_PLACEHOLDER": "{\"key\": \"value\"}",
+        "PAYLOAD_HINT": "Optional. Leave empty to run the job with its default payload.",
+        "PAYLOAD_INVALID": "The payload is not valid JSON: {error}",
+        "TOOLBAR": {
+          "RUN": "Run"
+        }
+      }
+    }
+  }
+}
