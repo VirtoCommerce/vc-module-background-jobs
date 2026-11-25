@@ -40,7 +40,17 @@ internal static class HangfireGlobalRetry
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
-        return Math.Max(0, envelope.MaxRetryAttempts ?? Current()?.Attempts ?? 0);
+        // With no AutomaticRetryAttribute registered Hangfire does not retry at all: the per-job filter only corrects
+        // what the global one elected and its raise path returns when there is no global filter to copy. A per-job
+        // MaxRetryAttempts therefore cannot buy retries here, and promising them would show "attempt 1 of N" for a job
+        // whose first failure is its last.
+        var global = Current();
+        if (global is null)
+        {
+            return 0;
+        }
+
+        return Math.Max(0, envelope.MaxRetryAttempts ?? global.Attempts);
     }
 
     /// <summary>

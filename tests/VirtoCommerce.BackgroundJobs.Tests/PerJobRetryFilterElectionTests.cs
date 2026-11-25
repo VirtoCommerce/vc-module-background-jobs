@@ -112,6 +112,19 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
         connection.Verify(x => x.SetJobParameter(_hangfireJobId, "RetryCount", "4"), Times.Once);
     }
 
+    [Fact]
+    public void Scheduled_ByGlobal_PastLowerJobLimit_FailsWithTheOriginalException()
+    {
+        // The lowering direction: the global filter (3 attempts, 60 s delay) elects a delayed retry for the second
+        // failure, but this job asked for 1 retry. Left alone the job would be retried past its limit and its progress
+        // notification would stay at "retrying" for a retry that was never meant to run.
+        var failure = new FailedState(new InvalidOperationException("boom"));
+
+        var (context, _) = Elect(retryCountStored: 1, AttemptsExceededAction.Fail, failure, jobLimit: 1);
+
+        Assert.Same(failure, context.CandidateState);
+    }
+
     // Hangfire exposes no getter for its current log provider, and the field is read only so that it can be put back.
     private static ILogProvider? ReadLogProvider()
     {
@@ -128,11 +141,11 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
 
     // Registers the global retry filter, elects the failure through it first (so a Delete is reached the way Hangfire
     // reaches it: Failed candidate, then Deleted with the failure traversed) and then through the per-job filter.
-    private (ElectStateContext Context, Mock<IStorageConnection> Connection) Elect(int retryCountStored, AttemptsExceededAction onExceeded, FailedState failure)
+    private (ElectStateContext Context, Mock<IStorageConnection> Connection) Elect(int retryCountStored, AttemptsExceededAction onExceeded, FailedState failure, int jobLimit = _jobLimit)
     {
         var global = RegisterGlobalRetry(onExceeded);
 
-        var context = CreateContext(failure, retryCountStored, out var connection);
+        var context = CreateContext(failure, retryCountStored, out var connection, jobLimit);
 
         global.OnStateElection(context);
         new PerJobRetryFilterAttribute().OnStateElection(context);
@@ -156,19 +169,24 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
 
     // The state change of a job the engine enqueued: Execute(envelopeJson, context, token), as HangfireJobEngine builds it.
     // Hangfire's public constructors build the context; only the storage collaborators are mocked.
-    private static ElectStateContext CreateContext(IState candidate, int retryCountStored, out Mock<IStorageConnection> connection)
+    private static ElectStateContext CreateContext(IState candidate, int retryCountStored, out Mock<IStorageConnection> connection, int jobLimit = _jobLimit)
     {
         var envelopeJson = JsonConvert.SerializeObject(new JobEnvelope
         {
             JobType = "t",
             PayloadType = "t",
             PayloadJson = "{}",
-            MaxRetryAttempts = _jobLimit,
+            MaxRetryAttempts = jobLimit,
         });
         var job = Job.FromExpression<HangfireJobExecutor>(x => x.Execute(envelopeJson, null!, CancellationToken.None));
 
         connection = new Mock<IStorageConnection>();
-        connection.Setup(x => x.GetJobParameter(_hangfireJobId, "RetryCount")).Returns(retryCountStored.ToString(CultureInfo.InvariantCulture));
+
+        // The count is stateful, as in Hangfire: what the global filter writes for the failure it reschedules is what
+        // the per-job filter then reads back.
+        var stored = retryCountStored.ToString(CultureInfo.InvariantCulture);
+        connection.Setup(x => x.GetJobParameter(_hangfireJobId, "RetryCount")).Returns(() => stored);
+        connection.Setup(x => x.SetJobParameter(_hangfireJobId, "RetryCount", It.IsAny<string>())).Callback<string, string, string>((_, _, value) => stored = value);
 
         var applyContext = new ApplyStateContext(
             new Mock<JobStorage>().Object,
