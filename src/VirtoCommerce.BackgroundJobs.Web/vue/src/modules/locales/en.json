@@ -21,7 +21,7 @@
       "RUN": {
         "TITLE": "Run {name}",
         "PAYLOAD": "Payload (JSON)",
-        "PAYLOAD_PLACEHOLDER": "{\"key\": \"value\"}",
+        "PAYLOAD_PLACEHOLDER": "{'{'}\"key\": \"value\"{'}'}",
         "PAYLOAD_HINT": "Optional. Leave empty to run the job with its default payload.",
         "PAYLOAD_INVALID": "The payload is not valid JSON: {error}",
         "TOOLBAR": {
