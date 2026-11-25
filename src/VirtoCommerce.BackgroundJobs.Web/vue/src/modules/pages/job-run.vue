@@ -22,7 +22,7 @@ import { useApiClient, useAsync, useBlade, type IBladeToolbar } from "@vc-shell/
 import { VcBlade, VcContainer, VcTextarea } from "@vc-shell/framework/ui";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { BackgroundJobsAdminClient } from "../../api_client/virtocommerce.backgroundjobs";
+import { RawEnqueueClient } from "../raw-enqueue-client";
 
 defineBlade({
   name: "BackgroundJobRun",
@@ -31,11 +31,12 @@ defineBlade({
 
 const { t } = useI18n({ useScope: "global" });
 const { options, openBlade } = useBlade<{ name: string }>();
-const { getApiClient } = useApiClient(BackgroundJobsAdminClient);
+const { getApiClient } = useApiClient(RawEnqueueClient);
 
 const payloadText = ref<string>();
 
-// an empty payload means "no payload": the request then carries none and the job gets its default
+// an empty payload means "no payload": the request then carries none and the job gets its default.
+// The text is parsed only to validate it; what is sent is the text itself.
 const hasPayload = computed(() => !!payloadText.value?.trim());
 
 const payloadError = computed(() => {
@@ -51,11 +52,7 @@ const payloadError = computed(() => {
 const { loading, action: run } = useAsync(async () => {
   const name = options.value!.name;
   const client = await getApiClient();
-  const jobId = await client.enqueue({
-    name,
-    payload: hasPayload.value ? JSON.parse(payloadText.value!) : undefined,
-    options: { reportProgress: true, title: name },
-  });
+  const jobId = await client.enqueueRaw(name, payloadText.value, { reportProgress: true, title: name });
   // the BackgroundJobProgress blade is added by the progress task; it is opened here by name
   await openBlade({ name: "BackgroundJobProgress", options: { jobId, title: name } });
 });

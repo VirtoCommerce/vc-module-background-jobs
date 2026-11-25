@@ -35,6 +35,14 @@
     <Content Remove="plugins\**" />
     <None Remove="plugins\**" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- NSwag emits repeated request/response plumbing; regenerate these clients instead of refactoring them.
+         They stay project items so this project-level setting reaches them. -->
+    <None Include="vue\src\api_client\virtocommerce.*.ts" />
+    <SonarQubeSetting Include="sonar.cpd.exclusions">
+      <Value>**/vue/src/api_client/virtocommerce.*.ts</Value>
+    </SonarQubeSetting>
+  </ItemGroup>
   <!-- Admin Shell plugin: built from vue/ into plugins/admin-shell/ before publish, so vc-build Compress (locally and in CI)
        packs it, as VirtoCommerce.SalesRep builds its storefront plugin. SkipAdminShellPlugin=true leaves it out. -->
   <Target Name="BuildAdminShellPlugin" BeforeTargets="Publish" Condition="'$(SkipAdminShellPlugin)' != 'true' AND Exists('$(MSBuildProjectDirectory)\vue\package.json')">
