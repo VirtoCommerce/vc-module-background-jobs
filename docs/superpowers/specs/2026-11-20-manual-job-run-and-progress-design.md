@@ -143,6 +143,9 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
 - **Menu item** "Background jobs", permission `background-jobs:access` (the module convention: menu on `:access`, data
   on `:read`; 7 of 8 module plugins and 6 of 7 modules' permission sets follow it).
 - **Jobs page** lists `GET api/background-jobs/registered` (`background-jobs:read`): name, payload type, triggerable.
+  A "Triggerable only" toggle filter in the table's search bar is on by default (a default search view), so the page
+  opens on the jobs a person can run; turning it off shows every registered job. The search text filters by name.
+  The analog is the host's Modules list (`search-bar`, `global-filters` with `{ toggle: true }`, `search-views`).
 - **Run** (shown for triggerable jobs, enabled with `background-jobs:execute`) opens a small form with an optional raw
   JSON payload (empty means default payload) and enqueues with `options: { reportProgress: true, title: <job name> }`.
   The server default for a request without options is unchanged.
@@ -450,8 +453,8 @@ Each criterion names its check: `test` only where the failure is silent and harm
 3. WHEN an enqueue request carries `options.progressNotificationId`, THEN the endpoint SHALL answer 400 naming that
    field and SHALL NOT enqueue a job. — test
 4. WHERE the user has `background-jobs:access`, THE Admin Shell SHALL show a "Background jobs" menu item. — E2E
-5. WHEN the user opens the Background jobs page, THEN it SHALL list every registered job with its triggerable flag.
-   — E2E
+5. WHEN the user opens the Background jobs page, THEN it SHALL list the triggerable jobs; WHEN the user turns the
+   "Triggerable only" filter off, THEN it SHALL list every registered job with its triggerable flag. — E2E
 6. WHERE a job is triggerable and the user has `background-jobs:execute`, THE page SHALL offer Run with an optional
    JSON payload; Run SHALL enqueue with progress reporting and the job name as title, and open the job's progress
    page. — E2E
@@ -677,3 +680,6 @@ the same assertion; items an engine may not support are capability-gated with th
   `EnqueueOptions` has no header slot, and `InternalsVisibleTo` stays removed, so the member is public. (3) A
   canceled job's toast is a warning (§3.3, AC 8 reworded: the toast shows the outcome by its kind, not as text),
   through a type-only vc-shell PR and a preview pin.
+- 2026-11-25 — Operator, during E2E: the jobs page opens filtered to triggerable jobs (§3.3, AC 5 reworded); a list
+  of jobs a person cannot run is noise on a page made for running them. Schedule columns (cron, next and last run)
+  were asked for too and go to a separate work item: they need a Hangfire last-run read the module does not have.
