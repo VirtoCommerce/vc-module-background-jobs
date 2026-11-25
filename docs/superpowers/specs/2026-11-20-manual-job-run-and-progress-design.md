@@ -266,8 +266,12 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   - RabbitMQ: the retry is re-published with `Attempt + 1`, and the cancel request is not cleared while a retry of the
     job is in flight, so the retry's pre-dispatch discard closes it (below).
   - Hangfire: the job is already `Deleted`, so no retry follows; `HangfireJobExecutor` classifies by the stored state
-    on any exception thrown while the dispatch token is cancelled, not only on `OperationCanceledException`, and
-    closes `Canceled` with the current attempt's numbers.
+    on any exception thrown during a non-final attempt while the dispatch token is cancelled, not only on
+    `OperationCanceledException`, and closes `Canceled` with the current attempt's numbers.
+- **On the final attempt, a requested cancel whose handler then fails with another exception is a failure.** The
+  dispatcher closes `Failed` with the error, on every engine, and no engine replaces that close with `Canceled`: no
+  retry was pending for the cancel to stop, and the error is the only record of why the job ended. An
+  `OperationCanceledException` on the final attempt with a cancel requested still closes `Canceled`.
 - **A job canceled before it runs, or while it waits for a retry**, is closed `Canceled` too:
   - Hangfire: an apply-state filter on `Deleted`, for a job that was `Enqueued`, `Scheduled` (a retry wait included)
     or `Awaiting`, reads the envelope from the job's first argument and closes its notification; no executor will
@@ -439,7 +443,9 @@ Each criterion names its check: `test` only where the failure is silent and harm
     dispatch token is cancelled and no cancel was requested, THEN the notification SHALL stay open. WHEN it arises
     while the dispatch token is not cancelled, THEN it SHALL be handled as a failure. WHEN a cancel is requested
     during a non-final attempt whose handler then fails with another exception, THEN the handler SHALL NOT run again
-    and the notification SHALL close as `Canceled`. — test; E2E for a queued RabbitMQ message (§8 item 5)
+    and the notification SHALL close as `Canceled`. WHEN a cancel is requested during the final attempt whose handler
+    then fails with another exception, THEN the notification SHALL close as `Failed` with the error, on every engine.
+    — test; E2E for a queued RabbitMQ message (§8 item 5)
 11. WHEN the dispatcher fails before the handler runs (payload, type or handler resolution), THEN the failure SHALL be
     handled like a handler failure: closed `Failed` on the final attempt, open while a retry is pending. — test
 12. FOR an owned notification, every update SHALL keep `Started`, `Created` and `JobId` unchanged, keep the last known
@@ -508,7 +514,8 @@ the same assertion; items an engine may not support are capability-gated with th
    leaves it open; one with the token not cancelled closes `Failed` on the final attempt. A cancel during a
    non-final attempt whose handler then throws another exception: the handler does not run again and the
    notification closes `Canceled` — on every fixture that supports cancellation and retries (InMemory and Reference
-   in CI; RabbitMQ with a broker via `VC_CONFORMANCE_RABBITMQ`, which CI does not run). A retry-waiting job: a unit
+   in CI; RabbitMQ with a broker via `VC_CONFORMANCE_RABBITMQ`, which CI does not run). The same on the final
+   attempt closes `Failed` with the error on those fixtures and on Hangfire. A retry-waiting job: a unit
    test of the Hangfire `Deleted` filter with old state `Scheduled` closes its notification `Canceled`. A queued
    RabbitMQ message: no fixture can hold one (an unserved queue is never consumed, so a test there could not fail),
    so its discard close is checked by E2E on a stand with a broker, one consumer slot held by a blocking job. Wrong
@@ -631,3 +638,10 @@ the same assertion; items an engine may not support are capability-gated with th
   `OperationCanceledException`, so the notification would stay at "retrying". The case's first run decides. (2) The
   discard of a queued RabbitMQ message is checked by E2E only, on a stand with a broker; CI runs no broker. (3) AC 12's
   exception covers every close made before an attempt starts, on every engine, not only Hangfire's.
+- 2026-11-25 — Operator, after the Task 6b review: on the final attempt, a requested cancel whose handler then fails
+  with another exception closes `Failed` with the error on every engine (§3.5, AC 10, §8 item 5). Observed first: the
+  case's first runs confirmed both read-from-code predictions of the previous entry (Hangfire stayed at "retrying",
+  RabbitMQ ran the retry); after the fixes, Hangfire classified any exception by stored state on every attempt and so
+  replaced the dispatcher's final `Failed` close with `Canceled`, dropping the error, while InMemory and RabbitMQ
+  ended `Failed`. Chosen over `Canceled` everywhere because no retry was pending for the cancel to stop and the error
+  is the only record of why the job ended.
