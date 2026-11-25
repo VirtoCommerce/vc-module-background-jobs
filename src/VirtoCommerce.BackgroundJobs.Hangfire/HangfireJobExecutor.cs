@@ -6,6 +6,8 @@ using Hangfire.Logging;
 using Hangfire.Server;
 using Hangfire.States;
 using Hangfire.Storage;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Newtonsoft.Json;
 using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core.Models;
@@ -19,9 +21,17 @@ namespace VirtoCommerce.BackgroundJobs.Hangfire;
 /// runs the shared <see cref="IJobDispatcher"/>. <see cref="PerformContext"/> and <see cref="CancellationToken"/>
 /// are substituted by Hangfire at execution time.
 /// </summary>
-public sealed class HangfireJobExecutor(IJobDispatcher dispatcher, IPushNotificationManager pushNotificationManager)
+public sealed class HangfireJobExecutor(
+    IJobDispatcher dispatcher,
+    IPushNotificationManager pushNotificationManager,
+    ILogger<HangfireJobExecutor> logger)
 {
     private static readonly ILog _logger = LogProvider.For<HangfireJobExecutor>();
+
+    public HangfireJobExecutor(IJobDispatcher dispatcher, IPushNotificationManager pushNotificationManager)
+        : this(dispatcher, pushNotificationManager, NullLogger<HangfireJobExecutor>.Instance)
+    {
+    }
 
     [HandlerJobDisplayName]
     public async Task Execute(string envelopeJson, PerformContext? performContext, CancellationToken cancellationToken)
@@ -43,7 +53,14 @@ public sealed class HangfireJobExecutor(IJobDispatcher dispatcher, IPushNotifica
 
         // Shared factory builds the progress context, so the notification title is threaded consistently across engines.
         // The context and the dispatcher must see the same envelope: the notification shows the attempt the context was built with.
-        var context = JobExecutionContextFactory.Create(pushNotificationManager, enriched, jobId);
+        var innerContext = JobExecutionContextFactory.Create(pushNotificationManager, enriched, jobId);
+
+        // The console wrapper sits around the push-notification progress and NoOpJobProgress alike, so the dispatcher's
+        // outcome and the cancel close below both reach the console and the wrapped progress through it.
+        var context = new JobExecutionContext(
+            innerContext.JobId,
+            new ConsoleJobProgress(innerContext.Progress, performContext, logger),
+            innerContext.Headers);
 
         try
         {
