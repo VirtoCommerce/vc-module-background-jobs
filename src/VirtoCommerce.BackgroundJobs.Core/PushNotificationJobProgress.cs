@@ -73,7 +73,7 @@ public sealed class PushNotificationJobProgress : IJobProgress
         _processedCount = progress.ProcessedCount ?? _processedCount;
         _totalCount = progress.TotalCount ?? _totalCount;
 
-        var notification = Build(progress.Message, outcome: null, error: null, finished: null);
+        var notification = Build(progress.Message, outcome: null, error: null, finished: null, isNew: false);
 
         if (!string.IsNullOrEmpty(progress.Message))
         {
@@ -101,7 +101,7 @@ public sealed class PushNotificationJobProgress : IJobProgress
 
     private JobProgressPushNotification BuildClosing(string outcome, string? error)
     {
-        var notification = Build(_lastMessage ?? outcome, outcome, error, finished: DateTime.UtcNow);
+        var notification = Build(_lastMessage ?? outcome, outcome, error, finished: DateTime.UtcNow, isNew: true);
 
         if (!string.IsNullOrEmpty(error))
         {
@@ -117,7 +117,7 @@ public sealed class PushNotificationJobProgress : IJobProgress
         return Complete(error is null ? JobOutcome.Succeeded : JobOutcome.Failed, error, cancellationToken);
     }
 
-    private JobProgressPushNotification Build(string? description, string? outcome, string? error, DateTime? finished)
+    private JobProgressPushNotification Build(string? description, string? outcome, string? error, DateTime? finished, bool isNew)
     {
         return JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
             _notificationId,
@@ -133,7 +133,7 @@ public sealed class PushNotificationJobProgress : IJobProgress
             outcome,
             error,
             finished,
-            IsNew: false));
+            IsNew: isNew));
     }
 
     private static DateTime? ReadTicks(JobEnvelope envelope, string header)

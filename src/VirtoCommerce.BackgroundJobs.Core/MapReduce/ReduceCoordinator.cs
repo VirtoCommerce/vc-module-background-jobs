@@ -132,7 +132,7 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             outcome.ToString(),
             Error: null,
             Finished: DateTime.UtcNow,
-            IsNew: false)));
+            IsNew: true)));
     }
 
     // Re-hydrate the type-erased records into a List<MapResult<TResult>> the reduce handler can accept as

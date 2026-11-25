@@ -632,7 +632,7 @@ public class MapReduceTests
         Assert.Null(close.JobId);
         Assert.NotNull(close.Finished);
         Assert.Equal(nameof(JobOutcome.Succeeded), close.Outcome);
-        Assert.False(close.IsNew);
+        Assert.True(close.IsNew);
         Assert.Equal("Completed (2 items, 0 failed).", close.Description);
     }
 

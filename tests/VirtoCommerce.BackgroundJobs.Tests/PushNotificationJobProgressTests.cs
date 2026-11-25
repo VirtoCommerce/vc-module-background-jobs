@@ -115,4 +115,20 @@ public class PushNotificationJobProgressTests
         Assert.Equal(900, completed.ProcessedCount);
         Assert.Equal("job-1", completed.JobId);
     }
+
+    [Theory]
+    [InlineData(JobOutcome.Succeeded, null)]
+    [InlineData(JobOutcome.Failed, "boom")]
+    [InlineData(JobOutcome.Canceled, null)]
+    public async Task Complete_SendsTheCloseAsUnread_AfterReadUpdates(JobOutcome outcome, string error)
+    {
+        var (progress, sent) = CreateProgress(CreateEnvelope());
+
+        await progress.Report(new JobProgressInfo { Message = "working", ProcessedCount = 1, TotalCount = 2 }, TestContext.Current.CancellationToken);
+        await progress.Complete(outcome, error, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, sent.Count);
+        Assert.False(sent[0].IsNew);
+        Assert.True(sent[1].IsNew);
+    }
 }
