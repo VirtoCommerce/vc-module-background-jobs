@@ -330,8 +330,9 @@ elected and the `RetryCount` that election wrote:
 
 A `DeletedState` with no traversed `FailedState` (a dashboard delete, a cancel) is never touched: in Hangfire.Core
 v1.8.23 only `AutomaticRetryAttribute` turns a `Failed` candidate into `Deleted`. Each extended attempt under `Delete`
-leaves a "Deleted" row in the job's history and Hangfire's "automatically deleted" warning in the log; the job itself
-is not deleted until the per-job limit is spent.
+leaves "Failed", "Deleted" and "Failed" rows before the retry in the job's history (Hangfire records every candidate
+an election passed through) and Hangfire's "automatically deleted" warning in the log; the job itself is not deleted
+until the per-job limit is spent.
 
 - Jobs without a per-job value and non-envelope jobs keep the global filter's decision.
 - The copy is built from the registered global attribute (same delays, same `OnAttemptsExceeded`), not a fresh
