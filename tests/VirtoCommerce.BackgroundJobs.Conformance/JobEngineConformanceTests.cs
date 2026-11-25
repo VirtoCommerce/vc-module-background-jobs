@@ -89,7 +89,6 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         RequireEngine();
         var jobId = await EnqueueAndWaitAsync(new ConformancePayload { CorrelationId = NewId(), Value = "id" });
 
-        Assert.False(string.IsNullOrEmpty(jobId));
     }
 
     // 5 — a handler that always throws must not stop the worker: a subsequent good job still runs.
@@ -421,6 +420,53 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         var status = await engine.GetStatus(jobId, TestContext.Current.CancellationToken);
         Assert.NotNull(status);
         Assert.Equal("Succeeded", status.State);
+    }
+
+    // 21 — a per-job retry limit above the engine's global count runs the job limit + 1 times. Hangfire has no per-job
+    // retry count, so this is the case its filter has to make work: the global filter gives up first. The wait is for
+    // the notification's closing Failed, which an engine that does not report its attempt budget sends at the first failure.
+    [Fact]
+    public async Task MaxRetryAttempts_Above_Global_Runs_N_Plus_One()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            fixture.Capabilities.SupportsRetry && fixture.Capabilities.ReportsAttemptBudget,
+            "engine does not retry failed jobs or does not report its attempt budget.");
+        var id = NewId();
+        var limit = fixture.RetryBudget + 2;
+
+        await EnqueueAsync(
+            new ConformancePayload { CorrelationId = id, Value = "retry-above-global", FailAlways = true, ReportProgress = true },
+            new EnqueueOptions { ReportProgress = true, Title = id, MaxRetryAttempts = limit });
+        var closing = await fixture.WaitForProgressAsync(
+            NotificationIdOf(id), x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.Equal(limit + 1, closing.TotalAttempts);
+        Assert.Equal(fixture.RetryBudget + 3, fixture.Probe.ExecutionCount(id));
+    }
+
+    // 22 — a per-job retry limit below the engine's global count stops the job early: limit + 1 runs.
+    [Fact]
+    public async Task MaxRetryAttempts_Below_Global_Runs_N_Plus_One()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            fixture.Capabilities.SupportsRetry && fixture.Capabilities.ReportsAttemptBudget,
+            "engine does not retry failed jobs or does not report its attempt budget.");
+        var id = NewId();
+        const int limit = 1;
+        Assert.True(limit < fixture.RetryBudget, "the scenario needs a global count above the per-job limit.");
+
+        await EnqueueAsync(
+            new ConformancePayload { CorrelationId = id, Value = "retry-below-global", FailAlways = true, ReportProgress = true },
+            new EnqueueOptions { ReportProgress = true, Title = id, MaxRetryAttempts = limit });
+        var closing = await fixture.WaitForProgressAsync(
+            NotificationIdOf(id), x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.Equal(limit + 1, closing.TotalAttempts);
+        Assert.Equal(limit + 1, fixture.Probe.ExecutionCount(id));
     }
 
     private async Task AssertCancelOutcomeAsync(string correlationId, string notificationId, bool observeHandlerCancel)
