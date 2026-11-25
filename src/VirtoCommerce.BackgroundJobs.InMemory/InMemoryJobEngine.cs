@@ -96,7 +96,7 @@ public sealed class InMemoryJobEngine(
                     // cancelled token, so it is closed Canceled here.
                     _states[jobId] = "Cancelled";
                     logger.LogInformation("In-memory job {JobId} ({JobType}) was cancelled.", jobId, envelope.JobType);
-                    await CloseCanceledAsync(context, jobId);
+                    await context.Progress.TryCompleteCanceledAsync(logger, jobId);
                     return;
                 }
                 catch (Exception ex)
@@ -125,20 +125,6 @@ public sealed class InMemoryJobEngine(
         }
     }
 
-    // A failure to close the notification must not turn a requested cancel into a failure: the notification stays open
-    // (the lesser harm), as when the engine does not close it at all.
-    private async Task CloseCanceledAsync(IJobExecutionContext context, string jobId)
-    {
-        try
-        {
-            await context.Progress.Complete(JobOutcome.Canceled, null);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not close the progress notification of the cancelled in-memory job {JobId}; it stays open.", jobId);
-        }
-    }
-
     public Task<Job?> GetStatus(string jobId, CancellationToken cancellationToken = default)
         => Task.FromResult(_states.TryGetValue(jobId, out var state)
             ? new Job { Id = jobId, State = state, Completed = IsTerminal(state) }
@@ -159,15 +145,18 @@ public sealed class InMemoryJobEngine(
             try
             {
                 cts.Cancel();
+
+                return Task.FromResult(true);
             }
             catch (ObjectDisposedException)
             {
-                // The job settled between the lookup and the cancel, so it is decided from its state as for any finished job.
-                return Task.FromResult(_states.TryGetValue(jobId, out var settled) && !IsTerminal(settled));
+                // Falls through to the settled check below.
             }
         }
 
-        return Task.FromResult(true);
+        // The job settled between the state check and the cancel (no token left, or it was just disposed), so it is
+        // decided from its state as for any finished job: a cancel racing a finishing job is not accepted.
+        return Task.FromResult(_states.TryGetValue(jobId, out var settled) && !IsTerminal(settled));
     }
 
     private static bool IsTerminal(string state) => state is "Succeeded" or "Failed" or "Cancelled";

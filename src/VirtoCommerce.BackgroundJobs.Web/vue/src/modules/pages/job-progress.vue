@@ -109,7 +109,6 @@ const elapsed = computed(() => {
   return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((x) => String(x).padStart(2, "0")).join(":");
 });
 
-// cancelling a finished Hangfire job turns its state from Succeeded into Deleted, so the command is hidden once finished
 // stays set after an accepted cancel until the closing notification hides the command: a second cancel of a job
 // Hangfire has already deleted would answer 404 and show an error for a cancel that worked
 const cancelRequested = ref(false);
@@ -126,6 +125,7 @@ const bladeToolbar = ref<IBladeToolbar[]>([
     title: t("BACKGROUND_JOBS.PAGES.PROGRESS.TOOLBAR.CANCEL"),
     icon: "lucide-circle-x",
     permissions: "background_jobs:manage",
+    // cancelling a finished Hangfire job turns its state from Succeeded into Deleted, so the command is hidden once finished
     isVisible: computed(() => !finished.value),
     disabled: computed(() => cancelling.value || cancelRequested.value),
     clickHandler: () => cancel(),

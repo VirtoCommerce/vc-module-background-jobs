@@ -129,15 +129,18 @@ public sealed class ReferenceJobEngine(
             try
             {
                 cts.Cancel();
+
+                return Task.FromResult(true);
             }
             catch (ObjectDisposedException)
             {
-                // The job settled between the lookup and the cancel, so it is decided from its state as for any finished job.
-                return Task.FromResult(_states.TryGetValue(jobId, out var settled) && !IsTerminal(settled));
+                // Falls through to the settled check below.
             }
         }
 
-        return Task.FromResult(true);
+        // The job settled between the state check and the cancel (no token left, or it was just disposed), so it is
+        // decided from its state as for any finished job: a cancel racing a finishing job is not accepted.
+        return Task.FromResult(_states.TryGetValue(jobId, out var settled) && !IsTerminal(settled));
     }
 
     private static bool IsTerminal(string state) => state is "Succeeded" or "Failed" or "Cancelled";

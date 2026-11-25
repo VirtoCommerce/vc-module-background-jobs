@@ -26,7 +26,7 @@ public sealed class HangfireJobEngine(IBackgroundJobClient client) : IJobEngine
 
     // The states a job can be canceled from. Processing is what cancels a running job: the move to Deleted trips the
     // token flowed through HangfireJobExecutor.
-    private static readonly string[] _cancellableStates = [EnqueuedState.StateName, ScheduledState.StateName, AwaitingState.StateName, ProcessingState.StateName];
+    private static readonly string[] _cancellableStates = [.. CancelBeforeRunStateFilter.NotYetRunStates, ProcessingState.StateName];
 
     public string ProviderName => BackgroundJobsProviders.Hangfire;
 

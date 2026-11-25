@@ -153,8 +153,7 @@ public sealed class DefaultJobDispatcher(
     // admin UI keeps showing a running job instead of a finished one that is about to run again.
     private static async Task ReportFailedAttempt(JobEnvelope envelope, IJobExecutionContext context, string message)
     {
-        var isFinal = envelope.TotalAttempts is null || envelope.Attempt >= envelope.TotalAttempts;
-        if (isFinal)
+        if (envelope.IsFinalAttempt())
         {
             await context.Progress.Complete(JobOutcome.Failed, message);
         }

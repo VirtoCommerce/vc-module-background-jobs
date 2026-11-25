@@ -1,12 +1,11 @@
 #nullable enable
 using System;
+using System.Linq;
 using Hangfire;
 using Hangfire.Common;
 using Hangfire.Logging;
 using Hangfire.States;
 using Hangfire.Storage;
-using Newtonsoft.Json;
-using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 
@@ -31,6 +30,11 @@ public sealed class CancelBeforeRunStateFilter(IPushNotificationManager pushNoti
 {
     private static readonly ILog _logger = LogProvider.For<CancelBeforeRunStateFilter>();
 
+    /// <summary>
+    /// Enqueued: not picked up yet. Scheduled: a delayed job or a retry wait. Awaiting: a continuation not yet released.
+    /// </summary>
+    internal static readonly string[] NotYetRunStates = [EnqueuedState.StateName, ScheduledState.StateName, AwaitingState.StateName];
+
     public void OnStateApplied(ApplyStateContext context, IWriteOnlyTransaction transaction)
     {
         try
@@ -41,24 +45,17 @@ public sealed class CancelBeforeRunStateFilter(IPushNotificationManager pushNoti
             }
 
             var backgroundJob = context.BackgroundJob;
-            var job = backgroundJob?.Job;
-            if (backgroundJob is null || job?.Type != typeof(HangfireJobExecutor) || job.Args is not { Count: > 0 } args || args[0] is not string envelopeJson)
-            {
-                return;
-            }
 
-            var envelope = ReadEnvelope(envelopeJson);
-            if (envelope is null || string.IsNullOrEmpty(envelope.ProgressNotificationId))
+            // An envelope we cannot read names no notification to close.
+            var envelope = HangfireJobExecutor.TryReadEnvelope(backgroundJob?.Job);
+            if (backgroundJob is null || envelope is null || string.IsNullOrEmpty(envelope.ProgressNotificationId))
             {
                 return;
             }
 
             // The envelope does not know which attempt was waiting, and its defaults (attempt 1, no total) would
-            // overwrite the numbers earlier attempts wrote. The stored value is serialized, as PerformContext reads it;
-            // none is stored until the job has failed once.
-            var retryCount = SerializationHelper.Deserialize<int>(
-                context.Connection.GetJobParameter(backgroundJob.Id, PerJobRetryFilterAttribute.RetryCountParameter),
-                SerializationOption.User);
+            // overwrite the numbers earlier attempts wrote. None is stored until the job has failed once.
+            var retryCount = context.GetJobParameter<int>(PerJobRetryFilterAttribute.RetryCountParameter);
 
             // The reporter decides whether the notification is the job's to close (a shared map/reduce bar is not).
             // Carrying the Hangfire job id keeps the JobId earlier attempts wrote: storage replaces a notification by id.
@@ -79,20 +76,6 @@ public sealed class CancelBeforeRunStateFilter(IPushNotificationManager pushNoti
     {
     }
 
-    // Enqueued: not picked up yet. Scheduled: a delayed job or a retry wait. Awaiting: a continuation not yet released.
     private static bool HasNotRun(string? oldStateName)
-        => oldStateName == EnqueuedState.StateName || oldStateName == ScheduledState.StateName || oldStateName == AwaitingState.StateName;
-
-    private static JobEnvelope? ReadEnvelope(string envelopeJson)
-    {
-        try
-        {
-            return JsonConvert.DeserializeObject<JobEnvelope>(envelopeJson);
-        }
-        catch (JsonException)
-        {
-            // An envelope we cannot read names no notification to close.
-            return null;
-        }
-    }
+        => oldStateName is not null && NotYetRunStates.Contains(oldStateName);
 }

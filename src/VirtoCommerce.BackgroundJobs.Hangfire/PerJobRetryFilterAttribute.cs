@@ -4,7 +4,6 @@ using System.Linq;
 using Hangfire;
 using Hangfire.Common;
 using Hangfire.States;
-using Newtonsoft.Json;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 
 namespace VirtoCommerce.BackgroundJobs.Hangfire;
@@ -49,13 +48,14 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
     {
         // A retry the global filter elected: a ScheduledState, or an EnqueuedState when its delay is zero. The Enqueued
         // candidate also arises from an ordinary enqueue, so it counts only when a failure was traversed to reach it.
+        var failureTraversed = context.TraversedStates.Any(x => x is FailedState);
         var retryElected = context.CandidateState is ScheduledState
-            || (context.CandidateState is EnqueuedState && context.TraversedStates.Any(x => x is FailedState));
+            || (context.CandidateState is EnqueuedState && failureTraversed);
         var failed = context.CandidateState is FailedState;
 
         // A Deleted candidate is the global filter giving up only when a failure was traversed to reach it: in Hangfire
         // that is the one place a Failed becomes Deleted. A plain delete (the dashboard, a cancel) traversed nothing.
-        var deletedAfterFailure = context.CandidateState is DeletedState && context.TraversedStates.Any(x => x is FailedState);
+        var deletedAfterFailure = context.CandidateState is DeletedState && failureTraversed;
 
         // Anything else (Succeeded, a plain Deleted, Processing, ...) is not a retry decision.
         if (!retryElected && !failed && !deletedAfterFailure)
@@ -63,7 +63,7 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
             return;
         }
 
-        var maxRetryAttempts = GetMaxRetryAttempts(context.BackgroundJob?.Job);
+        var maxRetryAttempts = HangfireJobExecutor.TryReadEnvelope(context.BackgroundJob?.Job)?.MaxRetryAttempts;
         if (maxRetryAttempts is null)
         {
             // No per-job override — the global AutomaticRetryAttribute governs, as before.
@@ -141,24 +141,5 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
         };
 
         raised.OnStateElection(context);
-    }
-
-    private static int? GetMaxRetryAttempts(Job? job)
-    {
-        // The engine enqueues exactly one shape of job: HangfireJobExecutor.Execute(envelopeJson, context, token).
-        if (job?.Type != typeof(HangfireJobExecutor) || job.Args.Count == 0 || job.Args[0] is not string envelopeJson)
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonConvert.DeserializeObject<JobEnvelope>(envelopeJson)?.MaxRetryAttempts;
-        }
-        catch (JsonException)
-        {
-            // An envelope we cannot read is not a reason to change the retry decision — fall back to the global one.
-            return null;
-        }
     }
 }

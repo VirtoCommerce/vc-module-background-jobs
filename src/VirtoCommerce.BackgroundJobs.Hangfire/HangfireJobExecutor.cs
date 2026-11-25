@@ -13,6 +13,7 @@ using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
+using HangfireJob = Hangfire.Common.Job;
 
 namespace VirtoCommerce.BackgroundJobs.Hangfire;
 
@@ -66,7 +67,7 @@ public sealed class HangfireJobExecutor(
         {
             await dispatcher.Dispatch(enriched, context, cancellationToken);
         }
-        catch (Exception ex) when (cancellationToken.IsCancellationRequested && (ex is OperationCanceledException || !IsFinalAttempt(enriched)))
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested && (ex is OperationCanceledException || !enriched.IsFinalAttempt()))
         {
             // The dispatcher keeps the notification open here: a requested cancel, a host shutdown and an ownership
             // change all trip this token, and only Hangfire's stored state tells them apart. Any exception counts, not
@@ -80,9 +81,27 @@ public sealed class HangfireJobExecutor(
         }
     }
 
-    // The dispatcher's own rule (DefaultJobDispatcher.ReportFailedAttempt): an unknown budget counts as final.
-    private static bool IsFinalAttempt(JobEnvelope envelope)
-        => envelope.TotalAttempts is null || envelope.Attempt >= envelope.TotalAttempts;
+    /// <summary>
+    /// The envelope of a job whose body is <see cref="Execute"/>, or null for any other job or an envelope that cannot
+    /// be read. The engine enqueues exactly one shape of job, <c>Execute(envelopeJson, context, token)</c>, so the
+    /// filters that inspect a Hangfire job read it here.
+    /// </summary>
+    internal static JobEnvelope? TryReadEnvelope(HangfireJob? job)
+    {
+        if (job?.Type != typeof(HangfireJobExecutor) || job.Args.Count == 0 || job.Args[0] is not string envelopeJson)
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonConvert.DeserializeObject<JobEnvelope>(envelopeJson);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     // A cancel is a move to Deleted, and Hangfire trips a running job's token only after it has read a state other
     // than Processing, so a cancel reads Deleted here. A shutdown still reads Processing, an ownership change reads

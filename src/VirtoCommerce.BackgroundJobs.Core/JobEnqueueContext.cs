@@ -30,7 +30,7 @@ public static class JobEnqueueContext
         ArgumentException.ThrowIfNullOrEmpty(runId);
         var previous = _runId.Value;
         _runId.Value = runId;
-        return new Scope(previous);
+        return new Scope<string?>(_runId, previous);
     }
 
     /// <summary>The start time of the map/reduce batch being fanned out, or null when none is active.</summary>
@@ -46,10 +46,10 @@ public static class JobEnqueueContext
     {
         var previous = _batchStartedAt.Value;
         _batchStartedAt.Value = started;
-        return new BatchScope(previous);
+        return new Scope<DateTime?>(_batchStartedAt, previous);
     }
 
-    private sealed class Scope(string? previous) : IDisposable
+    private sealed class Scope<T>(AsyncLocal<T> slot, T previous) : IDisposable
     {
         private bool _disposed;
 
@@ -61,23 +61,7 @@ public static class JobEnqueueContext
             }
 
             _disposed = true;
-            _runId.Value = previous;
-        }
-    }
-
-    private sealed class BatchScope(DateTime? previous) : IDisposable
-    {
-        private bool _disposed;
-
-        public void Dispose()
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-            _batchStartedAt.Value = previous;
+            slot.Value = previous;
         }
     }
 }

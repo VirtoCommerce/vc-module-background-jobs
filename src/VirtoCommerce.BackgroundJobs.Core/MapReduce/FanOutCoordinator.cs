@@ -77,29 +77,27 @@ public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
 
         // The batch start reaches the map children through the enqueue facade's ambient scope; a batch stored before the
         // start time was recorded has none, and its map updates carry no start time, as before.
-        using (batch.Started.HasValue ? JobEnqueueContext.BeginBatch(batch.Started.Value) : null)
+        using var batchScope = batch.Started.HasValue ? JobEnqueueContext.BeginBatch(batch.Started.Value) : null;
+        for (var index = startIndex; index < items.Count; index++)
         {
-            for (var index = startIndex; index < items.Count; index++)
+            var item = items[index];
+            var mapEnvelope = new MapTaskEnvelope
             {
-                var item = items[index];
-                var mapEnvelope = new MapTaskEnvelope
-                {
-                    BatchId = envelope.BatchId,
-                    Index = index,
-                    ItemType = item.ItemType,
-                    ItemJson = item.ItemJson,
-                };
+                BatchId = envelope.BatchId,
+                Index = index,
+                ItemType = item.ItemType,
+                ItemJson = item.ItemJson,
+            };
 
-                await _backgroundJob.Enqueue<MapCoordinator>(mapEnvelope,
-                    new EnqueueOptions { Queue = batch.Queue, ProgressNotificationId = batch.ProgressNotificationId, Title = batch.Title },
-                    cancellationToken);
+            await _backgroundJob.Enqueue<MapCoordinator>(mapEnvelope,
+                new EnqueueOptions { Queue = batch.Queue, ProgressNotificationId = batch.ProgressNotificationId, Title = batch.Title },
+                cancellationToken);
 
-                // Checkpoint every few items so a retry (redelivery or crash) resumes near the failure point rather than
-                // re-dispatching from the last checkpoint; the re-dispatch window is bounded by CheckpointEvery.
-                if ((index + 1) % CheckpointEvery == 0)
-                {
-                    await _store.SetFanOutProgressAsync(envelope.BatchId, index + 1, cancellationToken);
-                }
+            // Checkpoint every few items so a retry (redelivery or crash) resumes near the failure point rather than
+            // re-dispatching from the last checkpoint; the re-dispatch window is bounded by CheckpointEvery.
+            if ((index + 1) % CheckpointEvery == 0)
+            {
+                await _store.SetFanOutProgressAsync(envelope.BatchId, index + 1, cancellationToken);
             }
         }
 
