@@ -110,9 +110,14 @@ const elapsed = computed(() => {
 });
 
 // cancelling a finished Hangfire job turns its state from Succeeded into Deleted, so the command is hidden once finished
+// stays set after an accepted cancel until the closing notification hides the command: a second cancel of a job
+// Hangfire has already deleted would answer 404 and show an error for a cancel that worked
+const cancelRequested = ref(false);
+
 const { action: cancel, loading: cancelling } = useAsync(async () => {
   const client = await getApiClient();
   await client.cancel(options.value!.jobId);
+  cancelRequested.value = true;
 });
 
 const bladeToolbar = ref<IBladeToolbar[]>([
@@ -122,8 +127,7 @@ const bladeToolbar = ref<IBladeToolbar[]>([
     icon: "lucide-circle-x",
     permissions: "background_jobs:manage",
     isVisible: computed(() => !finished.value),
-    // a second click while the request is in flight would send a second cancel
-    disabled: computed(() => cancelling.value),
+    disabled: computed(() => cancelling.value || cancelRequested.value),
     clickHandler: () => cancel(),
   },
 ]);
