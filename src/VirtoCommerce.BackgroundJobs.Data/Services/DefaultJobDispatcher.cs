@@ -39,6 +39,13 @@ public sealed class DefaultJobDispatcher(
         {
             try
             {
+                // The queued notification carries no job id and the page finds its job by job id, so a handler that never
+                // reports would look queued for its whole run. Inside the try: a failed send is a failed attempt like any other.
+                if (envelope.CompletesProgressNotification)
+                {
+                    await context.Progress.Report(new JobProgressInfo());
+                }
+
                 // Everything from payload deserialization on sits inside the try: a payload that does not deserialize or
                 // a handler that cannot be resolved is a failure of this attempt like any other, and must close (or
                 // keep open, while a retry is pending) the job's notification instead of leaving it running forever.
@@ -58,7 +65,7 @@ public sealed class DefaultJobDispatcher(
                 // failure like any other.
                 if (!(actual is OperationCanceledException && cancellationToken.IsCancellationRequested))
                 {
-                    await ReportFailedAttempt(envelope, context, actual.Message);
+                    await ReportFailedAttempt(envelope, context, actual.Message, cancellationToken);
                 }
 
                 ExceptionDispatchInfo.Throw(actual); // preserves the original stack; never returns
@@ -149,15 +156,17 @@ public sealed class DefaultJobDispatcher(
         return null;
     }
 
-    // The final attempt closes the job's notification as failed; an attempt a retry will follow only says so, so the
-    // admin UI keeps showing a running job instead of a finished one that is about to run again.
-    private static async Task ReportFailedAttempt(JobEnvelope envelope, IJobExecutionContext context, string message)
+    // The final attempt closes the job's notification as failed. A retry announcement is sent only for an owned
+    // notification (a shared bar carries the whole batch, not one task's attempt) and only while the token is live: with
+    // it cancelled the dispatcher cannot know whether a retry follows, so it says nothing rather than announce a retry
+    // that a cancel may be about to stop.
+    private static async Task ReportFailedAttempt(JobEnvelope envelope, IJobExecutionContext context, string message, CancellationToken cancellationToken)
     {
         if (envelope.IsFinalAttempt())
         {
             await context.Progress.Complete(JobOutcome.Failed, message);
         }
-        else
+        else if (envelope.CompletesProgressNotification && !cancellationToken.IsCancellationRequested)
         {
             await context.Progress.Report(new JobProgressInfo
             {

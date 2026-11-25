@@ -73,7 +73,7 @@ public sealed class PushNotificationJobProgress : IJobProgress
         _processedCount = progress.ProcessedCount ?? _processedCount;
         _totalCount = progress.TotalCount ?? _totalCount;
 
-        var notification = Build(progress.Message, outcome: null, error: null, finished: null, isNew: false);
+        var notification = Build(string.IsNullOrEmpty(progress.Message) ? _lastMessage : progress.Message, outcome: null, error: null, finished: null, isNew: false);
 
         if (!string.IsNullOrEmpty(progress.Message))
         {

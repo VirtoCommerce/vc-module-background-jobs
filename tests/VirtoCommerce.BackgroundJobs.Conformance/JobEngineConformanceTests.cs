@@ -390,6 +390,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
 
         Assert.NotNull(closing.Finished);
         Assert.Null(closing.Error);
+        Assert.DoesNotContain("retrying", closing.Description ?? string.Empty);
 
         if (fixture.Capabilities.ReportsAttemptBudget)
         {

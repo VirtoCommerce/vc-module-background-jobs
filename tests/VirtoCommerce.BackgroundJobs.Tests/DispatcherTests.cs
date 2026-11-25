@@ -100,7 +100,7 @@ public class DispatcherTests
             => behavior.Run(cancellationToken);
     }
 
-    private static JobEnvelope CreateEnvelope(JsonJobPayloadSerializer serializer, int attempt, int? totalAttempts, string payloadJson = null)
+    private static JobEnvelope CreateEnvelope(JsonJobPayloadSerializer serializer, int attempt, int? totalAttempts, string payloadJson = null, bool completesProgressNotification = false)
     {
         var (payloadType, json) = serializer.Serialize(new UserPayload { Value = "x" });
 
@@ -111,18 +111,20 @@ public class DispatcherTests
             PayloadJson = payloadJson ?? json,
             Attempt = attempt,
             TotalAttempts = totalAttempts,
+            CompletesProgressNotification = completesProgressNotification,
         };
     }
 
     private static async Task<(RecordingProgress Progress, Exception Thrown)> Dispatch(
-        JobEnvelope envelope, JsonJobPayloadSerializer serializer, HandlerBehavior behavior, CancellationToken cancellationToken)
+        JobEnvelope envelope, JsonJobPayloadSerializer serializer, HandlerBehavior behavior, CancellationToken cancellationToken,
+        RecordingProgress progress = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(behavior);
         services.AddTransient<IBackgroundJobHandler<UserPayload>, ConfigurableHandler>();
         using var provider = services.BuildServiceProvider();
 
-        var progress = new RecordingProgress();
+        progress ??= new RecordingProgress();
         var context = new JobExecutionContext("job-1", progress, new Dictionary<string, string>());
         var dispatcher = new DefaultJobDispatcher(provider, serializer);
 
@@ -157,14 +159,54 @@ public class DispatcherTests
     public async Task Dispatch_UndeserializablePayload_RetryPending_StaysOpen()
     {
         var serializer = new JsonJobPayloadSerializer();
-        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 3, payloadJson: "{");
+        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 3, payloadJson: "{", completesProgressNotification: true);
 
         var (progress, thrown) = await Dispatch(envelope, serializer, new HandlerBehavior(), TestContext.Current.CancellationToken);
 
         Assert.NotNull(thrown);
         Assert.Empty(progress.Completions);
-        var report = Assert.Single(progress.Reports);
-        Assert.StartsWith("Attempt 1 of 3 failed, retrying: ", report.Message);
+        Assert.StartsWith("Attempt 1 of 3 failed, retrying: ", progress.Reports[^1].Message);
+    }
+
+    // 14 — an owned notification is updated when the attempt starts, before the handler runs: the queued notification
+    // carries no job id, so a handler that never reports would otherwise look queued for its whole run.
+    [Fact]
+    public async Task Dispatch_OwnedNotification_ReportsBeforeHandlerRuns()
+    {
+        var reportsSeenByHandler = await CountReportsSeenByHandler(completesProgressNotification: true);
+
+        Assert.Equal(1, reportsSeenByHandler);
+    }
+
+    [Fact]
+    public async Task Dispatch_SharedNotification_DoesNotReportBeforeHandlerRuns()
+    {
+        var reportsSeenByHandler = await CountReportsSeenByHandler(completesProgressNotification: false);
+
+        Assert.Equal(0, reportsSeenByHandler);
+    }
+
+    private static async Task<int> CountReportsSeenByHandler(bool completesProgressNotification)
+    {
+        var serializer = new JsonJobPayloadSerializer();
+        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 1, completesProgressNotification: completesProgressNotification);
+        var progress = new RecordingProgress();
+        var reportsSeenByHandler = -1;
+        var behavior = new HandlerBehavior
+        {
+            Run = _ =>
+            {
+                reportsSeenByHandler = progress.Reports.Count;
+
+                return Task.CompletedTask;
+            },
+        };
+
+        var (_, thrown) = await Dispatch(envelope, serializer, behavior, TestContext.Current.CancellationToken, progress);
+
+        Assert.Null(thrown);
+
+        return reportsSeenByHandler;
     }
 
     [Fact]
