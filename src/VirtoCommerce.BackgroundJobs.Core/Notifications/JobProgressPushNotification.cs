@@ -38,10 +38,7 @@ public class JobProgressPushNotification : PushNotification
             IsNew: true));
     }
 
-    /// <summary>
-    /// Closes <paramref name="queued"/> for a job whose enqueue failed: same id, title and start, outcome Failed, and
-    /// <paramref name="error"/> as the error.
-    /// </summary>
+    /// <summary>Closes <paramref name="queued"/> as failed for a job whose enqueue failed.</summary>
     public static JobProgressPushNotification CreateEnqueueFailed(JobProgressPushNotification queued, string error)
     {
         ArgumentNullException.ThrowIfNull(queued);
