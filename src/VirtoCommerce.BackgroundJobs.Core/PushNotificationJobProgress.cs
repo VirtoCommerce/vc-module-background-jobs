@@ -34,7 +34,11 @@ public sealed class PushNotificationJobProgress : IJobProgress
     private long _totalCount;
     private string? _lastMessage;
 
-    /// <summary>Reports into the notification as its owner, without a job id or attempt.</summary>
+    /// <summary>
+    /// Reports into the notification as its owner, without a job id or attempt: <see cref="Complete(JobOutcome, string?, CancellationToken)"/>
+    /// closes it. To report into a notification shared by several jobs (a map/reduce batch), build the reporter from the
+    /// envelope (the constructor below, or <see cref="JobExecutionContextFactory"/>) so that a single job does not close it.
+    /// </summary>
     public PushNotificationJobProgress(
         IPushNotificationManager pushNotificationManager,
         string notificationId,

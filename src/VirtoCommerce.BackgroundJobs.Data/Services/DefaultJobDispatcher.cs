@@ -79,14 +79,13 @@ public sealed class DefaultJobDispatcher(
                 ExceptionDispatchInfo.Throw(actual); // preserves the original stack; never returns
             }
 
-            // Only an owned notification is closed here (envelope.CompletesProgressNotification): a reporter built with the
-            // legacy four-argument PushNotificationJobProgress constructor owns its notification whatever the envelope
-            // says, so the reporter's own decision cannot stand in for the envelope's. A failed close is logged and not
-            // thrown: the handler has finished, and failing the attempt would make an engine run it again.
-            if (envelope.CompletesProgressNotification)
-            {
-                await TrySend(() => context.Progress.Complete(JobOutcome.Succeeded), "close the notification as succeeded", envelope, context, cancellationToken);
-            }
+            // The outcome is always delivered to the context's progress, owned notification or not: a wrapper around it
+            // (the Hangfire console line) must learn how every job ended. Whether the notification is closed is the
+            // reporter's decision — the push reporter built from the envelope ignores Complete for a notification it does
+            // not own, and the one built with the released four-argument constructor owns its notification by definition.
+            // A failed close is logged and not thrown: the handler has finished, and failing the attempt would make an
+            // engine run it again.
+            await TrySend(() => context.Progress.Complete(JobOutcome.Succeeded), "close the notification as succeeded", envelope, context, cancellationToken);
         }
         finally
         {
@@ -170,23 +169,18 @@ public sealed class DefaultJobDispatcher(
         return null;
     }
 
-    // Only an owned notification (envelope.CompletesProgressNotification) is touched; a shared map/reduce bar carries the
-    // whole batch, not one task's attempt, and a legacy-constructed reporter owns its notification whatever the envelope
-    // says, so the gate cannot be left to the reporter. The final attempt closes the notification as failed. A retry
-    // announcement is sent only while the token is live: with it cancelled the dispatcher cannot know whether a retry
-    // follows, so it says nothing rather than announce a retry that a cancel may be about to stop.
+    // The final attempt always delivers the failure outcome to the context's progress; whether that closes a notification
+    // is the reporter's decision (see Dispatch). The retry announcement is an attempt report, so it is gated on ownership
+    // (envelope.CompletesProgressNotification): a shared map/reduce bar carries the whole batch, not one task's attempt.
+    // It is sent only while the token is live: with it cancelled the dispatcher cannot know whether a retry follows, so
+    // it says nothing rather than announce a retry that a cancel may be about to stop.
     private async Task ReportFailedAttempt(JobEnvelope envelope, IJobExecutionContext context, string message, CancellationToken cancellationToken)
     {
-        if (!envelope.CompletesProgressNotification)
-        {
-            return;
-        }
-
         if (envelope.IsFinalAttempt())
         {
             await TrySend(() => context.Progress.Complete(JobOutcome.Failed, message), "close the notification as failed", envelope, context, cancellationToken);
         }
-        else if (!cancellationToken.IsCancellationRequested)
+        else if (envelope.CompletesProgressNotification && !cancellationToken.IsCancellationRequested)
         {
             await TrySend(
                 () => context.Progress.Report(new JobProgressInfo

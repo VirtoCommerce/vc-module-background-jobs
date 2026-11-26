@@ -293,24 +293,37 @@ public class DispatcherTests
         Assert.Same(expected, thrown);
     }
 
-    // A reporter built with the legacy four-argument PushNotificationJobProgress constructor owns its notification
-    // whatever the envelope says, so the dispatcher must not call Complete for an envelope that does not own it.
+    // The dispatcher always delivers the outcome to the context's progress: ownership of the notification is the
+    // reporter's decision (the push reporter built from the envelope ignores Complete for a notification it does not own),
+    // and a wrapper around the context's progress (the Hangfire console line) must learn the outcome of every job.
+    // What a shared notification must not receive is the attempt itself — start-of-attempt and retry reports.
     [Fact]
-    public async Task Dispatch_SharedNotification_NeverCompletes()
+    public async Task Dispatch_SharedNotification_DeliversOutcomeButNotAttemptReports()
     {
         var serializer = new JsonJobPayloadSerializer();
-        var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 1, completesProgressNotification: false);
 
         var succeeded = new RecordingProgress();
-        await Dispatch(envelope, serializer, new HandlerBehavior(), TestContext.Current.CancellationToken, succeeded);
+        var succeededEnvelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 3, completesProgressNotification: false);
+        await Dispatch(succeededEnvelope, serializer, new HandlerBehavior(), TestContext.Current.CancellationToken, succeeded);
 
-        var failed = new RecordingProgress();
+        var failedFinal = new RecordingProgress();
+        var finalEnvelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 1, completesProgressNotification: false);
         var behavior = new HandlerBehavior { Run = _ => throw new InvalidOperationException("boom") };
-        var (_, thrown) = await Dispatch(envelope, serializer, behavior, TestContext.Current.CancellationToken, failed);
+        var (_, thrown) = await Dispatch(finalEnvelope, serializer, behavior, TestContext.Current.CancellationToken, failedFinal);
+
+        var failedRetry = new RecordingProgress();
+        var retryEnvelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 3, completesProgressNotification: false);
+        await Dispatch(retryEnvelope, serializer, behavior, TestContext.Current.CancellationToken, failedRetry);
 
         Assert.NotNull(thrown);
-        Assert.Empty(succeeded.Completions);
-        Assert.Empty(failed.Completions);
+        Assert.Equal(JobOutcome.Succeeded, Assert.Single(succeeded.Completions).Outcome);
+        var failure = Assert.Single(failedFinal.Completions);
+        Assert.Equal(JobOutcome.Failed, failure.Outcome);
+        Assert.Equal("boom", failure.Error);
+        Assert.Empty(failedRetry.Completions);
+        Assert.Empty(succeeded.Reports);
+        Assert.Empty(failedFinal.Reports);
+        Assert.Empty(failedRetry.Reports);
     }
 
     // The production registration must bind the constructor that takes the logger, and a failed send must be logged
