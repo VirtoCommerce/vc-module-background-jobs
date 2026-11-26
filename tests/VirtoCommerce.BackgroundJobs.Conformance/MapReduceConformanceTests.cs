@@ -198,4 +198,26 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
         Assert.Equal(nameof(JobOutcome.Failed), Fixture.ProgressUpdates(notificationId).Last().Outcome);
     }
+
+    // 21 — a reduce whose read of the map results fails on every attempt closes the notification Failed on the last.
+    [Fact]
+    public async Task MapReduce_Reduce_Results_Read_Failure_On_Final_Attempt_Closes_Notification_Failed()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            Fixture.Capabilities.SupportsRetry && Fixture.Capabilities.ReportsAttemptBudget,
+            "engine does not retry failed jobs or does not report its attempt budget.");
+        var id = NewId();
+
+        var notificationId = await EnqueueReportingBatchAsync<ConformanceResultsReadFailureReduceHandler>(new ConformanceReduceState { CorrelationId = id });
+        var closing = await Fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.NotNull(closing.Finished);
+        Assert.Contains("Conformance-induced results read failure", closing.Description);
+
+        await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+        Assert.Equal(nameof(JobOutcome.Failed), Fixture.ProgressUpdates(notificationId).Last().Outcome);
+    }
 }

@@ -51,7 +51,10 @@ internal sealed class ConformanceFaultInjectingBatchStore(IMapReduceBatchStore i
         => inner.ReleaseReduceAsync(batchId, cancellationToken);
 
     public Task<IReadOnlyCollection<MapResultRecord>> GetResultsAsync(string batchId, CancellationToken cancellationToken = default)
-        => inner.GetResultsAsync(batchId, cancellationToken);
+    {
+        ThrowIfFaulted<ConformanceResultsReadFailureReduceHandler>(batchId, "Conformance-induced results read failure.");
+        return inner.GetResultsAsync(batchId, cancellationToken);
+    }
 
     public Task MarkProgressClosedAsync(string batchId, ProgressClose close, CancellationToken cancellationToken = default)
         => inner.MarkProgressClosedAsync(batchId, close, cancellationToken);

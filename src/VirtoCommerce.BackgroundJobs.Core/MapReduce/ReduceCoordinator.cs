@@ -52,20 +52,21 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             return;
         }
 
-        var results = await _store.GetResultsAsync(envelope.BatchId, cancellationToken);
-        var failures = results.Count(x => !x.Succeeded);
-
-        if (batch.FailurePolicy == FailurePolicy.FailFast && failures > 0)
-        {
-            _logger.LogError("Map/reduce batch {BatchId} faulted: {Failures}/{Total} map items failed (FailFast); reduce skipped.",
-                envelope.BatchId, failures, batch.Total);
-            await MapReduceBatchNotification.CloseAsync(_store, _pushNotificationManager, batch, $"Faulted: {failures}/{batch.Total} map items failed.", JobOutcome.Failed, _logger);
-            await _store.CompleteAsync(envelope.BatchId, cancellationToken);
-            return;
-        }
-
+        var failures = 0;
         try
         {
+            var results = await _store.GetResultsAsync(envelope.BatchId, cancellationToken);
+            failures = results.Count(x => !x.Succeeded);
+
+            if (batch.FailurePolicy == FailurePolicy.FailFast && failures > 0)
+            {
+                _logger.LogError("Map/reduce batch {BatchId} faulted: {Failures}/{Total} map items failed (FailFast); reduce skipped.",
+                    envelope.BatchId, failures, batch.Total);
+                await MapReduceBatchNotification.CloseAsync(_store, _pushNotificationManager, batch, $"Faulted: {failures}/{batch.Total} map items failed.", JobOutcome.Failed, _logger);
+                await _store.CompleteAsync(envelope.BatchId, cancellationToken);
+                return;
+            }
+
             var resultType = Type.GetType(batch.ResultType)
                 ?? throw new InvalidOperationException($"Cannot resolve map result type '{batch.ResultType}'.");
             var stateType = Type.GetType(batch.StateType)

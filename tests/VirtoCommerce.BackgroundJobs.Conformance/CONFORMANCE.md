@@ -71,6 +71,7 @@ which overlap the numbers of the first file, so refer to them by test name.
 | 18 | `MapReduce_FanOut_Failure_On_Final_Attempt_Closes_Notification_Failed`: a fan-out that fails on its final attempt closes the batch's shared notification `Failed` (its description carries the error), once | `SupportsRetry` and `ReportsAttemptBudget` (skipped otherwise) |
 | 19 | `MapReduce_Map_Failure_On_Final_Attempt_Closes_Notification_Failed`: the same for the map task that completes the batch and fails before the reduce is enqueued; it may close twice, always `Failed`, and ends `Failed` | `SupportsRetry` and `ReportsAttemptBudget` (skipped otherwise) |
 | 20 | `MapReduce_FanOut_Failure_After_Enqueuing_Map_Tasks_Keeps_Notification_Failed`: a fan-out that fails on its final attempt after it enqueued map tasks (30 items) closes the shared notification `Failed`, and the map tasks that run afterwards do not reopen it: the last update is still the close | `SupportsRetry` and `ReportsAttemptBudget` (skipped otherwise) |
+| 21 | `MapReduce_Reduce_Results_Read_Failure_On_Final_Attempt_Closes_Notification_Failed`: a reduce whose read of the map results fails on every attempt closes the shared notification `Failed` on the final one (its description carries the error), and the last update stays that close | `SupportsRetry` and `ReportsAttemptBudget` (skipped otherwise) |
 
 Capability-gated scenarios assert the documented behavior when supported, and the documented fallback (or skip) when
 not — so an engine is never penalized for a feature it legitimately cannot provide. A scenario that asserts a closing
@@ -213,9 +214,10 @@ public class MyEngineConformanceTests(MyEngineConformanceFixture fixture)
 
 The base builds the engine-agnostic services the standard depends on (serializer, dispatcher, the `IBackgroundJob`
 facade, map/reduce orchestration, the conformance handlers, a capturing push-notification manager, and a batch store
-that fails the fan-out, its first checkpoint or the join step of a batch whose reduce handler is the matching marker
-type). You supply only the engine and its worker. A fixture must not register its own `IMapReduceBatchStore`: the kit
-registers its fault-injecting one, and a replacement turns map/reduce scenarios 18 to 20 into misleading failures.
+that fails the fan-out, its first checkpoint, the join step or the reduce's read of the results of a batch whose
+reduce handler is the matching marker type). You supply only the engine and its worker. A fixture must not register its
+own `IMapReduceBatchStore`: the kit registers its fault-injecting one, and a replacement turns map/reduce scenarios 18
+to 21 into misleading failures.
 
 ## Reference examples in this repo
 
