@@ -152,7 +152,7 @@ public sealed class MapReduceJob : IMapReduceJob
         var notification = JobProgressPushNotification.CreateQueued(userName ?? "system", title, started, total);
         await BestEffortNotificationSend.TrySendAsync(
             () => _pushNotificationManager.SendAsync(notification),
-            ex => _logger.LogError(ex, "Could not send the queued progress notification {NotificationId}; the batch is enqueued regardless.", notification.Id));
+            ex => _logger.LogError(ex, "Could not send the queued progress notification {NotificationId}; enqueueing continues.", notification.Id));
 
         return notification;
     }
