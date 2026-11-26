@@ -5,12 +5,7 @@ using Newtonsoft.Json.Linq;
 
 namespace VirtoCommerce.BackgroundJobs.Web.Models;
 
-/// <summary>
-/// Reads an enqueue request's <c>payload</c> member as a raw <see cref="JToken"/> that keeps date-like strings as
-/// strings and numbers with a fraction as decimals, so the payload text handed to the job serializer carries what the
-/// caller sent. MVC's own reader would turn a date-like string into a <c>DateTime</c> before the payload type is known.
-/// Does not depend on the platform's global converters, which differ between platform versions.
-/// </summary>
+/// <summary>Reads an enqueue request's <c>payload</c> as a raw <see cref="JToken"/>, keeping date-like strings as strings and fractional numbers as decimals, independent of the platform's global converters.</summary>
 public sealed class RawJsonPayloadConverter : JsonConverter
 {
     public override bool CanConvert(Type objectType) => typeof(JToken).IsAssignableFrom(objectType);

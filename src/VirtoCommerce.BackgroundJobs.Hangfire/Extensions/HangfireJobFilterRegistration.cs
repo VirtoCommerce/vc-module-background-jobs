@@ -8,11 +8,7 @@ using VirtoCommerce.Platform.Core.PushNotifications;
 
 namespace VirtoCommerce.Platform.Hangfire.Extensions;
 
-/// <summary>
-/// Adds this module's Hangfire filters that need a service from the container to <see cref="GlobalJobFilters.Filters"/>,
-/// which is process-wide: a filter holds what it was built with, so registering again replaces the earlier instance
-/// instead of leaving one bound to a provider that is gone (a second host in one process, a test fixture per class).
-/// </summary>
+/// <summary>Adds this module's container-dependent Hangfire filters to the process-wide <see cref="GlobalJobFilters.Filters"/>, replacing any instance an earlier registration left there.</summary>
 public static class HangfireJobFilterRegistration
 {
     public static void RegisterServiceFilters(IServiceProvider serviceProvider)

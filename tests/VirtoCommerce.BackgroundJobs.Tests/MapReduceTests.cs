@@ -476,8 +476,7 @@ public class MapReduceTests
             => payload.Value == 0 ? throw new InvalidOperationException("boom") : Task.CompletedTask;
     }
 
-    // A map task reports into the batch's shared notification. The dispatcher does not close it for a task, and the
-    // reporter must refuse to as well (the test asks it directly): a reporter built for another envelope may be handed the close.
+    // A reporter built for another envelope may be handed the close, so the test asks the reporter directly.
     [Fact]
     public async Task MapTaskProgress_DoesNotCloseSharedNotification()
     {
@@ -529,13 +528,10 @@ public class MapReduceTests
         Assert.Null(await DispatchMapTask(1));
         Assert.IsType<InvalidOperationException>(await DispatchMapTask(0));
 
-        // A shared bar is closed by the batch's reduce, never by a map task: nothing a task does may finish it.
         Assert.DoesNotContain(sent, x => x.Finished is not null || x.Outcome is not null);
     }
 
-    // The shared notification must keep the batch start time through every replacement: the initial one, each map
-    // task's update (the start time travels as a header the fan-out's enqueue stamps) and the reduce close. The harness
-    // runs the real facade over a capturing engine so the header path is exercised end to end.
+    // Runs the real facade over a capturing engine, so the batch-start header path is exercised end to end.
     private sealed class NotifyingHarness
     {
         public List<JobProgressPushNotification> Sent { get; } = [];
@@ -583,8 +579,7 @@ public class MapReduceTests
             Reduce = new ReduceCoordinator(sp, Serializer, Store, Manager.Object, NullLogger<ReduceCoordinator>.Instance);
         }
 
-        // Runs the batch up to the reduce close and returns the notifications sent by the initial send, the map tasks
-        // and the reduce, in that order. beforeReduce runs once the map tasks are done, to change what the reduce sees.
+        // Returns the initial send, the map updates and the reduce close; beforeReduce runs after the map tasks.
         public async Task<(JobProgressPushNotification Initial, IReadOnlyList<JobProgressPushNotification> MapUpdates, JobProgressPushNotification Close)>
             RunAsync<TMap>(SquareItem[] items, CancellationToken ct, Action? beforeReduce = null)
             where TMap : class
@@ -641,7 +636,6 @@ public class MapReduceTests
         Assert.Contains("2 items", close.Description);
     }
 
-    // A FailFast batch with a failed map item never runs the reduce handler; its close must say Failed, not Succeeded.
     [Fact]
     public async Task SharedNotification_FailFastFault_ClosesFailed()
     {
@@ -656,8 +650,7 @@ public class MapReduceTests
         Assert.Contains("1/2", close.Description);
     }
 
-    // Platform storage folds a notification with the same title, type and description into the previous one, so two
-    // batches of one handler started in a row must not open with the same description.
+    // Platform storage folds notifications with the same title, type and description into one.
     [Fact]
     public async Task Enqueue_TwoBatches_InitialNotificationsDiffer()
     {
@@ -703,8 +696,6 @@ public class MapReduceTests
         return (facade, sent);
     }
 
-    // The batch's Queued notification is sent before the batch is stored and fanned out; if anything after that throws,
-    // no coordinator will ever close it, so the facade closes it as Failed and the caller still gets the original error.
     [Fact]
     public async Task Enqueue_FanOutEnqueueThrows_ClosesBatchNotificationAsFailed_AndRethrows()
     {
@@ -740,8 +731,6 @@ public class MapReduceTests
         Assert.NotNull(closing.Finished);
     }
 
-    // The batch's notification only displays it: the reduce handler has already run when its success close is sent, so a
-    // failed send must not fail the attempt (an engine would run the reduce handler again) nor skip completing the batch.
     [Fact]
     public async Task Reduce_SuccessCloseSendThrows_DoesNotFailTheAttempt()
     {
@@ -767,8 +756,7 @@ public class MapReduceTests
             => Task.CompletedTask;
     }
 
-    // The map task that completes the batch must still trigger the reduce when its progress update cannot be sent:
-    // otherwise the engine runs the map handler again and the batch waits on a reduce that was never enqueued.
+    // Otherwise the engine re-runs the map item and the reduce is never enqueued.
     [Fact]
     public async Task MapTask_ProgressReportOnLastItemThrows_StillEnqueuesReduce()
     {

@@ -57,14 +57,11 @@ public class BackgroundJobsAdminController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<string>> Enqueue([FromBody] EnqueueJobRequest request, CancellationToken cancellationToken)
     {
-        // A body that is not valid JSON, or a payload the converter cannot read, fails model binding: answer 400 naming
-        // the failing member instead of treating the request as one with no name (or with a default payload).
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
         }
 
-        // A REST caller cannot own a notification created elsewhere; in-process callers keep the option.
         if (!string.IsNullOrEmpty(request?.Options?.ProgressNotificationId))
         {
             return BadRequest("'options.progressNotificationId' is not accepted over REST: a progress notification is created by the endpoint when 'options.reportProgress' is set.");
@@ -88,8 +85,6 @@ public class BackgroundJobsAdminController(
             return BadRequest($"Background job '{descriptor.Name}' is internal and cannot be triggered on demand.");
         }
 
-        // Bind the request payload JSON to the handler's payload type. A missing payload and an explicit "payload": null both
-        // arrive as null (the model binder does not hand a JSON null over as a JToken of type Null) ⇒ default instance.
         var payloadJson = request.Payload is null
             ? "{}"
             : request.Payload.ToString(Formatting.None);

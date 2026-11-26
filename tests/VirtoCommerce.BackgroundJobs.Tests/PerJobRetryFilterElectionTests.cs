@@ -18,30 +18,19 @@ using Xunit;
 
 namespace VirtoCommerce.BackgroundJobs.Tests;
 
-/// <summary>
-/// Defines the xUnit collection of the tests that replace the process-wide <see cref="GlobalJobFilters"/>. The
-/// Hangfire conformance fixture rebuilds that same static, and test classes run in parallel with each other, so such
-/// tests must not overlap with it. <c>DisableParallelization</c> makes the runner execute this collection alone,
-/// after the parallel ones have finished.
-/// </summary>
+/// <summary>Tests that replace the process-wide <see cref="GlobalJobFilters"/>; run alone, since the Hangfire conformance fixture rebuilds the same static.</summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class GlobalJobFiltersCollection
 {
     public const string Name = "GlobalJobFilters";
 }
 
-/// <summary>
-/// Runs <see cref="PerJobRetryFilterAttribute"/> against a real <see cref="ElectStateContext"/> after the real
-/// <see cref="AutomaticRetryAttribute"/> has elected, the way Hangfire's state machine does — the one place the
-/// election itself can be asserted without a worker. Each case fails <b>silently</b> on a regression: a job that a
-/// per-job limit still allows to retry would be deleted early, and its progress notification would hang at "retrying".
-/// </summary>
+/// <summary>Runs <see cref="PerJobRetryFilterAttribute"/> on a real <see cref="ElectStateContext"/> after the real <see cref="AutomaticRetryAttribute"/> elected, as Hangfire's state machine does.</summary>
 [Collection(GlobalJobFiltersCollection.Name)]
 public sealed class PerJobRetryFilterElectionTests : IDisposable
 {
     private const string _hangfireJobId = "job-1";
 
-    // The attempts the global AutomaticRetryAttribute gives every job; the per-job limit goes above it.
     private const int _globalAttempts = 3;
     private const int _jobLimit = 5;
 
@@ -50,9 +39,7 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
 
     public PerJobRetryFilterElectionTests()
     {
-        // AutomaticRetryAttribute takes its logger in its constructor from Hangfire's static log provider. A conformance
-        // fixture that ran earlier in this process leaves the provider of its disposed host there, and any logger taken
-        // from it throws. This class neither asserts nor needs logging, so it runs with a silent provider.
+        // An earlier conformance fixture can leave Hangfire's static log provider bound to a disposed host, and AutomaticRetryAttribute takes its logger from it.
         LogProvider.SetCurrentLogProvider(new SilentLogProvider());
 
         foreach (var filter in _originalFilters)
@@ -88,9 +75,7 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
     [Fact]
     public void Deleted_WithoutTraversedFailure_IsNotTouched()
     {
-        // A dashboard delete or a cancel arrives as a plain DeletedState: nothing failed, so there is nothing to retry.
-        // The global retry filter is registered, as it always is in production, and the stored count is below the job
-        // limit: without the traversed-failure check the filter would reach for a failure that was never traversed.
+        // Global retry registered and the count below the limit, so only the traversed-failure check keeps this untouched.
         RegisterGlobalRetry(AttemptsExceededAction.Delete);
         var deleted = new DeletedState();
         var context = CreateContext(deleted, retryCountStored: _globalAttempts, out var connection);
@@ -105,7 +90,6 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
     [Fact]
     public void Failed_ByGlobal_BelowJobLimit_StillSchedulesRetry()
     {
-        // The existing raise from FailedState, guarded alongside the Delete variant.
         var (context, connection) = Elect(retryCountStored: _globalAttempts, AttemptsExceededAction.Fail, new FailedState(new InvalidOperationException("boom")));
 
         Assert.IsType<ScheduledState>(context.CandidateState);
@@ -115,9 +99,7 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
     [Fact]
     public void Scheduled_ByGlobal_PastLowerJobLimit_FailsWithTheOriginalException()
     {
-        // The lowering direction: the global filter (3 attempts, 60 s delay) elects a delayed retry for the second
-        // failure, but this job asked for 1 retry. Left alone the job would be retried past its limit and its progress
-        // notification would stay at "retrying" for a retry that was never meant to run.
+        // The global filter elects a delayed retry for the second failure; the job asked for 1 retry.
         var failure = new FailedState(new InvalidOperationException("boom"));
 
         var (context, _) = Elect(retryCountStored: 1, AttemptsExceededAction.Fail, failure, jobLimit: 1);
@@ -139,8 +121,7 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
         public ILog GetLogger(string name) => new Mock<ILog>().Object;
     }
 
-    // Registers the global retry filter, elects the failure through it first (so a Delete is reached the way Hangfire
-    // reaches it: Failed candidate, then Deleted with the failure traversed) and then through the per-job filter.
+    // Elects through the global filter first, so a Delete is reached as in Hangfire (Failed, then Deleted with the failure traversed), then through the per-job filter.
     private (ElectStateContext Context, Mock<IStorageConnection> Connection) Elect(int retryCountStored, AttemptsExceededAction onExceeded, FailedState failure, int jobLimit = _jobLimit)
     {
         var global = RegisterGlobalRetry(onExceeded);
@@ -167,7 +148,6 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
         return global;
     }
 
-    // The state change of a job the engine enqueued: Execute(envelopeJson, context, token), as HangfireJobEngine builds it.
     // Hangfire's public constructors build the context; only the storage collaborators are mocked.
     private static ElectStateContext CreateContext(IState candidate, int retryCountStored, out Mock<IStorageConnection> connection, int jobLimit = _jobLimit)
     {

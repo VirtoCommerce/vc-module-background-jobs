@@ -1,9 +1,6 @@
 import path from "node:path";
 import { getDynamicModuleConfiguration } from "@vc-shell/mf-module";
 
-// Builds the Background jobs admin UI as a Module Federation remote of the Admin Shell host.
-// Output: <module>/plugins/admin-shell/ (remoteEntry.js + public/plugin.json with the menu contribution),
-// served by the platform at /modules/$(VirtoCommerce.BackgroundJobs)/plugins/admin-shell/.
 const base = "/modules/$(VirtoCommerce.BackgroundJobs)/plugins/admin-shell/";
 process.env.APP_BASE_PATH = base;
 

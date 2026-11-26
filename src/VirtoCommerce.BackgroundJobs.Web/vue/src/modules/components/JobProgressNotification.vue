@@ -23,7 +23,6 @@ import type { JobProgressPushNotification } from "../types/job-progress-notifica
 
 const notificationRef = useNotificationContext();
 const notification = computed(() => notificationRef.value as JobProgressPushNotification);
-// outside a blade, openBlade opens on top of the active workspace
 const { openBlade } = useBlade();
 
 const outcomeColors: Record<string, string> = {
@@ -31,7 +30,6 @@ const outcomeColors: Record<string, string> = {
   Canceled: "var(--warning-500)",
 };
 
-// a finished entry with no outcome reads as Succeeded
 const color = computed(() => {
   if (!notification.value.finished) return "var(--primary-500)";
   return outcomeColors[notification.value.outcome ?? ""] ?? "var(--success-500)";

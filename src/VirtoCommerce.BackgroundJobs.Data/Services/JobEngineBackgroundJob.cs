@@ -30,8 +30,6 @@ public sealed class JobEngineBackgroundJob(
     // Optional: provided by the active engine module. Null when no engine is installed — enqueue then throws the
     // actionable BackgroundJobEngineNotInstalledException instead of failing DI resolution of this facade.
     IJobEngine? engine = null,
-    // Last and optional, like the dispatcher's: a caller that builds the facade by hand stays source-compatible, and DI
-    // injects the logger in production. A failed send that closes the notification of a job whose enqueue failed is reported through it.
     ILogger<JobEngineBackgroundJob>? logger = null) : IBackgroundJob, IBulkBackgroundJob
 {
     private readonly BackgroundJobsOptions _options = options.Value;
@@ -87,9 +85,6 @@ public sealed class JobEngineBackgroundJob(
         JobProgressPushNotification? queued = null;
         if (options?.ReportProgress == true && string.IsNullOrEmpty(progressNotificationId))
         {
-            // The only send the facade makes once the engine has the job: from here the worker owns the notification (it
-            // keeps this Started and adds the job id), so nothing is sent after the engine takes the job — that would race
-            // the worker. The one exception is a job the engine reported a failure for, closed below.
             queued = JobProgressPushNotification.CreateQueued(userName ?? "system", title, enqueuedAt, totalCount: 0);
             await pushNotificationManager.SendAsync(queued);
             progressNotificationId = queued.Id;
@@ -111,8 +106,6 @@ public sealed class JobEngineBackgroundJob(
                 headers[JobHeaders.RunId] = runId;
             }
 
-            // A map task of a shared (map/reduce) notification cannot learn the batch start time from its own envelope, so the
-            // fan-out passes it through the ambient scope. Only an enqueue that reports into an existing notification needs it.
             var batchStartedAt = JobEnqueueContext.BatchStartedAt;
             if (batchStartedAt.HasValue && !string.IsNullOrEmpty(options?.ProgressNotificationId))
             {
@@ -139,10 +132,6 @@ public sealed class JobEngineBackgroundJob(
         }
         catch (Exception ex) when (queued is not null)
         {
-            // The engine reported a failure, so no worker may ever close the notification sent above: close it here as
-            // failed. If the engine did take the job after all (a broker publish can time out on its confirm after the
-            // message was routed), the worker's own sends replace this close. A failed close must not hide the error the
-            // caller needs.
             await pushNotificationManager.TryCloseEnqueueFailedAsync(queued, ex.Message, _logger);
 
             throw;

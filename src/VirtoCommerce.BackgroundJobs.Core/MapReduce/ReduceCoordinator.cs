@@ -65,9 +65,6 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             return;
         }
 
-        // The try covers everything a final attempt can fail on, not just the handler call: an unresolvable type, a state
-        // that does not deserialize or a reduce handler that is not registered fail the attempt like the handler does,
-        // and the batch bar is shared, so the dispatcher never closes it for this job.
         try
         {
             var resultType = Type.GetType(batch.ResultType)
@@ -104,10 +101,7 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             // stack) so the engine retries/dead-letters on the actual cause, not the reflection wrapper.
             var actual = ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
 
-            // With nobody else to close the shared bar, a reduce that fails for the last time would leave it running
-            // forever. A failure with a retry pending leaves it open (the retry may finish the batch), and so does a cancel
-            // (the engine decides what a cancel means).
-            // The batch stays in the store, as for a failure with a retry pending: a retry or a requeue reads it again.
+            // A cancel leaves the bar open: the engine decides what a cancel means.
             var canceled = actual is OperationCanceledException && cancellationToken.IsCancellationRequested;
             if (context is JobExecutionContext { IsFinalAttempt: true } && !canceled)
             {
@@ -123,12 +117,7 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             envelope.BatchId, batch.Total, failures);
     }
 
-    // Closes the shared progress notification (sets Finished and Outcome) once the batch settles, since individual map
-    // tasks intentionally don't close the aggregate bar. Built through the notification builder so the replacement keeps
-    // the title and the batch start time; a batch stored before the start time was recorded closes without one.
-    // Best effort: the notification only displays the batch. A failed send is logged and not thrown — on the success
-    // path the reduce handler has already run, and failing the attempt would make the engine run it again; on the failure
-    // path the handler's own exception must reach the engine.
+    // Best effort on both paths: a thrown send would re-run a finished reduce, or replace the handler's exception.
     private Task MarkFinishedAsync(MapReduceBatch batch, string description, JobOutcome outcome)
     {
         if (string.IsNullOrEmpty(batch.ProgressNotificationId))

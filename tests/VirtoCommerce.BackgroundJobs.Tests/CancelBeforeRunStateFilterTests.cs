@@ -19,11 +19,6 @@ using JobOutcome = VirtoCommerce.Platform.Core.Jobs.JobOutcome;
 
 namespace VirtoCommerce.BackgroundJobs.Tests;
 
-/// <summary>
-/// A job moved to <c>Deleted</c> before it runs, or while it waits for a retry, has no executor to close its
-/// notification: the filter does it. Which old states count is the whole point, because closing a job that is still
-/// <c>Processing</c> would stack a stray <c>Canceled</c> on the <c>Failed</c> the dispatcher already wrote.
-/// </summary>
 public class CancelBeforeRunStateFilterTests
 {
     private const string _hangfireJobId = "job-1";
@@ -46,8 +41,7 @@ public class CancelBeforeRunStateFilterTests
         },
     };
 
-    // The state change of a job the engine enqueued: Execute(envelopeJson, context, token), as HangfireJobEngine builds it.
-    // storedRetryCount is what Hangfire keeps in the job's RetryCount parameter: serialized, and absent until a first failure.
+    // storedRetryCount: Hangfire's serialized RetryCount parameter, absent until the first failure.
     private static ApplyStateContext CreateDeleteContext(string oldStateName, string? storedRetryCount)
     {
         var envelopeJson = JsonConvert.SerializeObject(CreateEnvelope());
@@ -76,8 +70,7 @@ public class CancelBeforeRunStateFilterTests
         return (new CancelBeforeRunStateFilter(manager.Object), sent);
     }
 
-    // A retry wait is Scheduled (two retries spent: the canceled attempt is the third); a job not yet picked up is
-    // Enqueued (no RetryCount stored: the first attempt). The envelope allows 3 retries, so 4 attempts in all.
+    // Scheduled with 2 retries spent is attempt 3; Enqueued with none stored is attempt 1. 3 retries allowed: 4 attempts.
     [Theory]
     [InlineData("Scheduled", "2", 3)]
     [InlineData("Enqueued", null, 1)]
@@ -97,8 +90,7 @@ public class CancelBeforeRunStateFilterTests
         Assert.Equal(4, closing.TotalAttempts);
     }
 
-    // AutomaticRetry's OnAttemptsExceeded = Delete moves a Processing job to Deleted after the dispatcher has closed
-    // it Failed; the executor owns that job, so the filter must not add a Canceled on top.
+    // OnAttemptsExceeded = Delete moves a Processing job the dispatcher already closed Failed to Deleted.
     [Fact]
     public void Delete_Of_A_Processing_Job_Sends_Nothing()
     {

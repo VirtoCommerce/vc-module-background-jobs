@@ -25,8 +25,7 @@ namespace VirtoCommerce.BackgroundJobs.GoogleCloudTasks.Controllers;
 [Route("api/background-jobs/google-cloud-tasks")]
 public sealed class GoogleCloudTasksCallbackController : ControllerBase
 {
-    // Header Cloud Tasks sets with the task id only (the last segment of the resource name). The job id is the full
-    // resource name Enqueue returned, so the callback rebuilds it from the options.
+    // Holds only the short task id, not the full resource name Enqueue returns.
     private const string TaskNameHeader = "X-CloudTasks-TaskName";
 
     private readonly GoogleCloudTasksOptions _options;
@@ -78,7 +77,6 @@ public sealed class GoogleCloudTasksCallbackController : ControllerBase
             return BadRequest();
         }
 
-        // The worker must see the id Enqueue returned: the full task resource name, not the short id from the header.
         var jobId = Request.Headers.TryGetValue(TaskNameHeader, out var taskId) && !string.IsNullOrEmpty(taskId.ToString())
             ? TaskName.FromProjectLocationQueueTask(_options.ProjectId, _options.LocationId, _options.QueueId, taskId.ToString()).ToString()
             : string.Empty;

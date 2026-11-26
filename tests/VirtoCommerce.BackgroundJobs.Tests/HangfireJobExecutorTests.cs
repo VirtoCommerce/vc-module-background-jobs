@@ -20,10 +20,7 @@ using HangfireJob = Hangfire.Common.Job;
 
 namespace VirtoCommerce.BackgroundJobs.Tests;
 
-/// <summary>
-/// Runs <see cref="HangfireJobExecutor"/> against a hand-built <see cref="PerformContext"/>, with the process-wide
-/// <see cref="GlobalJobFilters"/> emptied (hence the collection), to see the attempt budget it hands the dispatcher.
-/// </summary>
+/// <summary>Runs <see cref="HangfireJobExecutor"/> against a hand-built <see cref="PerformContext"/> with <see cref="GlobalJobFilters"/> emptied, hence the collection.</summary>
 [Collection(GlobalJobFiltersCollection.Name)]
 public sealed class HangfireJobExecutorTests : IDisposable
 {
@@ -45,8 +42,7 @@ public sealed class HangfireJobExecutorTests : IDisposable
         }
     }
 
-    // Hangfire does not retry when no AutomaticRetryAttribute is registered, whatever the envelope asks for: a budget of
-    // "attempt 1 of 6" would show retries that never come and keep the notification open after the job's only failure.
+    // Without a registered AutomaticRetryAttribute Hangfire never retries, so a per-job value must not promise attempts.
     [Fact]
     public async Task Execute_WithoutGlobalRetryFilter_PerJobRetriesDoNotWidenTheBudget()
     {

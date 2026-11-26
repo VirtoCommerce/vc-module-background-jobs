@@ -67,10 +67,7 @@ public sealed class InMemoryJobEngine(
         {
             for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
             {
-                // The context and the dispatcher see the same envelope: the notification shows the attempt the context
-                // was built with, and the dispatcher decides from the same numbers whether a failure is final. Built
-                // before the cancellation check so that a cancel observed before this attempt starts closes the
-                // notification with the attempt that was about to run and the job's total, not the envelope's defaults.
+                // Built before the cancellation check, so a cancel before this attempt closes with its attempt and total, not the envelope's defaults.
                 var attemptEnvelope = envelope with { Attempt = attempt, TotalAttempts = maxRetries + 1 };
                 var context = JobExecutionContextFactory.Create(pushNotificationManager, attemptEnvelope, jobId);
 
@@ -91,9 +88,7 @@ public sealed class InMemoryJobEngine(
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    // Cancelled via Delete — the job's own token has no other writer, so this is a requested cancel: a
-                    // terminal outcome, not a failure; don't retry. The dispatcher leaves the notification open for a
-                    // cancelled token, so it is closed Canceled here.
+                    // The job's token has no writer but Delete, so this is a requested cancel: close it Canceled (the dispatcher leaves it open), never retry.
                     _states[jobId] = "Cancelled";
                     logger.LogInformation("In-memory job {JobId} ({JobType}) was cancelled.", jobId, envelope.JobType);
                     await context.Progress.TryCompleteCanceledAsync(logger, jobId);
@@ -132,14 +127,11 @@ public sealed class InMemoryJobEngine(
 
     public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default)
     {
-        // Unknown or finished: nothing to cancel, and a finished job keeps the state it ended in.
         if (!_states.TryGetValue(jobId, out var state) || IsTerminal(state))
         {
             return Task.FromResult(false);
         }
 
-        // Signal the job to stop (its handler's token trips); RunAsync then records Cancelled and removes and disposes
-        // the source. The entry stays, so the cancel shows in the job's status.
         if (_running.TryGetValue(jobId, out var cts))
         {
             try
@@ -154,8 +146,7 @@ public sealed class InMemoryJobEngine(
             }
         }
 
-        // The job settled between the state check and the cancel (no token left, or it was just disposed), so it is
-        // decided from its state as for any finished job: a cancel racing a finishing job is not accepted.
+        // Settled between the check and the cancel: decide from its state, so a cancel racing a finishing job is refused.
         return Task.FromResult(_states.TryGetValue(jobId, out var settled) && !IsTerminal(settled));
     }
 

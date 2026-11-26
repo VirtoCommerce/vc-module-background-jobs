@@ -44,9 +44,6 @@ public sealed class MapReduceBatch
 
     public string? UserName { get; set; }
 
-    /// <summary>
-    /// When the batch started: the same instant as its shared notification's <c>Started</c>. Null on a batch stored by
-    /// an earlier version, so every reader treats it as optional.
-    /// </summary>
+    /// <summary>When the batch started (its shared notification's <c>Started</c>); null on a batch stored by an earlier version.</summary>
     public DateTime? Started { get; set; }
 }

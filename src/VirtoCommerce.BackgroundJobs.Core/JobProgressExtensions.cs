@@ -8,11 +8,7 @@ namespace VirtoCommerce.BackgroundJobs;
 
 public static class JobProgressExtensions
 {
-    /// <summary>
-    /// Closes the job's progress notification as <see cref="JobOutcome.Canceled"/>. A failure to close it must neither
-    /// turn a requested cancel into a failure nor keep a queue message unacked (it would be redelivered and discarded
-    /// again), so the notification stays open (the lesser harm), as when the engine does not close it at all.
-    /// </summary>
+    /// <summary>Closes the job's progress notification as <see cref="JobOutcome.Canceled"/>; a failed close is logged and swallowed, leaving the notification open.</summary>
     public static async Task TryCompleteCanceledAsync(
         this IJobProgress progress,
         ILogger logger,

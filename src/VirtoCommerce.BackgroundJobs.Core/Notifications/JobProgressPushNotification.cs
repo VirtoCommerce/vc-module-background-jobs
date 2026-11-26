@@ -15,13 +15,7 @@ public class JobProgressPushNotification : PushNotification
         NotifyType = nameof(JobProgressPushNotification);
     }
 
-    /// <summary>
-    /// The notification a job gets when it is enqueued: new, titled, and not yet picked up. <paramref name="enqueuedAt"/>
-    /// is both its start and creation time, and is written into the description so two enqueues of the same job never
-    /// share a description (platform storage folds a notification with the same title, type and description into the
-    /// previous one). <paramref name="totalCount"/> is the work the job already knows it has (a map/reduce batch knows its
-    /// item count; a single job, 0, does not).
-    /// </summary>
+    /// <summary>The notification a job gets when it is enqueued; <paramref name="enqueuedAt"/> is its start and creation time, and <paramref name="totalCount"/> the work already known (0 when none).</summary>
     public static JobProgressPushNotification CreateQueued(string creator, string title, DateTime enqueuedAt, long totalCount)
     {
         return JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
@@ -82,10 +76,7 @@ public class JobProgressPushNotification : PushNotification
     /// <summary>The engine's job id, written by the worker once it runs the job (null while queued).</summary>
     public string? JobId { get; set; }
 
-    /// <summary>
-    /// The name of the <see cref="JobOutcome"/> once the job ended, null while it is queued or running. A string, not the
-    /// enum: how an enum is serialized on the live channel depends on the deployment.
-    /// </summary>
+    /// <summary>The <see cref="JobOutcome"/> name once the job ended; null while queued or running. A string because enum serialization on the live channel depends on the deployment.</summary>
     public string? Outcome { get; set; }
 
     public int? Attempt { get; set; }

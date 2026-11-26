@@ -15,11 +15,7 @@ public static class JobExecutionContextFactory
     public static IJobExecutionContext Create(IPushNotificationManager pushNotificationManager, JobEnvelope envelope, string jobId)
         => Create(pushNotificationManager, envelope, jobId, x => x);
 
-    /// <summary>
-    /// As <see cref="Create(IPushNotificationManager, JobEnvelope, string)"/>, with the progress the context carries
-    /// replaced by <paramref name="wrapProgress"/> of it (an engine decorating it, e.g. with its own console). The
-    /// context is built once, so what it knows about the attempt (whether it is the final one) survives the wrapping.
-    /// </summary>
+    /// <summary>As <see cref="Create(IPushNotificationManager, JobEnvelope, string)"/>, with the context's progress wrapped by <paramref name="wrapProgress"/>; the context keeps what it knows about the attempt.</summary>
     public static IJobExecutionContext Create(
         IPushNotificationManager pushNotificationManager,
         JobEnvelope envelope,

@@ -14,10 +14,6 @@ namespace VirtoCommerce.BackgroundJobs;
 /// <see cref="IJobProgress"/> that streams updates to the admin UI by sending a
 /// <see cref="JobProgressPushNotification"/> (keyed by the enqueue-time notification id) over SignalR.
 /// </summary>
-/// <remarks>
-/// Push storage replaces a notification by id, so every send carries the whole set of display fields (title, start
-/// time, job id, attempt) — a field left out of one update is lost from the notification the admin UI shows.
-/// </remarks>
 public sealed class PushNotificationJobProgress : IJobProgress
 {
     private readonly IPushNotificationManager _pushNotificationManager;
@@ -35,9 +31,7 @@ public sealed class PushNotificationJobProgress : IJobProgress
     private string? _lastMessage;
 
     /// <summary>
-    /// Reports into the notification as its owner, without a job id or attempt: <see cref="Complete(JobOutcome, string?, CancellationToken)"/>
-    /// closes it. To report into a notification shared by several jobs (a map/reduce batch), build the reporter from the
-    /// envelope (the constructor below, or <see cref="JobExecutionContextFactory"/>) so that a single job does not close it.
+    /// Reports into the notification as its owner, without a job id or attempt.
     /// </summary>
     [Obsolete("Owns its notification whatever the job's envelope says. Build the reporter from the envelope (PushNotificationJobProgress(IPushNotificationManager, JobEnvelope, string)) or through JobExecutionContextFactory.",
         DiagnosticId = "VC0016",
@@ -56,9 +50,7 @@ public sealed class PushNotificationJobProgress : IJobProgress
     }
 
     /// <summary>
-    /// Reports for the job <paramref name="envelope"/> describes. An owned notification (the job's own) takes its start
-    /// time from the enqueue header and carries the job id; a shared one (a map/reduce batch) takes the batch start and
-    /// no job id, since the job is only one of many behind the bar.
+    /// Reports for the job <paramref name="envelope"/> describes: its own notification with its job id, or a shared one (a map/reduce batch) without it.
     /// </summary>
     public PushNotificationJobProgress(IPushNotificationManager pushNotificationManager, JobEnvelope envelope, string jobId)
     {
@@ -72,8 +64,7 @@ public sealed class PushNotificationJobProgress : IJobProgress
         _jobId = _owned ? jobId : null;
         _started = ReadTicks(envelope, _owned ? JobHeaders.EnqueuedAt : JobHeaders.BatchStartedAt);
 
-        // The attempt is the job's own: a map task of a shared notification would write its attempt into the batch's bar,
-        // whose attempt is the batch's, not any one task's.
+        // A shared bar's attempt is the batch's, not one task's.
         _attempt = _owned ? envelope.Attempt : null;
         _totalAttempts = _owned ? envelope.TotalAttempts : null;
     }
@@ -95,9 +86,7 @@ public sealed class PushNotificationJobProgress : IJobProgress
     }
 
     /// <summary>
-    /// Marks the notification finished (so the admin UI closes the live bar). Keeps the last reported counts, title and
-    /// message; records an error entry when the job failed. Does nothing for a shared notification — a single job must
-    /// not close the aggregate bar, its owner does.
+    /// Marks the notification finished, keeping the last counts, title and message, with an error entry on failure. Does nothing for a shared notification: its owner closes it.
     /// </summary>
     public Task Complete(JobOutcome outcome, string? error = null, CancellationToken cancellationToken = default)
     {

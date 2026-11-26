@@ -24,8 +24,6 @@ public sealed class HangfireJobEngine(IBackgroundJobClient client) : IJobEngine
 
     private static readonly string[] _finalStates = [DeletedState.StateName, FailedState.StateName, SucceededState.StateName];
 
-    // The states a job can be canceled from. Processing is what cancels a running job: the move to Deleted trips the
-    // token flowed through HangfireJobExecutor.
     private static readonly string[] _cancellableStates = [.. CancelBeforeRunStateFilter.NotYetRunStates, ProcessingState.StateName];
 
     public string ProviderName => BackgroundJobsProviders.Hangfire;
@@ -71,16 +69,12 @@ public sealed class HangfireJobEngine(IBackgroundJobClient client) : IJobEngine
             using var connection = JobStorage.Current.GetConnection();
             var stateName = connection.GetStateData(jobId)?.Name;
 
-            // An unknown job has nothing to cancel, and a finished one (Succeeded, Failed, already Deleted) must keep the
-            // history it has: only a job that has not finished is moved to Deleted.
             if (stateName is null || !_cancellableStates.Contains(stateName))
             {
                 return Task.FromResult(false);
             }
 
-            // The expected state is what protects a finished job: if the job moved on since the read, the change is
-            // refused instead of overwriting the new state. An Enqueued job that a worker has just picked up is the
-            // common case, so the state is read again and the change retried while the job is still cancellable.
+            // Pass the state just read: a job that moved on since (finished, or picked up) is refused, and the loop re-reads it.
             deleted = client.ChangeState(jobId, new DeletedState(), stateName);
             if (deleted)
             {

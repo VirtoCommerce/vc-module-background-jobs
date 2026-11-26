@@ -19,7 +19,6 @@ public class ConformancePayload
     /// <summary>Throw on the first N executions (then succeed) — drives the retry scenario. 0 = never throw.</summary>
     public int FailAttempts { get; set; }
 
-    /// <summary>Throw on every execution — drives the exhausted-retries (final failure) scenario.</summary>
     public bool FailAlways { get; set; }
 
     /// <summary>Report progress from the handler — drives the progress scenario.</summary>
@@ -28,8 +27,7 @@ public class ConformancePayload
     /// <summary>Block in the handler until the <c>CancellationToken</c> trips — drives the cancellation scenario.</summary>
     public bool BlockUntilCancelled { get; set; }
 
-    /// <summary>With <see cref="BlockUntilCancelled"/>: once the token trips, throw an <see cref="InvalidOperationException"/>
-    /// instead of rethrowing the cancellation — a handler that fails after it was cancelled. False = rethrow, as before.</summary>
+    /// <summary>With <see cref="BlockUntilCancelled"/>: once the token trips, throw <see cref="InvalidOperationException"/> instead of rethrowing the cancellation.</summary>
     public bool FailOnCancel { get; set; }
 }
 
@@ -111,7 +109,6 @@ public sealed class ConformanceReduceState
 {
     public string CorrelationId { get; set; } = string.Empty;
 
-    /// <summary>Throw on every execution of the reduce step — drives the reduce-failure scenario.</summary>
     public bool FailAlways { get; set; }
 }
 
@@ -141,10 +138,7 @@ public sealed class ConformanceReduceHandler(ConformanceProbe probe) : IReduceJo
     }
 }
 
-/// <summary>
-/// A reduce handler the fixture never registers: a batch that names it fails in the reduce step before any handler code
-/// runs, which drives the scenarios for a reduce that fails on its setup rather than in its handler.
-/// </summary>
+/// <summary>A reduce handler the fixture never registers: a batch naming it fails in the reduce step before any handler code runs.</summary>
 public sealed class ConformanceUnregisteredReduceHandler : IReduceJobHandler<ConformanceReduceState, ConformanceMapResult>
 {
     public Task Reduce(ConformanceReduceState state, IReadOnlyCollection<MapResult<ConformanceMapResult>> results, IJobExecutionContext context, CancellationToken cancellationToken = default)

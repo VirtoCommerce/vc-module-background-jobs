@@ -400,8 +400,7 @@ public class BackgroundJobsTests
         });
     }
 
-    // Guards the no-re-send rule: the notification is sent once, before the engine takes the job; the worker owns
-    // every later update (a re-send after the engine returns could overwrite a worker update that already ran).
+    // A send after the engine returns could overwrite a worker update that already ran.
     [Fact]
     public async Task Enqueue_SendsNothingAfterEngineReturns()
     {
@@ -414,8 +413,6 @@ public class BackgroundJobsTests
         Assert.Equal(sentAtEngineEnqueue, sent.Count);
     }
 
-    // The facade sends the Queued notification before the engine takes the job; if the engine refuses, no worker will
-    // ever close it, so the facade closes that same notification as Failed and the caller still gets the engine's error.
     private static (JobEngineBackgroundJob Sut, List<JobProgressPushNotification> Sent) CreateFacadeWithFailingEngine(
         Exception engineError, Func<int, Exception> sendError = null)
     {

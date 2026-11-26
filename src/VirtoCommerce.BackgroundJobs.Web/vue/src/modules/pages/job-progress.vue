@@ -57,9 +57,7 @@ const { options } = useBlade<{ jobId: string; title: string }>();
 const { getApiClient } = useApiClient(JobsClient);
 const store = useNotificationStore();
 
-// The view is derived from the shell's notification store, not from useBladeNotifications' onMessage, which is
-// called only while a notification is new. The store merges every update into one entry per notification id, so
-// the entry for this job is also there when it arrived before this page opened.
+// From the notification store, not onMessage: the store also holds an update that arrived before this page opened.
 const job = computed(() =>
   (store.history.value as JobProgressPushNotification[]).find(
     (x) => x.notifyType === "JobProgressPushNotification" && !!x.jobId && x.jobId === options.value?.jobId,
@@ -68,8 +66,7 @@ const job = computed(() =>
 
 const finished = computed(() => !!job.value?.finished);
 
-// The queued notification is sent before the engine assigns the job id, so it carries none: until the first
-// worker update the page shows the job as queued from the enqueue response alone.
+// The queued notification carries no job id, so until the first worker update the job shows as queued.
 const state = computed(() => {
   if (!job.value) return "QUEUED";
   if (!finished.value) return "RUNNING";
@@ -82,7 +79,6 @@ const percent = computed(() =>
   job.value?.totalCount ? Math.min(100, Math.round(((job.value.processedCount ?? 0) / job.value.totalCount) * 100)) : 0,
 );
 
-// a job that reports no total still shows how many items it has processed
 const processedText = computed(() => {
   const { processedCount, totalCount } = job.value ?? {};
   if (totalCount) return `${processedCount ?? 0} / ${totalCount}`;
@@ -109,8 +105,7 @@ const elapsed = computed(() => {
   return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((x) => String(x).padStart(2, "0")).join(":");
 });
 
-// stays set after an accepted cancel until the closing notification hides the command: a second cancel of a job
-// Hangfire has already deleted would answer 404 and show an error for a cancel that worked
+// Stays set after an accepted cancel: a second cancel of a job Hangfire already deleted answers 404.
 const cancelRequested = ref(false);
 
 const { action: cancel, loading: cancelling } = useAsync(async () => {
@@ -125,7 +120,6 @@ const bladeToolbar = ref<IBladeToolbar[]>([
     title: t("BACKGROUND_JOBS.PAGES.PROGRESS.TOOLBAR.CANCEL"),
     icon: "lucide-circle-x",
     permissions: "background_jobs:manage",
-    // a finished job has nothing left to cancel, so the command is hidden once it finishes
     isVisible: computed(() => !finished.value),
     disabled: computed(() => cancelling.value || cancelRequested.value),
     clickHandler: () => cancel(),

@@ -1,10 +1,6 @@
 import type { PushNotification } from "@vc-shell/framework";
 
-/**
- * The server's JobProgressPushNotification (VirtoCommerce.BackgroundJobs.Core.Notifications). It is in no swagger
- * response, so the generator emits no type for it. `outcome` is the platform JobOutcome name as a string, whatever
- * the SignalR protocol, and is null while the job is queued or running.
- */
+/** The server's JobProgressPushNotification; no swagger response carries it, so the generator emits no type. */
 export interface JobProgressPushNotification extends PushNotification {
   jobId?: string;
   title?: string;

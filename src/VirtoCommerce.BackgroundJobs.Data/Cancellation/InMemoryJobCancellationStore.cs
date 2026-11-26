@@ -10,13 +10,11 @@ namespace VirtoCommerce.BackgroundJobs.Data.Cancellation;
 
 /// <summary>
 /// Single-process <see cref="IJobCancellationStore"/> for dev/testing and no-Redis deployments. Not fleet-safe: a
-/// flag set on one instance is invisible to others, so cancellation only reaches jobs running in this process. A flag
-/// expires after <see cref="_ttl"/> like <see cref="RedisJobCancellationStore"/>'s key, so a cancel that nothing clears
-/// (a discarded job leaves its flag for any redelivery to read) cannot grow the store for the life of the process.
+/// flag set on one instance is invisible to others, so cancellation only reaches jobs running in this process. A flag expires after <see cref="_ttl"/>.
 /// </summary>
 public sealed class InMemoryJobCancellationStore : IJobCancellationStore
 {
-    // The same lifetime as the Redis key's, so the two stores agree on how long a cancel request holds.
+    // Keep equal to RedisJobCancellationStore's key expiry.
     private static readonly TimeSpan _ttl = TimeSpan.FromHours(6);
 
     private readonly ConcurrentDictionary<string, DateTimeOffset> _cancelled = new();
@@ -68,7 +66,6 @@ public sealed class InMemoryJobCancellationStore : IJobCancellationStore
         return Task.CompletedTask;
     }
 
-    // Lazy: an entry nobody asks about again is dropped the next time a cancel is requested.
     private void PruneExpired(DateTimeOffset now)
     {
         foreach (var expired in _cancelled.Where(x => x.Value <= now).ToList())

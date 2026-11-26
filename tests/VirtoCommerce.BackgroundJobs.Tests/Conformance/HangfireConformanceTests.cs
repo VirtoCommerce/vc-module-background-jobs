@@ -69,10 +69,7 @@ public sealed class HangfireConformanceFixture : JobEngineConformanceFixture
             GlobalJobFilters.Filters.Remove(filter);
         }
 
-        // Production registers two: Hangfire's own default (10 attempts) and, after it, the module's configured one
-        // (AddHangfire does not remove the default). Hangfire keeps the later of two filters of a type, so the fixture
-        // mirrors that [default, configured] order — a reader that picks the first one would read 10 and show a total
-        // the job never reaches.
+        // Production's order: Hangfire's default (10 attempts) first, the configured one after it. A reader of the first one would show 10.
         GlobalJobFilters.Filters.Add(new AutomaticRetryAttribute());
         GlobalJobFilters.Filters.Add(new AutomaticRetryAttribute { Attempts = RetryBudget, DelaysInSeconds = new int[RetryBudget], OnAttemptsExceeded = AttemptsExceededAction.Fail });
 
@@ -87,8 +84,7 @@ public sealed class HangfireConformanceFixture : JobEngineConformanceFixture
         // the same storage instance the DI-hosted server uses so they agree.
         JobStorage.Current = services.GetRequiredService<JobStorage>();
 
-        // This fixture never runs UseHangfire, which is where production installs the filters that need the container;
-        // register them from this fixture's provider, replacing any left by an earlier fixture in the process.
+        // Production installs these in UseHangfire, which this fixture never runs.
         HangfireJobFilterRegistration.RegisterServiceFilters(services);
 
         await base.StartWorkerAsync(services, cancellationToken);
@@ -98,9 +94,6 @@ public sealed class HangfireConformanceFixture : JobEngineConformanceFixture
 public class HangfireConformanceTests(HangfireConformanceFixture fixture)
     : JobEngineConformanceTests<HangfireConformanceFixture>(fixture)
 {
-    // A Failed Hangfire job can be requeued (the dashboard's Requeue button, or an operator's retry): it runs again
-    // with its RetryCount already spent. That run is the job's last, so its failure must close the notification
-    // rather than leave it open on "attempt N of M failed, retrying" for a retry that never comes.
     [Fact]
     public async Task Requeued_Exhausted_Job_Closes_Failed()
     {
@@ -120,12 +113,10 @@ public class HangfireConformanceTests(HangfireConformanceFixture fixture)
 
         var notificationId = Fixture.ProgressNotifications.First(x => x.Title == title).Id;
 
-        // The first run: every attempt fails and the job lands in Failed with its retries spent.
         await Fixture.WaitForProgressAsync(notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
         await Fixture.WaitForStatusAsync(jobId, x => x.State == "Failed", ConformanceConstants.DefaultTimeout);
         Assert.Equal(total, Fixture.Probe.ExecutionCount(correlationId));
 
-        // Requeue it through the Hangfire client and wait for the extra run to end Failed again.
         Assert.True(Fixture.Services.GetRequiredService<IBackgroundJobClient>().Requeue(jobId), "Hangfire refused to requeue the failed job.");
         await Fixture.WaitForStatusAsync(jobId, x => x.State == "Failed", ConformanceConstants.DefaultTimeout);
         Assert.Equal(total + 1, Fixture.Probe.ExecutionCount(correlationId));
@@ -137,8 +128,6 @@ public class HangfireConformanceTests(HangfireConformanceFixture fixture)
         Assert.Equal(last.TotalAttempts, last.Attempt);
     }
 
-    // The Hangfire dashboard's Delete moves the job to Deleted through the client; no engine method is involved, so
-    // nothing but the executor's own read of the stored state can tell this cancel from a shutdown.
     [Fact]
     public async Task Running_Job_Deleted_Without_Engine_Closes_Canceled()
     {
@@ -159,8 +148,6 @@ public class HangfireConformanceTests(HangfireConformanceFixture fixture)
         Assert.NotNull(closing.Finished);
     }
 
-    // A requeue (the dashboard's Requeue button, or a worker lost to another server) trips the running job's token
-    // exactly as a cancel does, but Hangfire runs the job again: the notification must stay open for that second run.
     [Fact]
     public async Task Running_Job_Requeued_Stays_Open()
     {
@@ -175,14 +162,10 @@ public class HangfireConformanceTests(HangfireConformanceFixture fixture)
         {
             Assert.True(Fixture.Services.GetRequiredService<IBackgroundJobClient>().Requeue(jobId), "Hangfire refused to requeue the running job.");
 
-            // A requeued job is picked up again at once, while the first run is still blocked: it is the first run's
-            // token tripping (Hangfire notices the state change on its next poll) that ends it, and that is the moment
-            // its state gets classified. So wait for the second execution and for the first to observe the cancel.
+            // The requeued job restarts at once while the first run is still blocked: wait for the second execution and for the first to observe the cancel.
             await WaitForExecutionCountAsync(correlationId, 2);
             await Fixture.Probe.WaitCancelledAsync(correlationId, ConformanceConstants.CancellationTimeout, TestContext.Current.CancellationToken);
 
-            // Nothing signals that a send did not happen, so watch for a wrong close for a bounded time; the classifier
-            // runs right after the handler rethrows, well inside it.
             await Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
 
             Assert.DoesNotContain(Fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);

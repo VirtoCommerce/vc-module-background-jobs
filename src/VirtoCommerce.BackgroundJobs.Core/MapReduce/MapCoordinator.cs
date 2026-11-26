@@ -58,8 +58,6 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
         var step = Math.Max(1, batch.Total / 100);
         if (!string.IsNullOrEmpty(batch.ProgressNotificationId) && (completed >= batch.Total || completed % step == 0))
         {
-            // The notification only displays the batch: a failed update is logged, never allowed to skip the reduce trigger
-            // below or to make the engine run this map item again.
             await BestEffortNotificationSend.TrySendAsync(
                 () => context.Progress.Report(
                     new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },

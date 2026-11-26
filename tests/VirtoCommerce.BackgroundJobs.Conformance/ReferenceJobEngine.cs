@@ -26,7 +26,6 @@ public sealed class ReferenceJobEngine(
     IOptions<BackgroundJobsOptions> options) : IJobEngine
 {
     private readonly ConcurrentDictionary<string, string> _states = new();
-    // Per-job cancellation sources, so Delete can trip a running job's token. Added on enqueue, removed when the job settles.
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _running = new();
 
     public string ProviderName => "Reference";
@@ -45,18 +44,14 @@ public sealed class ReferenceJobEngine(
 
     private async Task RunAsync(string jobId, JobEnvelope envelope, EnqueueOptions enqueueOptions, CancellationToken cancellationToken)
     {
-        // The envelope's per-job value rides to whichever worker runs the job; the enqueue option is the same value for
-        // a caller that did not go through the facade.
+        // The envelope's value first; the enqueue option covers a caller that bypassed the facade.
         var maxRetries = Math.Max(0, envelope.MaxRetryAttempts ?? enqueueOptions.MaxRetryAttempts ?? options.Value.MaxRetryAttempts);
 
         try
         {
             for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
             {
-                // Fill the attempt and the attempts the job gets in all, and build the context from that same envelope, so
-                // the dispatcher can tell a failure with a retry pending from the final one. Built before the cancellation
-                // check so that a cancel observed before this attempt starts closes the notification with the attempt that
-                // was about to run and the job's total, not the envelope's defaults.
+                // Built before the cancellation check, so a cancel before this attempt closes with its attempt and total, not the envelope's defaults.
                 var attemptEnvelope = envelope with { Attempt = attempt, TotalAttempts = maxRetries + 1 };
                 var context = JobExecutionContextFactory.Create(pushNotificationManager, attemptEnvelope, jobId);
 
@@ -73,11 +68,8 @@ public sealed class ReferenceJobEngine(
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    // The job's own token has no writer but Delete, so this is a requested cancel — terminal, never
-                    // retried. The dispatcher leaves the notification open for a cancelled token: close it Canceled here.
+                    // The job's token has no writer but Delete: a requested cancel, never retried. Close it Canceled; the dispatcher leaves it open.
                     _states[jobId] = "Cancelled";
-                    // A failure to close the notification must not turn a requested cancel into a failure: it stays open. The shared
-                    // helper does that; the kit has no logger of its own, so the warning it would write goes nowhere.
                     await context.Progress.TryCompleteCanceledAsync(NullLogger.Instance, jobId);
                     return;
                 }
@@ -107,13 +99,11 @@ public sealed class ReferenceJobEngine(
 
     public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default)
     {
-        // Unknown or finished: nothing to cancel, and a finished job keeps the state it ended in.
         if (!_states.TryGetValue(jobId, out var state) || IsTerminal(state))
         {
             return Task.FromResult(false);
         }
 
-        // Trip the job's token; RunAsync then records Cancelled and removes and disposes the source. The entry stays.
         if (_running.TryGetValue(jobId, out var cts))
         {
             try
@@ -128,8 +118,7 @@ public sealed class ReferenceJobEngine(
             }
         }
 
-        // The job settled between the state check and the cancel (no token left, or it was just disposed), so it is
-        // decided from its state as for any finished job: a cancel racing a finishing job is not accepted.
+        // Settled between the check and the cancel: decide from its state, so a cancel racing a finishing job is refused.
         return Task.FromResult(_states.TryGetValue(jobId, out var settled) && !IsTerminal(settled));
     }
 

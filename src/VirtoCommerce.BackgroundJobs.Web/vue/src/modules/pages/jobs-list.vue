@@ -72,11 +72,10 @@ const { openBlade } = useBlade();
 const { getApiClient } = useApiClient(BackgroundJobsAdminClient);
 
 const items = ref<RegisteredJobInfo[]>([]);
-// single selection mode hands back the row itself; an array is tolerated
 const selection = ref<RegisteredJobInfo | RegisteredJobInfo[]>();
 
 const keyword = ref("");
-// true matches the default search view, so the first render is already filtered, before any filter event
+// Must match the default search view's toggle, so the first render is already filtered.
 const triggerableOnly = ref(true);
 
 const visible = computed(() => {
@@ -91,7 +90,6 @@ const selected = computed(() => {
   return row && visible.value.includes(row) ? row : undefined;
 });
 
-// GlobalFilterConfig does not list the toggle filter, SearchBarField does; the data table accepts both (as the host's tableFilters does)
 const globalFilters = computed(() => {
   const fields: SearchBarField[] = [
     { id: "triggerable", label: t("BACKGROUND_JOBS.PAGES.LIST.FILTERS.TRIGGERABLE_ONLY"), filter: { toggle: true } },

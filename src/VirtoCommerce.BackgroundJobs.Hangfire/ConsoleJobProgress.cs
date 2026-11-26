@@ -10,17 +10,7 @@ using VirtoCommerce.Platform.Core.Jobs;
 
 namespace VirtoCommerce.BackgroundJobs.Hangfire;
 
-/// <summary>
-/// Mirrors a job's progress into the Hangfire dashboard console and passes every call on to the wrapped progress
-/// (the push-notification one or <c>NoOpJobProgress</c>): a line when the message changes, one progress bar updated when
-/// the integer percentage changes, and a final line with the outcome. Without a console (no <c>UseConsole()</c> on the
-/// storage, or no <see cref="PerformContext"/>) the Hangfire.Console calls do nothing.
-/// </summary>
-/// <remarks>
-/// A console failure is logged and ignored: it must never fail the job or keep a progress update from reaching the
-/// wrapped progress. <see cref="Complete"/> is overridden because a wrapper that does not override it would still
-/// compile and silently drop the outcome the dispatcher delivers.
-/// </remarks>
+/// <summary>Mirrors a job's progress into the Hangfire dashboard console and forwards every call to the wrapped progress.</summary>
 public sealed class ConsoleJobProgress(IJobProgress inner, PerformContext? performContext, ILogger logger) : IJobProgress
 {
     private readonly object _lock = new();

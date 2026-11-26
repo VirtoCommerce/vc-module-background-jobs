@@ -31,8 +31,6 @@ public sealed class DefaultJobDispatcher(
     // with just the two required deps). Production DI injects both; when absent, telemetry is simply skipped.
     JobTelemetry? telemetry = null,
     IOptions<BackgroundJobsOptions>? options = null,
-    // Last and optional for the same reason: a harness that builds the dispatcher by hand stays source-compatible, and
-    // DI injects the logger in production. A failed send to the progress channel is reported through it.
     ILogger<DefaultJobDispatcher>? logger = null) : IJobDispatcher
 {
     private readonly string _engine = options?.Value.Provider ?? "unknown";
@@ -46,18 +44,11 @@ public sealed class DefaultJobDispatcher(
         {
             try
             {
-                // The queued notification carries no job id and the page finds its job by job id, so a handler that never
-                // reports would look queued for its whole run. The notification is a display channel: a failed send is
-                // logged and the handler runs anyway, the same rule as the engines' TryCompleteCanceledAsync — a failure
-                // to display must not change execution (here it would fail an attempt, or burn a retry, for nothing).
                 if (envelope.CompletesProgressNotification)
                 {
                     await TrySend(() => context.Progress.Report(new JobProgressInfo()), "report the start of the attempt", envelope, context, cancellationToken);
                 }
 
-                // Everything from payload deserialization on sits inside the try: a payload that does not deserialize or
-                // a handler that cannot be resolved is a failure of this attempt like any other, and must close (or
-                // keep open, while a retry is pending) the job's notification instead of leaving it running forever.
                 await Invoke(envelope, context, cancellationToken);
             }
             catch (Exception ex)
@@ -70,8 +61,6 @@ public sealed class DefaultJobDispatcher(
 
                 // Cancellation (shutdown / token) is NOT a job failure: leave the progress notification open and let
                 // the engine honor it (RabbitMQ requeue, Hangfire re-run) rather than marking the job finished/failed.
-                // An OperationCanceledException while the token is NOT cancelled (e.g. a handler's own timeout) is a
-                // failure like any other.
                 if (!(actual is OperationCanceledException && cancellationToken.IsCancellationRequested))
                 {
                     await ReportFailedAttempt(envelope, context, actual.Message, cancellationToken);
@@ -80,12 +69,6 @@ public sealed class DefaultJobDispatcher(
                 ExceptionDispatchInfo.Throw(actual); // preserves the original stack; never returns
             }
 
-            // The outcome is always delivered to the context's progress, owned notification or not: a wrapper around it
-            // (the Hangfire console line) must learn how every job ended. Whether the notification is closed is the
-            // reporter's decision — the push reporter built from the envelope ignores Complete for a notification it does
-            // not own, and the one built with the released four-argument constructor owns its notification by definition.
-            // A failed close is logged and not thrown: the handler has finished, and failing the attempt would make an
-            // engine run it again.
             await TrySend(() => context.Progress.Complete(JobOutcome.Succeeded), "close the notification as succeeded", envelope, context, cancellationToken);
         }
         finally
@@ -170,11 +153,7 @@ public sealed class DefaultJobDispatcher(
         return null;
     }
 
-    // The final attempt always delivers the failure outcome to the context's progress; whether that closes a notification
-    // is the reporter's decision (see Dispatch). The retry announcement is an attempt report, so it is gated on ownership
-    // (envelope.CompletesProgressNotification): a shared map/reduce bar carries the whole batch, not one task's attempt.
-    // It is sent only while the token is live: with it cancelled the dispatcher cannot know whether a retry follows, so
-    // it says nothing rather than announce a retry that a cancel may be about to stop.
+    // No retry announcement once the token is cancelled: a cancel may be about to stop the retry.
     private async Task ReportFailedAttempt(JobEnvelope envelope, IJobExecutionContext context, string message, CancellationToken cancellationToken)
     {
         if (envelope.IsFinalAttempt())
@@ -195,9 +174,6 @@ public sealed class DefaultJobDispatcher(
         }
     }
 
-    // Every send to the progress channel goes through here. The notification only displays the job; its failure must
-    // never change the job's fate, so an error is logged and swallowed. A send that fails with OperationCanceledException
-    // because the dispatch token is cancelled is expected (a shutdown or a cancel) and is not an error.
     private Task TrySend(Func<Task> send, string operation, JobEnvelope envelope, IJobExecutionContext context, CancellationToken cancellationToken)
     {
         return BestEffortNotificationSend.TrySendAsync(

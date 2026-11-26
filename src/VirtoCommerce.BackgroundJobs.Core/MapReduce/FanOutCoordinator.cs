@@ -75,8 +75,6 @@ public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
 
         _logger.LogInformation("Fanning out map task(s) {Start}..{Total} for batch {BatchId}.", startIndex, items.Count, envelope.BatchId);
 
-        // The batch start reaches the map children through the enqueue facade's ambient scope; a batch stored before the
-        // start time was recorded has none, and its map updates carry no start time, as before.
         using var batchScope = batch.Started.HasValue ? JobEnqueueContext.BeginBatch(batch.Started.Value) : null;
         for (var index = startIndex; index < items.Count; index++)
         {

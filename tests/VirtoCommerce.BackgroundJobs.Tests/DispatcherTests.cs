@@ -73,7 +73,7 @@ public class DispatcherTests
         Assert.Equal("alice", recorder.UserSeenDuringExecute);
     }
 
-    // Records what the dispatcher tells the job's progress channel; overrides the completion seam like the push reporter.
+    // Records what the dispatcher tells the progress channel.
     private sealed class RecordingProgress : IJobProgress
     {
         public List<JobProgressInfo> Reports { get; } = [];
@@ -177,8 +177,7 @@ public class DispatcherTests
         Assert.StartsWith("Attempt 1 of 3 failed, retrying: ", progress.Reports[^1].Message);
     }
 
-    // 14 — an owned notification is updated when the attempt starts, before the handler runs: the queued notification
-    // carries no job id, so a handler that never reports would otherwise look queued for its whole run.
+    // An owned notification is updated when the attempt starts: the queued one carries no job id, so a silent handler would look queued all run.
     [Fact]
     public async Task Dispatch_OwnedNotification_ReportsBeforeHandlerRuns()
     {
@@ -249,7 +248,6 @@ public class DispatcherTests
         Assert.Empty(progress.Reports);
     }
 
-    // The notification is a display channel: its failure must not change what the job does.
     [Fact]
     public async Task Dispatch_StartReportFails_HandlerStillRuns()
     {
@@ -268,7 +266,6 @@ public class DispatcherTests
     [Fact]
     public async Task Dispatch_SuccessCloseFails_DoesNotFailTheAttempt()
     {
-        // An engine would run a finished handler again if the attempt failed here.
         var serializer = new JsonJobPayloadSerializer();
         var envelope = CreateEnvelope(serializer, attempt: 1, totalAttempts: 3, completesProgressNotification: true);
         var progress = new RecordingProgress { ThrowOnComplete = outcome => outcome == JobOutcome.Succeeded };
@@ -293,10 +290,7 @@ public class DispatcherTests
         Assert.Same(expected, thrown);
     }
 
-    // The dispatcher always delivers the outcome to the context's progress: ownership of the notification is the
-    // reporter's decision (the push reporter built from the envelope ignores Complete for a notification it does not own),
-    // and a wrapper around the context's progress (the Hangfire console line) must learn the outcome of every job.
-    // What a shared notification must not receive is the attempt itself — start-of-attempt and retry reports.
+    // The outcome reaches the progress whoever owns the notification (a wrapper must see every outcome); only attempt reports are owner-only.
     [Fact]
     public async Task Dispatch_SharedNotification_DeliversOutcomeButNotAttemptReports()
     {
@@ -326,8 +320,6 @@ public class DispatcherTests
         Assert.Empty(failedRetry.Reports);
     }
 
-    // The production registration must bind the constructor that takes the logger, and a failed send must be logged
-    // with the job id and handler so an operator can see that a notification was lost.
     [Fact]
     public async Task Dispatch_ResolvedFromDi_LogsFailedSendWithJobId()
     {

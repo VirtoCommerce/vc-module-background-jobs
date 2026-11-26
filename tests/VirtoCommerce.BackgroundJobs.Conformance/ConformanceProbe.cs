@@ -75,8 +75,7 @@ public sealed class ConformanceProbe
 
     public int ExecutionCount(string correlationId) => _executions.TryGetValue(correlationId, out var value) ? value : 0;
 
-    /// <summary>The job id the context carried on every execution of the correlation id, in execution order — so a retry
-    /// scenario can assert the id stayed the same on each attempt, which the last-wins <see cref="Job"/> cannot show.</summary>
+    /// <summary>The job id the context carried on each execution of <paramref name="correlationId"/>, in execution order.</summary>
     public IReadOnlyList<string> ExecutionJobIds(string correlationId)
     {
         if (!_executionJobIds.TryGetValue(correlationId, out var jobIds))

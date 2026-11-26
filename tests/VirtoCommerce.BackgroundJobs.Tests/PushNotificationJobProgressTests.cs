@@ -91,7 +91,6 @@ public class PushNotificationJobProgressTests
         Assert.Equal(0, b.TotalCount);
     }
 
-    // Guards the count carry-over the builder rewrite touches.
     [Fact]
     public async Task Report_WithoutCounts_KeepsLastCounts()
     {

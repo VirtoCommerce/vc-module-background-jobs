@@ -122,7 +122,6 @@ public class GoogleCloudTasksTests
     [Fact]
     public async System.Threading.Tasks.Task Callback_Passes_Full_Task_Name_As_JobId()
     {
-        // Cloud Tasks puts only the task id in X-CloudTasks-TaskName, while Enqueue returns the full resource name.
         var runner = new Mock<IJobEnvelopeRunner>();
         string receivedJobId = null;
         runner

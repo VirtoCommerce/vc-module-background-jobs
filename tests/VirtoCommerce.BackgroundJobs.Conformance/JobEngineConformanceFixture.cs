@@ -51,19 +51,15 @@ public abstract class JobEngineConformanceFixture : IAsyncLifetime
     /// <summary>Every <see cref="JobProgressPushNotification"/> the engine pushed during the run (progress capture).</summary>
     public ConcurrentBag<JobProgressPushNotification> ProgressNotifications { get; } = [];
 
-    // The same capture as ProgressNotifications, in arrival order: a scenario that asserts what a send looked like
-    // next to the one before it (open, then closed) needs the order a bag does not keep.
+    // ProgressNotifications in arrival order, which a bag does not keep.
     private readonly ConcurrentQueue<JobProgressPushNotification> _progressUpdates = new();
 
     private static readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(25);
 
-    /// <summary>The engine's global retry count: how many retries a job gets on top of its first run when the enqueue
-    /// does not override it. A job gets <c>RetryBudget + 1</c> attempts in all. The fixture configures its engine with
-    /// this value, so a scenario states its expectation as <c>RetryBudget + 1</c> and never as a literal.</summary>
+    /// <summary>The engine's global retry count; a job gets <c>RetryBudget + 1</c> attempts. Scenarios state expectations from it, never as a literal.</summary>
     public virtual int RetryBudget => 3;
 
-    /// <summary>A queue no worker of the engine under test drains, so a job enqueued onto it stays queued. Used by
-    /// scenarios gated on <see cref="EngineCapabilities.CanHoldQueuedJob"/>.</summary>
+    /// <summary>A queue no worker of the engine under test drains.</summary>
     public virtual string UnservedQueue => "conformance-unserved";
 
     /// <summary>The sends to one notification, in arrival order.</summary>
@@ -74,8 +70,7 @@ public abstract class JobEngineConformanceFixture : IAsyncLifetime
     public JobProgressPushNotification? LastProgressUpdate(string title)
         => _progressUpdates.LastOrDefault(x => x.Title == title);
 
-    /// <summary>Waits for the first send to <paramref name="notificationId"/> that satisfies
-    /// <paramref name="predicate"/>; fails, naming the notification, the predicate and what did arrive, on timeout.</summary>
+    /// <summary>Waits for the first send to <paramref name="notificationId"/> matching <paramref name="predicate"/>.</summary>
     public async Task<JobProgressPushNotification> WaitForProgressAsync(
         string notificationId,
         Func<JobProgressPushNotification, bool> predicate,
@@ -106,8 +101,7 @@ public abstract class JobEngineConformanceFixture : IAsyncLifetime
         }
     }
 
-    /// <summary>Waits until the engine's <c>GetStatus</c> for <paramref name="jobId"/> satisfies
-    /// <paramref name="predicate"/>; fails, naming the job, the predicate and the last state read, on timeout.</summary>
+    /// <summary>Waits until the engine's <c>GetStatus</c> for <paramref name="jobId"/> satisfies <paramref name="predicate"/>.</summary>
     public async Task<Job> WaitForStatusAsync(
         string jobId,
         Func<Job, bool> predicate,

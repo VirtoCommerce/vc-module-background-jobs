@@ -1,12 +1,7 @@
 import { BackgroundJobsAdminClient, type EnqueueOptions } from "../api_client/virtocommerce.backgroundjobs";
 import { buildEnqueueBody } from "./enqueue-body";
 
-/**
- * The generated client with one more method. Its `enqueue` stringifies a parsed payload object, which cannot keep
- * the typed text intact, and its `http` field is private, so this sends through `window.fetch` (the shell's
- * interceptor-wrapped one, which the generated client uses by default as well) and hands the response to the
- * generated `processEnqueue`, so errors surface as they do for `enqueue`.
- */
+/** The generated client plus enqueueRaw, which sends the payload text as typed through window.fetch (the generated client's default) and parses the response with the generated processEnqueue. */
 export class RawEnqueueClient extends BackgroundJobsAdminClient {
   enqueueRaw(name: string, payloadText: string | undefined, options: EnqueueOptions): Promise<string> {
     const options_: RequestInit = {

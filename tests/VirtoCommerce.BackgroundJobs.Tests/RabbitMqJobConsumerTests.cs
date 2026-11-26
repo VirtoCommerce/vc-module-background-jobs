@@ -20,11 +20,7 @@ using Xunit;
 
 namespace VirtoCommerce.BackgroundJobs.Tests;
 
-/// <summary>
-/// Drives <see cref="RabbitMqJobConsumer"/> through a fake channel to see what it does to the job's cancellation flag.
-/// The flag belongs to the job: a delivery that cannot know no other delivery follows (a retry was published, or its
-/// own ack failed so the broker redelivers it) must leave it, or the next delivery runs a job that was canceled.
-/// </summary>
+/// <summary>Drives <see cref="RabbitMqJobConsumer"/> through a fake channel to see what it does to the job's cancellation flag.</summary>
 public sealed class RabbitMqJobConsumerTests
 {
     private const string _jobId = "job-1";
@@ -55,7 +51,6 @@ public sealed class RabbitMqJobConsumerTests
         Assert.True(await store.IsCancelRequested(_jobId, ct), "a discard leaves the flag: more deliveries of the job may follow.");
     }
 
-    // The same rule from the other side: a delivery that settled the job (acked, nothing follows) is what clears the flag.
     [Fact]
     public async Task Delivery_FinalFailure_Acked_ClearsCancelFlag()
     {
@@ -85,7 +80,6 @@ public sealed class RabbitMqJobConsumerTests
         }
     }
 
-    // The channel surface the consumer uses, over a Moq IChannel: setup, consume (captures the consumer), ack, publish.
     private sealed class FakeChannel
     {
         public Mock<IChannel> Mock { get; } = new();

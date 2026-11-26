@@ -14,7 +14,6 @@ namespace VirtoCommerce.BackgroundJobs.Conformance;
 /// </summary>
 public abstract partial class JobEngineConformanceTests<TFixture>
 {
-    // The title MapReduceJob gives the batch's shared notification; the scenario finds its notification by it.
     private static readonly string _mapReduceTitle = $"Map/reduce: {nameof(ConformanceMapItem)}";
 
     private async Task<ConformanceProbe.ReduceObservation> RunBatchAsync(string correlationId, ConformanceMapItem[] items, MapReduceOptions? options)
@@ -35,8 +34,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         return reduce!;
     }
 
-    // Every reporting batch gets a notification with the same title and the fixture keeps the notifications of the whole run,
-    // so the batch a scenario just enqueued is the notification that was not there before it.
+    // All reporting batches share one title, so the batch just enqueued is the notification that was not there before.
     private async Task<string> EnqueueReportingBatchAsync<TReduce>(ConformanceReduceState state)
         where TReduce : class
     {
@@ -85,9 +83,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         Assert.Equal(4 + 16, reduce.Total); // failed item excluded from the aggregate
     }
 
-    // 17 — a reduce step that fails on its final attempt closes the batch's shared progress notification Failed: the map
-    // tasks never close the bar and the dispatcher does not close it for the reduce job, so nobody else would, and
-    // the bar would run forever. Attempts before the last leave it open.
+    // 17 — a reduce that fails on its final attempt closes the batch's shared notification Failed; earlier attempts leave it open.
     [Fact]
     public async Task MapReduce_Reduce_Failure_On_Final_Attempt_Closes_Notification_Failed()
     {
@@ -105,15 +101,13 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         Assert.NotNull(closing.Finished);
         Assert.Contains("Conformance-induced reduce failure", closing.Description);
 
-        // The close came with the last attempt, not an earlier one, and nothing closes the bar a second time. The
-        // absence of a second close has no signal, so the check can only wait.
+        // The close came with the last attempt, and nothing closes the bar a second time.
         Assert.Equal(Fixture.RetryBudget + 1, Fixture.Probe.ExecutionCount(id));
         await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
         Assert.Single(Fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);
     }
 
-    // 17 (continued) — the same holds when the reduce step fails before its handler is reached: here no reduce handler is
-    // registered. Closing the bar only around the handler call would leave it running forever for this failure.
+    // 17 (continued) — the same when the reduce fails before its handler: no reduce handler is registered.
     [Fact]
     public async Task MapReduce_Reduce_Setup_Failure_On_Final_Attempt_Closes_Notification_Failed()
     {
@@ -131,7 +125,6 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         Assert.NotNull(closing.Finished);
         Assert.Contains("No reduce handler", closing.Description);
 
-        // Nothing closes the bar a second time; the absence of a second close has no signal, so the check can only wait.
         await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
         Assert.Single(Fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);
     }

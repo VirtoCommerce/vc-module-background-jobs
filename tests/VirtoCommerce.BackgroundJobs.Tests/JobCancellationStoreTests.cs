@@ -24,9 +24,6 @@ public class JobCancellationStoreTests
         Assert.False(await store.IsCancelRequested("job-1", ct));
     }
 
-    // The Redis store's key expires after six hours; a flag nothing clears (the consumer leaves it behind for a discarded
-    // job's redelivery) must not live in this one for the life of the process: the TTL keeps the store from growing
-    // without bound.
     [Fact]
     public async Task InMemory_FlagOlderThanTtl_ReadsAsNotRequested()
     {
@@ -41,7 +38,6 @@ public class JobCancellationStoreTests
         time.Advance(TimeSpan.FromSeconds(2));
         Assert.False(await store.IsCancelRequested("job-1", ct));
 
-        // A request made after the expiry starts a new lifetime.
         await store.RequestCancel("job-1", ct);
         Assert.True(await store.IsCancelRequested("job-1", ct));
     }

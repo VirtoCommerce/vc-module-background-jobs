@@ -37,19 +37,12 @@ public sealed record EngineCapabilities
     /// running job trips its handler's <c>CancellationToken</c>. Skipped when unsupported.</summary>
     public bool SupportsCancellation { get; init; }
 
-    /// <summary>The engine fills <c>Attempt</c> and <c>TotalAttempts</c> on the envelope before dispatch, so a failed
-    /// attempt with a retry pending keeps the job's notification open ("attempt N of M") and only the final failure
-    /// closes it. When false the engine leaves <c>TotalAttempts</c> null and every attempt counts as final: the first
-    /// failure closes the notification <c>Failed</c> (the documented fallback, asserted instead).</summary>
+    /// <summary>The engine fills <c>Attempt</c> and <c>TotalAttempts</c> before dispatch, so only the final failure closes the notification. When false every attempt counts as final.</summary>
     public bool ReportsAttemptBudget { get; init; }
 
-    /// <summary>A requested cancel (<c>Delete</c>) of a running or queued job closes its notification with outcome
-    /// <c>Canceled</c>, because the engine can tell a requested cancel from a shutdown or a lost lock. When false the
-    /// notification stays open after a cancel (the documented fallback, asserted instead).</summary>
+    /// <summary>A requested cancel (<c>Delete</c>) closes the job's notification <c>Canceled</c>. When false it stays open after a cancel.</summary>
     public bool ClosesCanceledNotification { get; init; }
 
-    /// <summary>The engine can keep a job queued without running it, so a scenario can cancel a job that never ran:
-    /// enqueued onto <see cref="JobEngineConformanceFixture.UnservedQueue"/>, which no worker drains. Skipped when
-    /// unsupported (an engine that runs a job at once, or has no queue to hold it in).</summary>
+    /// <summary>A job enqueued onto <see cref="JobEngineConformanceFixture.UnservedQueue"/> stays queued, so a scenario can cancel a job that never ran.</summary>
     public bool CanHoldQueuedJob { get; init; }
 }

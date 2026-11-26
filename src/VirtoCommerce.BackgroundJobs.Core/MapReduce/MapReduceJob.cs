@@ -33,8 +33,6 @@ public sealed class MapReduceJob : IMapReduceJob
         IJobPayloadSerializer serializer,
         IUserNameResolver userNameResolver,
         IPushNotificationManager pushNotificationManager,
-        // Last and optional, like the dispatcher's: a caller that builds the facade by hand stays source-compatible, and DI
-        // injects the logger in production. A failed send that closes the notification of a batch whose enqueue failed is reported through it.
         ILogger<MapReduceJob>? logger = null)
     {
         _backgroundJob = backgroundJob;
@@ -138,8 +136,6 @@ public sealed class MapReduceJob : IMapReduceJob
         }
         catch (Exception ex) when (queued is not null)
         {
-            // Nothing past the Queued send is guaranteed to run, so no coordinator will close the batch's notification:
-            // close it here as failed. A failed close must not hide the error the caller needs.
             await _pushNotificationManager.TryCloseEnqueueFailedAsync(queued, ex.Message, _logger);
 
             throw;
@@ -153,9 +149,6 @@ public sealed class MapReduceJob : IMapReduceJob
             return null;
         }
 
-        // The same queued notification a single job gets: its description carries the start time, so two batches of one
-        // handler never share a description (platform storage folds a notification with the same title, type and
-        // description into the previous one).
         var notification = JobProgressPushNotification.CreateQueued(userName ?? "system", title, started, total);
         await _pushNotificationManager.SendAsync(notification);
 

@@ -33,12 +33,7 @@ using Xunit;
 
 namespace VirtoCommerce.BackgroundJobs.Tests;
 
-/// <summary>
-/// <c>POST api/background-jobs/enqueue</c> through the real MVC pipeline (Newtonsoft configured as the platform does),
-/// the real <see cref="JobEngineBackgroundJob"/> facade and the real <see cref="DefaultJobDispatcher"/>, down to a
-/// recording handler. Each test runs with and without a stand-in for the global <c>JsonElement</c> converter that
-/// platform 3.1100 adds and 3.1097 lacks.
-/// </summary>
+/// <summary><c>POST api/background-jobs/enqueue</c> through the real MVC pipeline, facade and dispatcher, with and without a stand-in for the platform's global <c>JsonElement</c> converter.</summary>
 public class EnqueueEndpointTests
 {
     public class ProbeItem
@@ -85,8 +80,7 @@ public class EnqueueEndpointTests
         }
     }
 
-    // Runs the job inline through the real dispatcher, so the handler has been called when Enqueue returns and the
-    // recorder counts every enqueue. (InMemoryJobEngine is fire-and-forget and counts nothing.)
+    // Runs the job inline through the real dispatcher, so the handler has run when Enqueue returns.
     private sealed class DispatchingTestEngine(IServiceProvider serviceProvider, IPushNotificationManager pushNotificationManager, EnqueueRecorder recorder) : IJobEngine
     {
         public string ProviderName => "Test";
@@ -106,7 +100,7 @@ public class EnqueueEndpointTests
         public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default) => Task.FromResult(false);
     }
 
-    // Platform 3.1100's JsonElementJsonConverter (absent from Platform.Core 3.1097).
+    // Stands in for the platform's global JsonElement converter.
     private sealed class StandInJsonElementConverter : JsonConverter<JsonElement>
     {
         public override void WriteJson(JsonWriter writer, JsonElement value, Newtonsoft.Json.JsonSerializer serializer)
@@ -251,8 +245,7 @@ public class EnqueueEndpointTests
         Assert.Equal(0, recorder.Enqueued);
     }
 
-    // The controller has no separate case for a JSON null: the binder hands it over as no payload at all, and the
-    // handler must still get a default instance rather than null.
+    // The binder hands a JSON null over as no payload, so the controller needs no separate case.
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

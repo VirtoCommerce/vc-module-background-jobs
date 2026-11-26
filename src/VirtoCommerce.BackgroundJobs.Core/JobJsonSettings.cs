@@ -18,10 +18,7 @@ namespace VirtoCommerce.BackgroundJobs;
 /// host, <see cref="Default"/> carries the platform's <see cref="PolymorphJsonConverter"/> alone.
 /// </para>
 /// <para>
-/// Date-like strings stay strings and numbers with a fraction are read as decimals
-/// (<see cref="DateParseHandling.None"/>, <see cref="FloatParseHandling.Decimal"/>): <c>PolymorphJsonConverter.ReadJson</c>
-/// loads a polymorphic member with <c>JObject.Load</c>, which inherits these reader settings, so with the defaults a nested
-/// decimal is cut to double precision and a nested date-like string is re-formatted.
+/// Date-like strings stay strings and numbers with a fraction are read as decimals, in nested polymorphic members too.
 /// </para>
 /// </summary>
 public static class JobJsonSettings

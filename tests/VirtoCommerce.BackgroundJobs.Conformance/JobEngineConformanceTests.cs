@@ -233,9 +233,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         await fixture.Probe.WaitCancelledAsync(id, ConformanceConstants.CancellationTimeout, TestContext.Current.CancellationToken);
     }
 
-    // The owned notification the facade creates at enqueue (ReportProgress, no ProgressNotificationId) is the one the
-    // worker closes. Its id is generated there, so a scenario finds it by the unique title it enqueued with; the facade
-    // sends it before Enqueue returns, so it is already captured.
+    // The facade sends the owned notification before Enqueue returns; a scenario finds it by its unique title.
     private string NotificationIdOf(string title)
         => fixture.ProgressNotifications.First(x => x.Title == title).Id;
 
@@ -246,8 +244,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         return (jobId, NotificationIdOf(payload.CorrelationId));
     }
 
-    // 14 — a failed attempt with a retry pending keeps the notification open and says which attempt of how many failed.
-    // An engine that does not report its attempt budget treats every attempt as final: the first failure closes it.
+    // 14 — a failed attempt with a retry pending keeps the notification open and names the attempt.
     [Fact]
     public async Task Retry_Pending_Keeps_Notification_Open()
     {
@@ -322,12 +319,10 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.NotNull(closing.Finished);
     }
 
-    // How long a scenario watches for a closing send an engine is documented NOT to make. Nothing signals the absence
-    // of an event, so the check can only wait; it runs after the cancel was observed, never in place of that wait.
+    // How long a scenario watches for a send that must not happen: an absence has no signal.
     private static readonly TimeSpan _noCloseObservation = TimeSpan.FromSeconds(1);
 
-    // 17 — a requested cancel of a running job closes its notification Canceled. An engine that cannot tell a
-    // requested cancel from a shutdown (ClosesCanceledNotification false) leaves it open: the documented fallback.
+    // 17 — a requested cancel of a running job closes its notification Canceled.
     [Fact]
     public async Task Running_Job_Cancel_Closes_Notification_Canceled()
     {
@@ -366,9 +361,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Equal(0, fixture.Probe.ExecutionCount(id));
     }
 
-    // 19 — a cancel survives a handler that then fails with another exception: the failed attempt has a retry pending,
-    // but the job was canceled, so the notification closes Canceled and the handler does not run again. In-process
-    // engines and RabbitMQ close at the attempt after the failed one, Hangfire at the failed one (the job is already Deleted).
+    // 19 — a cancel wins over a handler that then fails with another exception: it closes Canceled and the handler does not run again.
     [Fact]
     public async Task Running_Job_Cancel_Then_Handler_Failure_Closes_Canceled()
     {
@@ -395,20 +388,17 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         if (fixture.Capabilities.ReportsAttemptBudget)
         {
             Assert.Equal(fixture.RetryBudget + 1, closing.TotalAttempts);
-            // The close is made at the failed attempt (1) or at the one after it (2), as the comment above says per engine;
-            // any other number, or none, is a close that lost the attempt it was made at.
+            // Hangfire closes at the failed attempt (1); the other engines at the next one (2).
             Assert.NotNull(closing.Attempt);
             Assert.InRange(closing.Attempt.Value, 1, 2);
         }
 
-        // No further attempt runs the handler: the absence of a run has no signal, so the check can only wait.
         await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, fixture.Probe.ExecutionCount(id));
     }
 
-    // 20 — the same on the final attempt is a failure: no retry was pending for the cancel to stop, so the error the
-    // dispatcher closed Failed with is the only record of why the job ended and no engine replaces it with Canceled.
+    // 20 — the same on the final attempt is a failure: the notification closes Failed with the handler's error.
     [Fact]
     public async Task Running_Job_Cancel_Then_Handler_Failure_On_Final_Attempt_Closes_Failed()
     {
@@ -418,7 +408,6 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
             "engine cannot cancel a job, close it Canceled or report its attempt budget.");
         var id = NewId();
 
-        // No retries: attempt 1 is the final attempt.
         var jobId = await EnqueueAsync(
             new ConformancePayload { CorrelationId = id, Value = "cancel-then-fail-final", BlockUntilCancelled = true, FailOnCancel = true, ReportProgress = true },
             new EnqueueOptions { ReportProgress = true, Title = id, MaxRetryAttempts = 0 });
@@ -433,15 +422,13 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
 
         Assert.NotNull(closing.Finished);
 
-        // Nothing replaces the Failed close with Canceled afterwards: the absence of an update has no signal, so the check can only wait.
         await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain(fixture.ProgressUpdates(notificationId), x => x.Outcome == nameof(JobOutcome.Canceled));
         Assert.Equal(1, fixture.Probe.ExecutionCount(id));
     }
 
-    // 21 — a cancel of a job that already finished changes nothing: the engine refuses it and the job keeps its state,
-    // so a late cancel cannot rewrite a finished job's history.
+    // 21 — a cancel of a finished job is refused and the job keeps its state.
     [Fact]
     public async Task Delete_Of_Succeeded_Job_Returns_False_And_Keeps_State()
     {
@@ -460,9 +447,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Equal("Succeeded", status.State);
     }
 
-    // 22 — a per-job retry limit above the engine's global count runs the job limit + 1 times. Hangfire has no per-job
-    // retry count, so this is the case its filter has to make work: the global filter gives up first. The wait is for
-    // the notification's closing Failed, which an engine that does not report its attempt budget sends at the first failure.
+    // 22 — a per-job retry limit above the engine's global count runs the job limit + 1 times.
     [Fact]
     public async Task MaxRetryAttempts_Above_Global_Runs_N_Plus_One()
     {
@@ -507,8 +492,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Equal(limit + 1, fixture.Probe.ExecutionCount(id));
     }
 
-    // 24 — one job id: the worker's context carries the id Enqueue returned, so the progress page finds its job.
-    // An engine that passes a different id (a short name for a full one) breaks it with no error anywhere.
+    // 24 — the worker's context carries the job id Enqueue returned.
     [Fact]
     public async Task Worker_JobId_Equals_Enqueue_Result()
     {
@@ -520,9 +504,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Equal(jobId, fixture.Probe.Job(id)!.JobId);
     }
 
-    // 25 — the same id on every attempt: a retry re-runs the handler, and neither the context nor the worker's
-    // notification updates may switch to another id. The first send is the facade's "Queued" one, which carries no job
-    // id by design; every send after it comes from a worker.
+    // 25 — the same job id on every attempt; the facade's first "Queued" send carries none by design.
     [Fact]
     public async Task Worker_JobId_Is_Stable_Across_Retries()
     {
@@ -554,18 +536,13 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
             Assert.NotNull(closing.Finished);
             Assert.Null(closing.Error);
 
-            // The close replaces the whole notification, so it must carry what the job's own sends carried: the job id the
-            // progress page finds the job by, and the start time the elapsed display counts from.
             Assert.Equal(jobId, closing.JobId);
             Assert.NotNull(closing.Started);
 
             if (fixture.Capabilities.ReportsAttemptBudget)
             {
-                // The close must not overwrite the attempt numbers earlier sends wrote: a running job closes with the
-                // numbers its last update carried; a job canceled before it ran shows the first attempt of the total.
                 if (observeHandlerCancel)
                 {
-                    // By reference: notifications of one id compare equal.
                     var previous = fixture.ProgressUpdates(notificationId).TakeWhile(x => !ReferenceEquals(x, closing)).Last();
 
                     Assert.NotNull(previous.TotalAttempts);
@@ -586,7 +563,6 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
                 await fixture.Probe.WaitCancelledAsync(correlationId, ConformanceConstants.CancellationTimeout, TestContext.Current.CancellationToken);
             }
 
-            // An absence of a close has no engine-agnostic signal, so the check can only wait.
             await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
 
             Assert.DoesNotContain(fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);

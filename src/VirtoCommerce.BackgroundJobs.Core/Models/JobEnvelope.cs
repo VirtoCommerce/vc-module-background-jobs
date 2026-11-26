@@ -34,12 +34,7 @@ public sealed record JobEnvelope
     /// </summary>
     public int? MaxRetryAttempts { get; init; }
 
-    /// <summary>
-    /// De-duplication key, taken from <c>EnqueueOptions.UniqueKey</c>. No shipped engine (Hangfire, RabbitMQ, InMemory)
-    /// de-duplicates by it: they carry the key on the envelope and ignore it, so it does not prevent a duplicate run.
-    /// Only an engine that implements de-duplication itself honors it (the Google Cloud Tasks sample maps it to a
-    /// task name).
-    /// </summary>
+    /// <summary>De-duplication key from <c>EnqueueOptions.UniqueKey</c>. Honored only by an engine that implements de-duplication itself; any other engine carries it and runs duplicates.</summary>
     public string? UniqueKey { get; init; }
 
     /// <summary>Push-notification id to report progress against, or null for fire-and-forget without progress.</summary>
@@ -60,7 +55,7 @@ public sealed record JobEnvelope
 
     public int Attempt { get; init; } = 1;
 
-    /// <summary>How many attempts the job gets in all (the first run plus its retries), shown next to <see cref="Attempt"/>; null when unknown.</summary>
+    /// <summary>How many attempts the job gets in all (the first run plus its retries); null when unknown.</summary>
     public int? TotalAttempts { get; init; }
 
     public IReadOnlyDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
