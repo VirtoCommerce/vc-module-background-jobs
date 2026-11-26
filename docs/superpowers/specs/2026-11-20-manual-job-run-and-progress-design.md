@@ -227,7 +227,7 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   notification can show `Failed` and then change.
 - **One builder produces every `JobProgressPushNotification`** (today built in `PushNotificationJobProgress.Report`/
   `Complete`, `JobProgressPushNotification.CreateQueued` / `CreateEnqueueFailed` and
-  `MapReduceBatchNotification.CloseAsync`). For an
+  `MapReduceBatchNotification.SendCloseAsync`). For an
   **owned** notification:
   - `Started` and `Created` come from the envelope's `JobHeaders.EnqueuedAt` and stay the same on every update.
   - Progress updates send `IsNew = false`, so the notification is not raised again while the job runs and one the
@@ -325,7 +325,8 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
     in one place, which the map task's re-send uses too.
   - `MapCoordinator` checks the marker before each throttled progress report and skips the report when it is set. When
     it is not set, the task sends the report and reads the marker again; a record found then is sent again as the
-    close. The closer marks and then sends, the map task sends and then reads, so a report stored after the close was
+    close. The re-read runs even when the report send threw, because the report may already be stored when the send
+    fails. The closer marks and then sends, the map task sends and then reads, so a report stored after the close was
     sent is followed by a read that sees the mark and puts the close back. All of it runs inside the best-effort send,
     so a failed read or send is logged like a failed report and never fails the map task, which by then has saved its
     result and may still have to trigger the reduce.
@@ -339,9 +340,18 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
       past that hop and the `CompleteAsync` can land after it.
     - A `Failed` close that lands after the reduce's `Succeeded` close, on a batch that still completed (a fan-out
       whose final checkpoint failed after every map task was enqueued, or an engine that leaves `TotalAttempts` null):
-      either a map task re-read the `Failed` record and the reduce marked, closed and completed before its re-send, or
-      a `Failed` closer read the batch before the reduce's `CompleteAsync`. Both need the whole reduce to finish inside
-      one task's gap between two store calls.
+      either a map task re-read the `Failed` record and the reduce marked and sent its close before the task's re-send,
+      or a `Failed` closer read the batch and the reduce sent its close before the closer's send. No `CompleteAsync` is
+      needed for either. Both are rare: the reduce's close has to fall inside that short gap in one task.
+    - A failed marker write returns the race for that batch: the close is still sent and only an error is logged, so a
+      map task finds no record and its report can replace the close.
+    - Several instances (a platform limitation, not fixable in the module): with the platform's
+      `PushNotifications:ScalabilityMode`, an instance stores its own sends at once and another instance's sends when
+      they arrive over the backplane, so the storage order across instances is not global. A map report sent on one
+      instance before the close was marked can be stored on the closing instance after that close, and the handshake's
+      re-read, which saw no record, does not repair it.
+    - A `Failed` closer that read the batch before the reduce's `CompleteAsync` and marks after it recreates the
+      `progressclosed` record as an orphan key. It expires with the store's TTL (7 days) and nothing reads it.
 - **A `Failed` close is not sent for a batch that is already gone.** `CloseFailedOnFinalAttemptAsync` reads the batch
   (best effort) before it closes. When the read returns nothing, because the reduce completed the batch or it expired,
   no close is sent and no marker is set: a map task that fails on its final attempt after the reduce closed the batch
@@ -699,8 +709,10 @@ the same assertion; items an engine may not support are capability-gated with th
     shared notification `Failed`, and the last update to it is still that close after a map task has run past it
     (`MapReduce_FanOut_Failure_After_Enqueuing_Map_Tasks_Keeps_Notification_Failed`). One map task of the batch waits
     in its handler until the test has seen the close, so a map task is sure to run after it; the others pass at once,
-    so the wait blocks one worker and the fan-out's retries still run. Wrong state: the batch's bar shows running for
-    good. (§3.5)
+    so the wait blocks one worker and the fan-out's retries still run. The scenario needs an engine that runs at least
+    two jobs at once: on a single-slot engine the waiting map task blocks the fan-out's retries and the scenario times
+    out, and its gate is only `SupportsRetry` and `ReportsAttemptBudget`. Wrong state: the batch's bar shows running
+    for good. (§3.5)
 20. Conformance, gated as item 19: a reduce whose read of the map results fails on every attempt closes the shared
     notification `Failed` on the final one, with the error in the description, and the last update is still that close
     (`MapReduce_Reduce_Results_Read_Failure_On_Final_Attempt_Closes_Notification_Failed`; the kit's batch store fails
@@ -881,3 +893,9 @@ the same assertion; items an engine may not support are capability-gated with th
   (3) The reduce's results read and `FailFast` check moved inside the final-attempt close scope; the success and
   `FailFast` closes and their `CompleteAsync` stay outside. Scenario 20 holds one map task until the close was seen,
   and scenario 21 covers (3).
+- 2026-11-26 — After the review of the close handshake: (1) the map task re-reads the marker also when its report send
+  threw, because the report may already be stored when the send fails (§3.5,
+  `MapTask_ReportSendThrowsAfterItWasStored_SendsTheCloseAgain`). (2) The accepted remainder in §3.5 gains a failed
+  marker write, the storage order across instances, and an orphan marker left by a `Failed` closer, and the reasoning
+  of the `Failed`-after-`Succeeded` case is corrected: no `CompleteAsync` is needed for it. (3) §3.4 names the
+  builder `SendCloseAsync`. (4) §8 item 19 states that its scenario needs an engine that runs two jobs at once.
