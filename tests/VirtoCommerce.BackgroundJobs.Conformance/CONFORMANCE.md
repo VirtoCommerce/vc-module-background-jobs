@@ -67,6 +67,9 @@ which overlap the numbers of the first file, so refer to them by test name.
 | 15 | `Recurring_Scheduler_AddOrUpdate_Then_Remove_DoNotThrow`: the recurring scheduler accepts add and remove | `SupportsRecurringScheduler` (skipped otherwise) |
 | 16 | `Recurring_Trigger_Enqueues_Runnable_Job`: a recurring trigger enqueues a runnable job | every engine |
 | 17 | `MapReduce_Reduce_Failure_On_Final_Attempt_Closes_Notification_Failed`: a reduce step that fails on its final attempt closes the batch's shared notification `Failed` (its description carries the error), once, after `RetryBudget + 1` runs | `SupportsRetry` and `ReportsAttemptBudget` (skipped otherwise) |
+| 17 (continued) | `MapReduce_Reduce_Setup_Failure_On_Final_Attempt_Closes_Notification_Failed`: the same when the reduce fails before its handler runs (no reduce handler is registered); the description carries the error | `SupportsRetry` and `ReportsAttemptBudget` (skipped otherwise) |
+| 18 | `MapReduce_FanOut_Failure_On_Final_Attempt_Closes_Notification_Failed`: a fan-out that fails on its final attempt closes the batch's shared notification `Failed` (its description carries the error), once | `SupportsRetry` and `ReportsAttemptBudget` (skipped otherwise) |
+| 19 | `MapReduce_Map_Failure_On_Final_Attempt_Closes_Notification_Failed`: the same for the map task that completes the batch and fails before the reduce is enqueued | `SupportsRetry` and `ReportsAttemptBudget` (skipped otherwise) |
 
 Capability-gated scenarios assert the documented behavior when supported, and the documented fallback (or skip) when
 not — so an engine is never penalized for a feature it legitimately cannot provide. A scenario that asserts a closing
@@ -90,10 +93,10 @@ so an engine that breaks it fails after the upgrade whatever its fixture declare
 | `SupportsDelete` | `Delete` can cancel or remove a known job | 18, 21 |
 | `SupportsUniqueKeyDedup` | re-enqueuing with the same `UniqueKey` collapses to one execution. **No shipped engine does**; keep it false unless yours truly does | 8 |
 | `SupportsQueueRouting` | a job on a non-default queue is processed on this instance | 10 |
-| `SupportsRetry` | a handler that throws is retried up to `MaxRetryAttempts` | 11, 14, 19, 22, 23, 25, `MapReduce_Reduce_Failure_On_Final_Attempt_Closes_Notification_Failed` |
+| `SupportsRetry` | a handler that throws is retried up to `MaxRetryAttempts` | 11, 14, 19, 22, 23, 25, and the four `MapReduce_*_Failure_On_Final_Attempt_Closes_Notification_Failed` scenarios |
 | `SupportsRecurringScheduler` | the engine registers an `IRecurringJobScheduler` (native, or the in-process one) | `Recurring_Scheduler_AddOrUpdate_Then_Remove_DoNotThrow` |
 | `SupportsCancellation` | `IJobEngine.SupportsCancellation` is true and a running job can be cancelled on demand | 7, 13, 17, 19, 20 |
-| `ReportsAttemptBudget` | the engine fills `Attempt` and `TotalAttempts` on the envelope before `Dispatch`. False: `TotalAttempts` stays null and every attempt counts as final | 14, 15, 17, 18, 19, 20, 22, 23, `MapReduce_Reduce_Failure_On_Final_Attempt_Closes_Notification_Failed` |
+| `ReportsAttemptBudget` | the engine fills `Attempt` and `TotalAttempts` on the envelope before `Dispatch`. False: `TotalAttempts` stays null and every attempt counts as final | 14, 15, 17, 18, 19, 20, 22, 23, and the four `MapReduce_*_Failure_On_Final_Attempt_Closes_Notification_Failed` scenarios |
 | `ClosesCanceledNotification` | a requested cancel (`Delete`) closes the job's notification `Canceled`, because the engine can tell a requested cancel from a shutdown or a lost lock. False: the notification stays open after a cancel | 17, 18, 19, 20 |
 | `CanHoldQueuedJob` | the engine can keep a job queued without running it, so a scenario can cancel a job that never ran (enqueued onto `UnservedQueue`). Only Hangfire declares it: an unserved queue is never consumed on RabbitMQ, and in-process engines run a job at once | 18 |
 
@@ -208,7 +211,7 @@ public class MyEngineConformanceTests(MyEngineConformanceFixture fixture)
 ```
 
 The base builds the engine-agnostic services the standard depends on (serializer, dispatcher, the `IBackgroundJob`
-facade, map/reduce orchestration, the conformance handlers, a capturing push-notification manager). You supply only
+facade, map/reduce orchestration, the conformance handlers, a capturing push-notification manager, and a batch store that fails the fan-out or the join step of a batch whose reduce handler is the matching marker type). You supply only
 the engine and its worker.
 
 ## Reference examples in this repo
