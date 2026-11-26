@@ -42,12 +42,8 @@ public class JobProgressPushNotification : PushNotification
     }
 
     /// <summary>
-    /// Closes the notification <paramref name="queued"/> as failed, for a job whose enqueue the engine reported as failed:
-    /// no worker may ever run it, so no worker would close the notification, and the admin UI would keep showing it as
-    /// queued. A failure report does not prove the job was not taken (a broker's publish can time out on its confirm after
-    /// the message was routed); if a worker does run it, the worker's own sends replace this close. It replaces the queued
-    /// notification (same id, creator, title, start time and total) and records <paramref name="error"/> the way the
-    /// worker's own failed close does.
+    /// Closes <paramref name="queued"/> for a job whose enqueue failed: same id, title and start, outcome Failed, and
+    /// <paramref name="error"/> as the error.
     /// </summary>
     public static JobProgressPushNotification CreateEnqueueFailed(JobProgressPushNotification queued, string error)
     {
@@ -59,7 +55,7 @@ public class JobProgressPushNotification : PushNotification
             queued.Creator,
             queued.Title,
             queued.Started,
-            outcome,
+            $"Enqueue failed: {error}",
             ProcessedCount: 0,
             TotalCount: queued.TotalCount,
             JobId: null,
