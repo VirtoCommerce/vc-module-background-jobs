@@ -39,6 +39,9 @@ public sealed class PushNotificationJobProgress : IJobProgress
     /// closes it. To report into a notification shared by several jobs (a map/reduce batch), build the reporter from the
     /// envelope (the constructor below, or <see cref="JobExecutionContextFactory"/>) so that a single job does not close it.
     /// </summary>
+    [Obsolete("Owns its notification whatever the job's envelope says. Build the reporter from the envelope (PushNotificationJobProgress(IPushNotificationManager, JobEnvelope, string)) or through JobExecutionContextFactory.",
+        DiagnosticId = "VC0016",
+        UrlFormat = "https://docs.virtocommerce.org/products/products-virto3-versions")]
     public PushNotificationJobProgress(
         IPushNotificationManager pushNotificationManager,
         string notificationId,
