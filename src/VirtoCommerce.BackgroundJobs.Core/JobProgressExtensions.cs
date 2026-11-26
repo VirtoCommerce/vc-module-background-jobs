@@ -1,7 +1,7 @@
-using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.Platform.Core.Jobs;
 
 namespace VirtoCommerce.BackgroundJobs;
@@ -19,13 +19,8 @@ public static class JobProgressExtensions
         string jobId,
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            await progress.Complete(JobOutcome.Canceled, null, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not close the progress notification of the cancelled job {JobId}; it stays open.", jobId);
-        }
+        await BestEffortNotificationSend.TrySendAsync(
+            () => progress.Complete(JobOutcome.Canceled, null, cancellationToken),
+            ex => logger.LogWarning(ex, "Could not close the progress notification of the cancelled job {JobId}; it stays open.", jobId));
     }
 }

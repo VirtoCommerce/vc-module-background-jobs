@@ -152,9 +152,8 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
                 Error: null,
                 Finished: DateTime.UtcNow,
                 IsNew: true))),
-            $"close the batch notification as {outcome}",
-            batch.ProgressNotificationId,
-            _logger);
+            ex => _logger.LogError(ex, "Could not close the batch progress notification {NotificationId} as {Outcome}; the batch's outcome is unchanged.",
+                batch.ProgressNotificationId, outcome));
     }
 
     // Re-hydrate the type-erased records into a List<MapResult<TResult>> the reduce handler can accept as

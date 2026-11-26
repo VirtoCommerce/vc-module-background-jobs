@@ -15,8 +15,6 @@ public static class JobProgressPushNotificationManagerExtensions
     {
         return BestEffortNotificationSend.TrySendAsync(
             () => manager.SendAsync(JobProgressPushNotification.CreateEnqueueFailed(queued, error)),
-            "close the notification as failed after the enqueue failed",
-            queued.Id,
-            logger);
+            ex => logger.LogError(ex, "Could not close the progress notification {NotificationId} of a job whose enqueue failed; the caller still gets the error.", queued.Id));
     }
 }

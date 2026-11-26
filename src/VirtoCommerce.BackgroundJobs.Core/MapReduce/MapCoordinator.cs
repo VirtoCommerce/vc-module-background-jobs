@@ -64,9 +64,8 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
                 () => context.Progress.Report(
                     new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },
                     cancellationToken),
-                "report the map progress",
-                batch.ProgressNotificationId,
-                _logger);
+                ex => _logger.LogError(ex, "Could not report the map progress to notification {NotificationId}; the batch's outcome is unchanged.",
+                    batch.ProgressNotificationId));
         }
 
         // The worker that observes the final completion (and wins the atomic claim) triggers reduce exactly once.

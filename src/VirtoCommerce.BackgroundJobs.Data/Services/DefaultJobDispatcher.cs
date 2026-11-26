@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Security;
 
@@ -197,21 +198,14 @@ public sealed class DefaultJobDispatcher(
     // Every send to the progress channel goes through here. The notification only displays the job; its failure must
     // never change the job's fate, so an error is logged and swallowed. A send that fails with OperationCanceledException
     // because the dispatch token is cancelled is expected (a shutdown or a cancel) and is not an error.
-    private async Task TrySend(Func<Task> send, string operation, JobEnvelope envelope, IJobExecutionContext context, CancellationToken cancellationToken)
+    private Task TrySend(Func<Task> send, string operation, JobEnvelope envelope, IJobExecutionContext context, CancellationToken cancellationToken)
     {
-        try
-        {
-            await send();
-        }
-        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogInformation(ex, "Could not {Operation} for job {JobId} (engine {Engine}, handler {Handler}): the job was canceled.",
-                operation, context.JobId, _engine, HandlerName(envelope));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Could not {Operation} for job {JobId} (engine {Engine}, handler {Handler}); the job's outcome is unchanged.",
-                operation, context.JobId, _engine, HandlerName(envelope));
-        }
+        return BestEffortNotificationSend.TrySendAsync(
+            send,
+            ex => _logger.LogError(ex, "Could not {Operation} for job {JobId} (engine {Engine}, handler {Handler}); the job's outcome is unchanged.",
+                operation, context.JobId, _engine, HandlerName(envelope)),
+            ex => _logger.LogInformation(ex, "Could not {Operation} for job {JobId} (engine {Engine}, handler {Handler}): the job was canceled.",
+                operation, context.JobId, _engine, HandlerName(envelope)),
+            cancellationToken);
     }
 }
