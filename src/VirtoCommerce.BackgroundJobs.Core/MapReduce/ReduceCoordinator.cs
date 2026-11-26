@@ -108,7 +108,7 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             var canceled = actual is OperationCanceledException && cancellationToken.IsCancellationRequested;
             if (context is JobExecutionContext { IsFinalAttempt: true } && !canceled)
             {
-                await TryMarkFailedAsync(batch, actual);
+                await MarkFinishedAsync(batch, $"Reduce failed: {actual.Message}", JobOutcome.Failed);
             }
 
             ExceptionDispatchInfo.Throw(actual);
@@ -120,45 +120,38 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             envelope.BatchId, batch.Total, failures);
     }
 
-    // Best effort: the failure being reported is the reduce handler's, and it must reach the engine whatever happens to
-    // the notification, so a failed send is logged and not thrown.
-    private async Task TryMarkFailedAsync(MapReduceBatch batch, Exception failure)
-    {
-        try
-        {
-            await MarkFinishedAsync(batch, $"Reduce failed: {failure.Message}", JobOutcome.Failed);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not close the progress notification of map/reduce batch {BatchId} as failed; it stays open.", batch.BatchId);
-        }
-    }
-
     // Closes the shared progress notification (sets Finished and Outcome) once the batch settles, since individual map
     // tasks intentionally don't close the aggregate bar. Built through the notification builder so the replacement keeps
     // the title and the batch start time; a batch stored before the start time was recorded closes without one.
-    private async Task MarkFinishedAsync(MapReduceBatch batch, string description, JobOutcome outcome)
+    // Best effort: the notification only displays the batch. A failed send is logged and not thrown — on the success
+    // path the reduce handler has already run, and failing the attempt would make the engine run it again; on the failure
+    // path the handler's own exception must reach the engine.
+    private Task MarkFinishedAsync(MapReduceBatch batch, string description, JobOutcome outcome)
     {
         if (string.IsNullOrEmpty(batch.ProgressNotificationId))
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        await _pushNotificationManager.SendAsync(JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
+        return BestEffortNotificationSend.TrySendAsync(
+            () => _pushNotificationManager.SendAsync(JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
+                batch.ProgressNotificationId,
+                batch.UserName ?? "system",
+                batch.Title,
+                batch.Started,
+                description,
+                ProcessedCount: batch.Total,
+                TotalCount: batch.Total,
+                JobId: null,
+                Attempt: null,
+                TotalAttempts: null,
+                outcome.ToString(),
+                Error: null,
+                Finished: DateTime.UtcNow,
+                IsNew: true))),
+            $"close the batch notification as {outcome}",
             batch.ProgressNotificationId,
-            batch.UserName ?? "system",
-            batch.Title,
-            batch.Started,
-            description,
-            ProcessedCount: batch.Total,
-            TotalCount: batch.Total,
-            JobId: null,
-            Attempt: null,
-            TotalAttempts: null,
-            outcome.ToString(),
-            Error: null,
-            Finished: DateTime.UtcNow,
-            IsNew: true)));
+            _logger);
     }
 
     // Re-hydrate the type-erased records into a List<MapResult<TResult>> the reduce handler can accept as

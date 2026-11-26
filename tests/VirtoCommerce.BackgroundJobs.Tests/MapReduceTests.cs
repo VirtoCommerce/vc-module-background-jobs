@@ -53,12 +53,14 @@ public class MapReduceTests
     private sealed class SumReducer : IReduceJobHandler<SumState, SquareResult>
     {
         public bool Ran { get; private set; }
+        public int Calls { get; private set; }
         public int Total { get; private set; }
         public IReadOnlyCollection<MapResult<SquareResult>>? Captured { get; private set; }
 
         public Task Reduce(SumState state, IReadOnlyCollection<MapResult<SquareResult>> results, IJobExecutionContext ctx, CancellationToken ct = default)
         {
             Ran = true;
+            Calls++;
             Captured = results;
             Total = results.Where(r => r.Succeeded).Sum(r => r.Value!.Square);
             return Task.CompletedTask;
@@ -545,6 +547,8 @@ public class MapReduceTests
         public FanOutCoordinator FanOut { get; }
         public MapCoordinator Map { get; }
         public ReduceCoordinator Reduce { get; }
+        public SumReducer Reducer { get; } = new();
+        public string? BatchId { get; private set; }
 
         public NotifyingHarness(IMapJobHandler<SquareItem, SquareResult> mapHandler)
         {
@@ -568,10 +572,9 @@ public class MapReduceTests
                 userResolver.Object,
                 engine.Object);
 
-            var reducer = new SumReducer();
             var services = new ServiceCollection();
             services.AddSingleton(mapHandler.GetType(), mapHandler);
-            services.AddSingleton(reducer);
+            services.AddSingleton(Reducer);
             var sp = services.BuildServiceProvider();
 
             Facade = new MapReduceJob(bus, Store, Serializer, userResolver.Object, Manager.Object);
@@ -581,13 +584,14 @@ public class MapReduceTests
         }
 
         // Runs the batch up to the reduce close and returns the notifications sent by the initial send, the map tasks
-        // and the reduce, in that order.
+        // and the reduce, in that order. beforeReduce runs once the map tasks are done, to change what the reduce sees.
         public async Task<(JobProgressPushNotification Initial, IReadOnlyList<JobProgressPushNotification> MapUpdates, JobProgressPushNotification Close)>
-            RunAsync<TMap>(SquareItem[] items, CancellationToken ct)
+            RunAsync<TMap>(SquareItem[] items, CancellationToken ct, Action? beforeReduce = null)
             where TMap : class
         {
             var batchId = await Facade.Enqueue<TMap, SumReducer>(
                 items, new SumState("squares"), new MapReduceOptions { ReportProgress = true }, ct);
+            BatchId = batchId;
             var initial = Sent.Single();
 
             await FanOut.Execute(new MapFanOutEnvelope { BatchId = batchId }, Context(), ct);
@@ -603,6 +607,7 @@ public class MapReduceTests
             }
 
             var mapUpdates = Sent.Skip(1).ToList();
+            beforeReduce?.Invoke();
             await Reduce.Execute(new ReduceTaskEnvelope { BatchId = batchId }, Context(), ct);
 
             return (initial, mapUpdates, Sent[^1]);
@@ -733,5 +738,53 @@ public class MapReduceTests
         Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
         Assert.Equal(thrown.Message, closing.Error);
         Assert.NotNull(closing.Finished);
+    }
+
+    // The batch's notification only displays it: the reduce handler has already run when its success close is sent, so a
+    // failed send must not fail the attempt (an engine would run the reduce handler again) nor skip completing the batch.
+    [Fact]
+    public async Task Reduce_SuccessCloseSendThrows_DoesNotFailTheAttempt()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new NotifyingHarness(new SquareHandler());
+
+        await harness.RunAsync<SquareHandler>(
+            [new SquareItem(1), new SquareItem(2)],
+            ct,
+            beforeReduce: () => harness.Manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+                .ThrowsAsync(new InvalidOperationException("push channel down")));
+
+        Assert.Equal(1, harness.Reducer.Calls);
+        Assert.Null(await harness.Store.GetAsync(harness.BatchId!, ct));
+    }
+
+    private sealed class ThrowOnProcessedCountProgress(long processedCount) : IJobProgress
+    {
+        public Task Report(JobProgressInfo progress, CancellationToken cancellationToken = default)
+            => progress.ProcessedCount == processedCount ? throw new InvalidOperationException("push channel down") : Task.CompletedTask;
+
+        public Task Complete(JobOutcome outcome, string? error = null, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
+    // The map task that completes the batch must still trigger the reduce when its progress update cannot be sent:
+    // otherwise the engine runs the map handler again and the batch waits on a reduce that was never enqueued.
+    [Fact]
+    public async Task MapTask_ProgressReportOnLastItemThrows_StillEnqueuesReduce()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (facade, fanOut, map, _, bus, _, _) = BuildHarness(new SquareHandler());
+
+        await facade.Enqueue<SquareHandler, SumReducer>(
+            [new SquareItem(1), new SquareItem(2)], new SumState("squares"), new MapReduceOptions { ReportProgress = true }, ct);
+        await fanOut.Execute(bus.Enqueued.OfType<MapFanOutEnvelope>().Single(), Context(), ct);
+
+        var context = new JobExecutionContext("map-job", new ThrowOnProcessedCountProgress(2), new Dictionary<string, string>());
+        foreach (var task in bus.Enqueued.OfType<MapTaskEnvelope>().ToList())
+        {
+            await map.Execute(task, context, ct);
+        }
+
+        Assert.Single(bus.Enqueued.OfType<ReduceTaskEnvelope>());
     }
 }
