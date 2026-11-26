@@ -79,7 +79,7 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
             await BestEffortNotificationSend.TrySendAsync(
                 async () =>
                 {
-                    if (await _store.IsProgressClosedAsync(envelope.BatchId, cancellationToken))
+                    if (await _store.GetProgressCloseAsync(envelope.BatchId, cancellationToken) is not null)
                     {
                         return;
                     }
@@ -87,6 +87,11 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
                     await context.Progress.Report(
                         new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },
                         cancellationToken);
+
+                    if (await _store.GetProgressCloseAsync(envelope.BatchId, cancellationToken) is { } close)
+                    {
+                        await MapReduceBatchNotification.SendCloseAsync(_pushNotificationManager, batch, close, _logger);
+                    }
                 },
                 ex => _logger.LogError(ex, "Could not report the map progress to notification {NotificationId}; the batch's outcome is unchanged.",
                     batch.ProgressNotificationId),

@@ -50,13 +50,14 @@ public interface IMapReduceBatchStore
     Task<IReadOnlyCollection<MapResultRecord>> GetResultsAsync(string batchId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Records that the batch's progress notification was closed, so later map progress reports skip it.
-    /// A decorating store forwards both this member and <see cref="IsProgressClosedAsync"/>.
+    /// Records that the batch's progress notification was closed, so later map progress reports skip it and a map
+    /// task that raced the close can send it again.
+    /// A decorating store forwards both this member and <see cref="GetProgressCloseAsync"/>.
     /// </summary>
-    Task MarkProgressClosedAsync(string batchId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    Task MarkProgressClosedAsync(string batchId, ProgressClose close, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-    /// <summary>True once <see cref="MarkProgressClosedAsync"/> recorded the close.</summary>
-    Task<bool> IsProgressClosedAsync(string batchId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+    /// <summary>The close <see cref="MarkProgressClosedAsync"/> recorded; null until one did.</summary>
+    Task<ProgressClose?> GetProgressCloseAsync(string batchId, CancellationToken cancellationToken = default) => Task.FromResult<ProgressClose?>(null);
 
     /// <summary>Mark the batch finished and release its state.</summary>
     Task CompleteAsync(string batchId, CancellationToken cancellationToken = default);

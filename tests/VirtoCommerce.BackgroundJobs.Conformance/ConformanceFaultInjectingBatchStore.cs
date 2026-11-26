@@ -53,11 +53,11 @@ internal sealed class ConformanceFaultInjectingBatchStore(IMapReduceBatchStore i
     public Task<IReadOnlyCollection<MapResultRecord>> GetResultsAsync(string batchId, CancellationToken cancellationToken = default)
         => inner.GetResultsAsync(batchId, cancellationToken);
 
-    public Task MarkProgressClosedAsync(string batchId, CancellationToken cancellationToken = default)
-        => inner.MarkProgressClosedAsync(batchId, cancellationToken);
+    public Task MarkProgressClosedAsync(string batchId, ProgressClose close, CancellationToken cancellationToken = default)
+        => inner.MarkProgressClosedAsync(batchId, close, cancellationToken);
 
-    public Task<bool> IsProgressClosedAsync(string batchId, CancellationToken cancellationToken = default)
-        => inner.IsProgressClosedAsync(batchId, cancellationToken);
+    public Task<ProgressClose?> GetProgressCloseAsync(string batchId, CancellationToken cancellationToken = default)
+        => inner.GetProgressCloseAsync(batchId, cancellationToken);
 
     public Task CompleteAsync(string batchId, CancellationToken cancellationToken = default)
         => inner.CompleteAsync(batchId, cancellationToken);

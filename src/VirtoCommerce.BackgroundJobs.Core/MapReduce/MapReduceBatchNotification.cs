@@ -23,35 +23,40 @@ internal static class MapReduceBatchNotification
             return;
         }
 
+        var close = new ProgressClose(description, outcome, DateTime.UtcNow);
+
         // Marked before the close is sent: a map report that checks the marker afterwards skips the bar.
         try
         {
-            await store.MarkProgressClosedAsync(batch.BatchId);
+            await store.MarkProgressClosedAsync(batch.BatchId, close);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Could not mark the progress of batch {BatchId} closed; a late map report may reopen the notification.", batch.BatchId);
         }
 
-        await BestEffortNotificationSend.TrySendAsync(
+        await SendCloseAsync(pushNotificationManager, batch, close, logger);
+    }
+
+    public static Task SendCloseAsync(IPushNotificationManager pushNotificationManager, MapReduceBatch batch, ProgressClose close, ILogger logger)
+        => BestEffortNotificationSend.TrySendAsync(
             () => pushNotificationManager.SendAsync(JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
-                batch.ProgressNotificationId,
+                batch.ProgressNotificationId!,
                 batch.UserName ?? "system",
                 batch.Title,
                 batch.Started,
-                description,
+                close.Description,
                 ProcessedCount: batch.Total,
                 TotalCount: batch.Total,
                 JobId: null,
                 Attempt: null,
                 TotalAttempts: null,
-                outcome.ToString(),
+                close.Outcome.ToString(),
                 Error: null,
-                Finished: DateTime.UtcNow,
+                Finished: close.Finished,
                 IsNew: true))),
             ex => logger.LogError(ex, "Could not close the batch progress notification {NotificationId} as {Outcome}; the batch's outcome is unchanged.",
-                batch.ProgressNotificationId, outcome));
-    }
+                batch.ProgressNotificationId, close.Outcome));
 
     // A cancel leaves the bar open: the engine decides what a cancel means.
     public static Task CloseFailedOnFinalAttemptAsync(

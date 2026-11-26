@@ -775,4 +775,94 @@ public class MapReduceTests
 
         Assert.Single(bus.Enqueued.OfType<ReduceTaskEnvelope>());
     }
+
+    // One map task left to run on a two-item reporting batch, over a store the test scripts.
+    private sealed class MapTaskHarness
+    {
+        public Mock<IMapReduceBatchStore> Store { get; } = new();
+        public List<JobProgressPushNotification> Sent { get; } = [];
+        public MapReduceBatch Batch { get; }
+        public MapCoordinator Map { get; }
+        public MapTaskEnvelope Envelope { get; }
+        public IJobExecutionContext Context { get; }
+
+        public MapTaskHarness(bool finalAttempt = false)
+        {
+            Batch = new MapReduceBatch
+            {
+                BatchId = "batch-1",
+                Total = 2,
+                ItemType = typeof(SquareItem).AssemblyQualifiedName!,
+                ResultType = typeof(SquareResult).AssemblyQualifiedName!,
+                StateType = typeof(SumState).AssemblyQualifiedName!,
+                MapHandlerType = typeof(SquareHandler).AssemblyQualifiedName,
+                ProgressNotificationId = "progress-1",
+                Title = "Squares",
+                Started = DateTime.UtcNow,
+            };
+            Store.Setup(x => x.GetAsync(Batch.BatchId, It.IsAny<CancellationToken>())).ReturnsAsync(Batch);
+            Store.Setup(x => x.SaveResultAndCountAsync(Batch.BatchId, It.IsAny<MapResultRecord>(), It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+            var manager = new Mock<IPushNotificationManager>();
+            manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+                .Callback<PushNotification>(x => Sent.Add((JobProgressPushNotification)x))
+                .Returns(Task.CompletedTask);
+
+            var services = new ServiceCollection();
+            services.AddSingleton(new SquareHandler());
+            var serializer = new JsonJobPayloadSerializer();
+
+            Map = new MapCoordinator(services.BuildServiceProvider(), serializer, Store.Object, new CapturingBackgroundJob(), manager.Object,
+                NullLogger<MapCoordinator>.Instance);
+
+            var (itemType, itemJson) = serializer.Serialize(new SquareItem(2));
+            Envelope = new MapTaskEnvelope { BatchId = Batch.BatchId, Index = 0, ItemType = itemType, ItemJson = itemJson };
+
+            Context = JobExecutionContextFactory.Create(
+                manager.Object,
+                new JobEnvelope
+                {
+                    JobType = typeof(MapTaskEnvelope).AssemblyQualifiedName!,
+                    PayloadType = itemType,
+                    PayloadJson = itemJson,
+                    ProgressNotificationId = Batch.ProgressNotificationId,
+                    Attempt = 1,
+                    TotalAttempts = finalAttempt ? 1 : 2,
+                },
+                "map-job");
+        }
+    }
+
+    [Fact]
+    public async Task MapTask_BatchClosedDuringItsReport_SendsTheCloseAgainAfterTheReport()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new MapTaskHarness();
+        var close = new ProgressClose("Faulted: 1/2 map items failed.", JobOutcome.Failed, new DateTime(2026, 11, 26, 10, 0, 0, DateTimeKind.Utc));
+        harness.Store.SetupSequence(x => x.GetProgressCloseAsync(harness.Batch.BatchId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProgressClose?)null)
+            .ReturnsAsync(close);
+
+        await harness.Map.Execute(harness.Envelope, harness.Context, ct);
+
+        Assert.Equal(2, harness.Sent.Count);
+        Assert.Null(harness.Sent[0].Outcome);
+        var last = harness.Sent[^1];
+        Assert.Equal(harness.Batch.ProgressNotificationId, last.Id);
+        Assert.Equal(nameof(JobOutcome.Failed), last.Outcome);
+        Assert.Equal(close.Finished, last.Finished);
+        Assert.Equal(close.Description, last.Description);
+    }
+
+    [Fact]
+    public async Task MapTask_BatchStillOpenAfterItsReport_SendsNoClose()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new MapTaskHarness();
+
+        await harness.Map.Execute(harness.Envelope, harness.Context, ct);
+
+        var sent = Assert.Single(harness.Sent);
+        Assert.Null(sent.Outcome);
+    }
 }

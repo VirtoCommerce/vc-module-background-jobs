@@ -22,7 +22,7 @@ public sealed class InMemoryMapReduceBatchStore : IMapReduceBatchStore
         public IReadOnlyList<MapItem> Items { get; set; } = [];
         public int ReduceClaimed;
         public int FanOutProgress;
-        public int ProgressClosed;
+        public ProgressClose? ProgressClose;
     }
 
     private readonly ConcurrentDictionary<string, Entry> _batches = new();
@@ -98,17 +98,17 @@ public sealed class InMemoryMapReduceBatchStore : IMapReduceBatchStore
         return Task.FromResult(results);
     }
 
-    public Task MarkProgressClosedAsync(string batchId, CancellationToken cancellationToken = default)
+    public Task MarkProgressClosedAsync(string batchId, ProgressClose close, CancellationToken cancellationToken = default)
     {
         if (_batches.TryGetValue(batchId, out var entry))
         {
-            Volatile.Write(ref entry.ProgressClosed, 1);
+            Volatile.Write(ref entry.ProgressClose, close);
         }
         return Task.CompletedTask;
     }
 
-    public Task<bool> IsProgressClosedAsync(string batchId, CancellationToken cancellationToken = default)
-        => Task.FromResult(_batches.TryGetValue(batchId, out var entry) && Volatile.Read(ref entry.ProgressClosed) == 1);
+    public Task<ProgressClose?> GetProgressCloseAsync(string batchId, CancellationToken cancellationToken = default)
+        => Task.FromResult(_batches.TryGetValue(batchId, out var entry) ? Volatile.Read(ref entry.ProgressClose) : null);
 
     public Task CompleteAsync(string batchId, CancellationToken cancellationToken = default)
     {

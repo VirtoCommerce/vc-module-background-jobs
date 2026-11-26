@@ -112,11 +112,14 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
             .ToList();
     }
 
-    public Task MarkProgressClosedAsync(string batchId, CancellationToken cancellationToken = default)
-        => _connection.GetDatabase().StringSetAsync(ProgressClosedKey(batchId), "1", _ttl);
+    public Task MarkProgressClosedAsync(string batchId, ProgressClose close, CancellationToken cancellationToken = default)
+        => _connection.GetDatabase().StringSetAsync(ProgressClosedKey(batchId), JsonConvert.SerializeObject(close), _ttl);
 
-    public Task<bool> IsProgressClosedAsync(string batchId, CancellationToken cancellationToken = default)
-        => _connection.GetDatabase().KeyExistsAsync(ProgressClosedKey(batchId));
+    public async Task<ProgressClose?> GetProgressCloseAsync(string batchId, CancellationToken cancellationToken = default)
+    {
+        var value = await _connection.GetDatabase().StringGetAsync(ProgressClosedKey(batchId));
+        return value.IsNullOrEmpty ? null : JsonConvert.DeserializeObject<ProgressClose>(value!);
+    }
 
     public async Task CompleteAsync(string batchId, CancellationToken cancellationToken = default)
     {
