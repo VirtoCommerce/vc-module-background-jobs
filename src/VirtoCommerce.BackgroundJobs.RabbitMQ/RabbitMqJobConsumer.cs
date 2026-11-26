@@ -428,15 +428,15 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         }
         else if (_rabbitMqOptions.UseDeadLetterQueue)
         {
-            _logger.LogError(ex, "Job {JobId} ({JobType}) failed on final attempt {Attempt}/{MaxAttempts}; dead-lettering",
-                jobId, envelope.JobType, envelope.Attempt, maxAttempts);
+            _logger.LogError(ex, "Job {JobId} ({JobType}) failed on final attempt {Attempt}/{TotalAttempts}; dead-lettering",
+                jobId, envelope.JobType, envelope.Attempt, maxAttempts + 1);
 
             await PublishToDeadLetterAsync(channel, envelope, jobId, ex);
         }
         else
         {
-            _logger.LogError(ex, "Job {JobId} ({JobType}) failed on final attempt {Attempt}/{MaxAttempts}; dropping (dead-letter queue disabled)",
-                jobId, envelope.JobType, envelope.Attempt, maxAttempts);
+            _logger.LogError(ex, "Job {JobId} ({JobType}) failed on final attempt {Attempt}/{TotalAttempts}; dropping (dead-letter queue disabled)",
+                jobId, envelope.JobType, envelope.Attempt, maxAttempts + 1);
         }
 
         return false;
