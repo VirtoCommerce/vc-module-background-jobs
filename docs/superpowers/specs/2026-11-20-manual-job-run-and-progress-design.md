@@ -331,11 +331,17 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
     result and may still have to trigger the reduce.
   - The reduce close is not gated. A batch is not deleted on a coordinator failure, so that a replay of the
     dead-lettered job can finish it; a replay that completes the batch closes it `Succeeded`.
-  - What remains: a map report that is sent after the reduce's success close **and** after `CompleteAsync` deleted the
-    record. The handshake finds no record then, and the report replaces the close. This is the delayed-report race the
-    baseline already had. A fan-out close is concurrent with running map tasks by construction, which is why the
-    handshake exists; the reduce close follows the last map report through a queue hop, so only a report delayed past
-    that hop and the `CompleteAsync` can land after it.
+  - What remains, all accepted:
+    - A map report sent after the reduce's success or `FailFast` close **and** after its `CompleteAsync` deleted the
+      record. The handshake finds no record then, and the report replaces the close. This is the delayed-report race
+      the baseline already had. A fan-out close is concurrent with running map tasks by construction, which is why the
+      handshake exists; the reduce close follows the last map report through a queue hop, so only a report delayed
+      past that hop and the `CompleteAsync` can land after it.
+    - A `Failed` close that lands after the reduce's `Succeeded` close, on a batch that still completed (a fan-out
+      whose final checkpoint failed after every map task was enqueued, or an engine that leaves `TotalAttempts` null):
+      either a map task re-read the `Failed` record and the reduce marked, closed and completed before its re-send, or
+      a `Failed` closer read the batch before the reduce's `CompleteAsync`. Both need the whole reduce to finish inside
+      one task's gap between two store calls.
 - **A `Failed` close is not sent for a batch that is already gone.** `CloseFailedOnFinalAttemptAsync` reads the batch
   (best effort) before it closes. When the read returns nothing, because the reduce completed the batch or it expired,
   no close is sent and no marker is set: a map task that fails on its final attempt after the reduce closed the batch
@@ -343,8 +349,8 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
 - **The reduce's results read is inside the final-attempt close.** `ReduceCoordinator` reads the map results and applies
   the `FailFast` check inside the scope whose catch closes `Failed` on the final attempt, so a store failure there on
   every attempt does not dead-letter the reduce with the bar left on "Mapped N/N". The batch read stays first and
-  outside, since there is nothing to close without a batch. The success close and `CompleteAsync` stay outside: a
-  `CompleteAsync` failure after a `Succeeded` close must not turn it `Failed`.
+  outside, since there is nothing to close without a batch. The success close, the `FailFast` close and their
+  `CompleteAsync` stay outside: a `CompleteAsync` failure after a close must not send a second close in its place.
 - **The engine closes the notification `Canceled` when the cancel was requested**, through the completion seam,
   because only the engine knows who tripped the token:
   - Hangfire: a cancel is a move to `Deleted` (`HangfireJobEngine.Delete`, or Delete in the Hangfire dashboard). The
@@ -701,10 +707,8 @@ the same assertion; items an engine may not support are capability-gated with th
     `GetResultsAsync` for a batch whose reduce handler is the matching marker type). Wrong state: the bar stays on
     "Mapped N/N". (§3.5)
 21. A map task whose first read of the close marker finds none and whose second finds one sends its report and then the
-    close; with no marker on either read it sends no close
-    (`MapTask_BatchClosedDuringItsReport_SendsTheCloseAgainAfterTheReport`,
-    `MapTask_BatchStillOpenAfterItsReport_SendsNoClose`). Wrong state: the bar is left running by a report that raced
-    the close. (§3.5)
+    close (`MapTask_BatchClosedDuringItsReport_SendsTheCloseAgainAfterTheReport`). Wrong state: the bar is left running
+    by a report that raced the close. (§3.5)
 22. A map task that fails on its final attempt closes the batch `Failed` while the batch exists and sends no close, and
     sets no marker, when the batch is gone
     (`MapTask_FailsOnFinalAttempt_ClosesFailedOnlyWhileTheBatchExists`). Wrong state: a `Succeeded` close replaced by
@@ -872,7 +876,7 @@ the same assertion; items an engine may not support are capability-gated with th
   the close (`ProgressClose`: description, outcome, finish time) and a map task that sends its report re-reads the
   marker and sends the close again when it is set, so a report that raced the close no longer leaves the bar running
   (§3.5). Accepting the check-then-send race was rejected: a fan-out close is concurrent with running map tasks by
-  construction, so the window is not the rare one it was described as. Both store members change shape from bool to
-  the record before any release. (2) A `Failed` close is skipped for a batch that is already gone. (3) The reduce's
-  results read and `FailFast` check moved inside the final-attempt close scope; the success close and `CompleteAsync`
-  stay outside. Scenario 20 holds one map task until the close was seen, and scenario 21 covers (3).
+  construction, so the window is not the rare one it was described as. The store's marker members take and return the
+  record instead of a flag, before any release. (2) A `Failed` close is skipped for a batch that is already gone. (3) The reduce's
+  results read and `FailFast` check moved inside the final-attempt close scope; the success and `FailFast` closes and
+  their `CompleteAsync` stay outside. Scenario 20 holds one map task until the close was seen, and scenario 21 covers (3).

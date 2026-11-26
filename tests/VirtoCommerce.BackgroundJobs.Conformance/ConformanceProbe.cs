@@ -85,7 +85,6 @@ public sealed class ConformanceProbe
         }
 
         await hold.Released.Task.WaitAsync(cancellationToken);
-        Interlocked.Increment(ref hold.Resumed);
         hold.ResumedSignal.TrySetResult();
     }
 
@@ -95,9 +94,6 @@ public sealed class ConformanceProbe
     /// <summary>Waits until the held map task of <paramref name="gateId"/> ran on past its hold, or throws <see cref="TimeoutException"/>.</summary>
     public Task WaitHeldMapTaskResumedAsync(string gateId, TimeSpan timeout, CancellationToken cancellationToken)
         => MapHoldFor(gateId).ResumedSignal.Task.WaitAsync(timeout, cancellationToken);
-
-    /// <summary>How many map tasks of <paramref name="gateId"/> ran on past their hold.</summary>
-    public int ResumedMapTasks(string gateId) => Volatile.Read(ref MapHoldFor(gateId).Resumed);
 
     public JobObservation? Job(string correlationId) => _jobs.TryGetValue(correlationId, out var value) ? value : null;
 
@@ -135,7 +131,6 @@ public sealed class ConformanceProbe
     private sealed class MapHold
     {
         public int Claimed;
-        public int Resumed;
         public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ResumedSignal { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }

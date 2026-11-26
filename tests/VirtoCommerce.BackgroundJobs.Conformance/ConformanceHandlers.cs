@@ -198,5 +198,5 @@ public sealed class ConformanceFanOutCheckpointFailureReduceHandler : IReduceJob
 public sealed class ConformanceResultsReadFailureReduceHandler : IReduceJobHandler<ConformanceReduceState, ConformanceMapResult>
 {
     public Task Reduce(ConformanceReduceState state, IReadOnlyCollection<MapResult<ConformanceMapResult>> results, IJobExecutionContext context, CancellationToken cancellationToken = default)
-        => throw new NotSupportedException("The reduce never reads its results.");
+        => throw new NotSupportedException("The reduce never reaches its handler.");
 }

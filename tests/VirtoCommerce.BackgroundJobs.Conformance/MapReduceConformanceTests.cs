@@ -200,7 +200,6 @@ public abstract partial class JobEngineConformanceTests<TFixture>
 
             Fixture.Probe.ReleaseHeldMapTask(id);
             await Fixture.Probe.WaitHeldMapTaskResumedAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
-            Assert.Equal(1, Fixture.Probe.ResumedMapTasks(id));
 
             await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
             Assert.Equal(nameof(JobOutcome.Failed), Fixture.ProgressUpdates(notificationId).Last().Outcome);

@@ -88,7 +88,7 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
                         new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },
                         cancellationToken);
 
-                    if (await _store.GetProgressCloseAsync(envelope.BatchId, cancellationToken) is { } close)
+                    if (await _store.GetProgressCloseAsync(envelope.BatchId, CancellationToken.None) is { } close)
                     {
                         await MapReduceBatchNotification.SendCloseAsync(_pushNotificationManager, batch, close, _logger);
                     }

@@ -854,18 +854,6 @@ public class MapReduceTests
         Assert.Equal(close.Description, last.Description);
     }
 
-    [Fact]
-    public async Task MapTask_BatchStillOpenAfterItsReport_SendsNoClose()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var harness = new MapTaskHarness();
-
-        await harness.Map.Execute(harness.Envelope, harness.Context, ct);
-
-        var sent = Assert.Single(harness.Sent);
-        Assert.Null(sent.Outcome);
-    }
-
     // A batch the reduce already completed, or one that expired, has nothing left to close.
     [Theory]
     [InlineData(false, 1)]

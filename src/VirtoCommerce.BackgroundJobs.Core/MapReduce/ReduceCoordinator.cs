@@ -53,47 +53,17 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
         }
 
         var failures = 0;
+        var faulted = false;
         try
         {
             var results = await _store.GetResultsAsync(envelope.BatchId, cancellationToken);
             failures = results.Count(x => !x.Succeeded);
+            faulted = batch.FailurePolicy == FailurePolicy.FailFast && failures > 0;
 
-            if (batch.FailurePolicy == FailurePolicy.FailFast && failures > 0)
+            if (!faulted)
             {
-                _logger.LogError("Map/reduce batch {BatchId} faulted: {Failures}/{Total} map items failed (FailFast); reduce skipped.",
-                    envelope.BatchId, failures, batch.Total);
-                await MapReduceBatchNotification.CloseAsync(_store, _pushNotificationManager, batch, $"Faulted: {failures}/{batch.Total} map items failed.", JobOutcome.Failed, _logger);
-                await _store.CompleteAsync(envelope.BatchId, cancellationToken);
-                return;
+                await ReduceAsync(batch, results, context, cancellationToken);
             }
-
-            var resultType = Type.GetType(batch.ResultType)
-                ?? throw new InvalidOperationException($"Cannot resolve map result type '{batch.ResultType}'.");
-            var stateType = Type.GetType(batch.StateType)
-                ?? throw new InvalidOperationException($"Cannot resolve reduce state type '{batch.StateType}'.");
-
-            var state = _serializer.Deserialize(batch.StateType, batch.StateJson);
-            var mapResults = BuildMapResults(results, resultType);
-
-            var handlerInterfaceType = typeof(IReduceJobHandler<,>).MakeGenericType(stateType, resultType);
-
-            // Handler-explicit batch names the concrete reduce handler; resolve it by type. Otherwise resolve by interface.
-            object handler;
-            if (!string.IsNullOrEmpty(batch.ReduceHandlerType))
-            {
-                var concreteHandlerType = Type.GetType(batch.ReduceHandlerType)
-                    ?? throw new InvalidOperationException($"Cannot resolve reduce handler type '{batch.ReduceHandlerType}'.");
-                handler = _serviceProvider.GetService(concreteHandlerType)
-                    ?? throw new InvalidOperationException($"No reduce handler '{concreteHandlerType.Name}' is registered.");
-            }
-            else
-            {
-                handler = _serviceProvider.GetService(handlerInterfaceType)
-                    ?? throw new InvalidOperationException($"No IReduceJobHandler<{stateType.Name}, {resultType.Name}> is registered.");
-            }
-
-            var reduceMethod = handlerInterfaceType.GetMethod(nameof(IReduceJobHandler<object, object>.Reduce))!;
-            await (Task)reduceMethod.Invoke(handler, [state, mapResults, context, cancellationToken])!;
         }
         catch (Exception ex)
         {
@@ -106,10 +76,50 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             ExceptionDispatchInfo.Throw(actual);
         }
 
+        if (faulted)
+        {
+            _logger.LogError("Map/reduce batch {BatchId} faulted: {Failures}/{Total} map items failed (FailFast); reduce skipped.",
+                envelope.BatchId, failures, batch.Total);
+            await MapReduceBatchNotification.CloseAsync(_store, _pushNotificationManager, batch, $"Faulted: {failures}/{batch.Total} map items failed.", JobOutcome.Failed, _logger);
+            await _store.CompleteAsync(envelope.BatchId, cancellationToken);
+            return;
+        }
+
         await MapReduceBatchNotification.CloseAsync(_store, _pushNotificationManager, batch, $"Completed ({batch.Total} items, {failures} failed).", JobOutcome.Succeeded, _logger);
         await _store.CompleteAsync(envelope.BatchId, cancellationToken);
         _logger.LogInformation("Map/reduce batch {BatchId} reduced ({Total} items, {Failures} failed).",
             envelope.BatchId, batch.Total, failures);
+    }
+
+    private async Task ReduceAsync(MapReduceBatch batch, IReadOnlyCollection<MapResultRecord> results, IJobExecutionContext context, CancellationToken cancellationToken)
+    {
+        var resultType = Type.GetType(batch.ResultType)
+            ?? throw new InvalidOperationException($"Cannot resolve map result type '{batch.ResultType}'.");
+        var stateType = Type.GetType(batch.StateType)
+            ?? throw new InvalidOperationException($"Cannot resolve reduce state type '{batch.StateType}'.");
+
+        var state = _serializer.Deserialize(batch.StateType, batch.StateJson);
+        var mapResults = BuildMapResults(results, resultType);
+
+        var handlerInterfaceType = typeof(IReduceJobHandler<,>).MakeGenericType(stateType, resultType);
+
+        // Handler-explicit batch names the concrete reduce handler; resolve it by type. Otherwise resolve by interface.
+        object handler;
+        if (!string.IsNullOrEmpty(batch.ReduceHandlerType))
+        {
+            var concreteHandlerType = Type.GetType(batch.ReduceHandlerType)
+                ?? throw new InvalidOperationException($"Cannot resolve reduce handler type '{batch.ReduceHandlerType}'.");
+            handler = _serviceProvider.GetService(concreteHandlerType)
+                ?? throw new InvalidOperationException($"No reduce handler '{concreteHandlerType.Name}' is registered.");
+        }
+        else
+        {
+            handler = _serviceProvider.GetService(handlerInterfaceType)
+                ?? throw new InvalidOperationException($"No IReduceJobHandler<{stateType.Name}, {resultType.Name}> is registered.");
+        }
+
+        var reduceMethod = handlerInterfaceType.GetMethod(nameof(IReduceJobHandler<object, object>.Reduce))!;
+        await (Task)reduceMethod.Invoke(handler, [state, mapResults, context, cancellationToken])!;
     }
 
     // Re-hydrate the type-erased records into a List<MapResult<TResult>> the reduce handler can accept as
