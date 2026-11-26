@@ -59,7 +59,7 @@ internal static class MapReduceBatchNotification
                 batch.ProgressNotificationId, close.Outcome));
 
     // A cancel leaves the bar open: the engine decides what a cancel means.
-    public static Task CloseFailedOnFinalAttemptAsync(
+    public static async Task CloseFailedOnFinalAttemptAsync(
         IMapReduceBatchStore store,
         IPushNotificationManager pushNotificationManager,
         MapReduceBatch batch,
@@ -70,11 +70,23 @@ internal static class MapReduceBatchNotification
         CancellationToken cancellationToken)
     {
         var canceled = exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
-        if (context is JobExecutionContext { IsFinalAttempt: true } && !canceled)
+        if (context is JobExecutionContext { IsFinalAttempt: true } && !canceled && !await IsGoneAsync(store, batch, logger))
         {
-            return CloseAsync(store, pushNotificationManager, batch, $"{stage} failed: {exception.Message}", JobOutcome.Failed, logger);
+            await CloseAsync(store, pushNotificationManager, batch, $"{stage} failed: {exception.Message}", JobOutcome.Failed, logger);
         }
+    }
 
-        return Task.CompletedTask;
+    private static async Task<bool> IsGoneAsync(IMapReduceBatchStore store, MapReduceBatch batch, ILogger logger)
+    {
+        try
+        {
+            return await store.GetAsync(batch.BatchId) is null;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not read batch {BatchId} before closing its progress as Failed; closing it.", batch.BatchId);
+
+            return false;
+        }
     }
 }

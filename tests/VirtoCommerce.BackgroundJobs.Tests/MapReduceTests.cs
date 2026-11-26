@@ -865,4 +865,26 @@ public class MapReduceTests
         var sent = Assert.Single(harness.Sent);
         Assert.Null(sent.Outcome);
     }
+
+    // The reduce already completed the batch, or it expired: nothing is left to close, and a close would reopen nothing.
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 0)]
+    public async Task MapTask_FailsOnFinalAttempt_ClosesFailedOnlyWhileTheBatchExists(bool batchGone, int expectedCloses)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new MapTaskHarness(finalAttempt: true);
+        harness.Store.SetupSequence(x => x.GetAsync(harness.Batch.BatchId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(harness.Batch)
+            .ReturnsAsync(batchGone ? null : harness.Batch);
+        harness.Store.Setup(x => x.SaveResultAndCountAsync(harness.Batch.BatchId, It.IsAny<MapResultRecord>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("store down"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Map.Execute(harness.Envelope, harness.Context, ct));
+
+        Assert.Equal(expectedCloses, harness.Sent.Count(x => x.Outcome == nameof(JobOutcome.Failed)));
+        harness.Store.Verify(
+            x => x.MarkProgressClosedAsync(harness.Batch.BatchId, It.IsAny<ProgressClose>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(expectedCloses));
+    }
 }
