@@ -350,8 +350,10 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
       they arrive over the backplane, so the storage order across instances is not global. A map report sent on one
       instance before the close was marked can be stored on the closing instance after that close, and the handshake's
       re-read, which saw no record, does not repair it.
-    - A `Failed` closer that read the batch before the reduce's `CompleteAsync` and marks after it recreates the
-      `progressclosed` record as an orphan key. It expires with the store's TTL (7 days) and nothing reads it.
+    - On the Redis store, a `Failed` closer that read the batch before the reduce's `CompleteAsync` and marks after it
+      recreates the `progressclosed` key as an orphan, which expires with the store's TTL (7 days). A map task still in
+      its report step can read it and re-send that `Failed` close, which is the case of the `Failed`-after-`Succeeded`
+      bullet above. The in-memory store does not recreate the record.
 - **A `Failed` close is not sent for a batch that is already gone.** `CloseFailedOnFinalAttemptAsync` reads the batch
   (best effort) before it closes. When the read returns nothing, because the reduce completed the batch or it expired,
   no close is sent and no marker is set: a map task that fails on its final attempt after the reduce closed the batch
@@ -710,9 +712,9 @@ the same assertion; items an engine may not support are capability-gated with th
     (`MapReduce_FanOut_Failure_After_Enqueuing_Map_Tasks_Keeps_Notification_Failed`). One map task of the batch waits
     in its handler until the test has seen the close, so a map task is sure to run after it; the others pass at once,
     so the wait blocks one worker and the fan-out's retries still run. The scenario needs an engine that runs at least
-    two jobs at once: on a single-slot engine the waiting map task blocks the fan-out's retries and the scenario times
-    out, and its gate is only `SupportsRetry` and `ReportsAttemptBudget`. Wrong state: the batch's bar shows running
-    for good. (§3.5)
+    two jobs at once: on a single-slot engine the waiting map task can block the fan-out's retries and the scenario
+    times out, and its gate is only `SupportsRetry` and `ReportsAttemptBudget`. Wrong state: the batch's bar shows
+    running for good. (§3.5)
 20. Conformance, gated as item 19: a reduce whose read of the map results fails on every attempt closes the shared
     notification `Failed` on the final one, with the error in the description, and the last update is still that close
     (`MapReduce_Reduce_Results_Read_Failure_On_Final_Attempt_Closes_Notification_Failed`; the kit's batch store fails
