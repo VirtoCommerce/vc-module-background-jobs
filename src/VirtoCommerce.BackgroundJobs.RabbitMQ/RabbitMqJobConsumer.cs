@@ -276,12 +276,15 @@ public sealed class RabbitMqJobConsumer : BackgroundService
                 // expected when the watch loop is stopped
             }
 
-            if (!string.IsNullOrEmpty(jobId) && acked && !retryPublished)
+            if (ShouldClearCancelFlag(jobId, acked, retryPublished))
             {
                 await _cancellationStore.Clear(jobId);
             }
         }
     }
+
+    private static bool ShouldClearCancelFlag(string jobId, bool acked, bool retryPublished)
+        => !string.IsNullOrEmpty(jobId) && acked && !retryPublished;
 
     // Polls the shared cancellation store for a running job and trips its token when a cancel is requested. Stops when
     // the job settles (watchStopToken) or once a cancel has been observed and signaled.

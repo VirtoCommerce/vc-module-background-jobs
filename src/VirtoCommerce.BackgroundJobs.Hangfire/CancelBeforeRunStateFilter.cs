@@ -25,7 +25,7 @@ public sealed class CancelBeforeRunStateFilter(IPushNotificationManager pushNoti
     {
         try
         {
-            if (context?.NewState is not DeletedState || !HasNotRun(context.OldStateName))
+            if (context.NewState is not DeletedState || !HasNotRun(context.OldStateName))
             {
                 return;
             }
@@ -48,7 +48,7 @@ public sealed class CancelBeforeRunStateFilter(IPushNotificationManager pushNoti
         catch (Exception ex)
         {
             _logger.ErrorException(
-                $"Failed to close the progress notification of the job '{context?.BackgroundJob?.Id}' canceled before it ran.",
+                $"Failed to close the progress notification of the job '{context.BackgroundJob?.Id}' canceled before it ran.",
                 ex);
         }
     }

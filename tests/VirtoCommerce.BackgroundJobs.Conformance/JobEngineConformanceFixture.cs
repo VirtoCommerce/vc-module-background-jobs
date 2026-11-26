@@ -57,11 +57,13 @@ public abstract class JobEngineConformanceFixture : IAsyncLifetime
 
     private static readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(25);
 
+    private const int _defaultRetryBudget = 3;
+
     /// <summary>
     /// The engine's global retry count; a job gets <c>RetryBudget + 1</c> attempts. Scenarios state expectations from
     /// it, never as a literal.
     /// </summary>
-    public virtual int RetryBudget => 3;
+    public virtual int RetryBudget => _defaultRetryBudget;
 
     /// <summary>A queue no worker of the engine under test drains.</summary>
     public virtual string UnservedQueue => "conformance-unserved";

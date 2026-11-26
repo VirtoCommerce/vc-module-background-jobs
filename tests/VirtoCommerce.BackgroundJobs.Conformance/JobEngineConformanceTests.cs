@@ -390,8 +390,10 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         {
             Assert.Equal(fixture.RetryBudget + 1, closing.TotalAttempts);
             // Hangfire closes at the failed attempt (1); the other engines at the next one (2).
+            const int failedAttempt = 1;
+            const int nextAttempt = 2;
             Assert.NotNull(closing.Attempt);
-            Assert.InRange(closing.Attempt.Value, 1, 2);
+            Assert.InRange(closing.Attempt.Value, failedAttempt, nextAttempt);
         }
 
         await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);

@@ -36,15 +36,7 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
 
     public void OnStateElection(ElectStateContext context)
     {
-        // Enqueued counts as a retry only after a traversed failure: an ordinary enqueue produces it too.
-        var failureTraversed = context.TraversedStates.Any(x => x is FailedState);
-        var retryElected = context.CandidateState is ScheduledState
-            || (context.CandidateState is EnqueuedState && failureTraversed);
-        var failed = context.CandidateState is FailedState;
-
-        var deletedAfterFailure = context.CandidateState is DeletedState && failureTraversed;
-
-        if (!retryElected && !failed && !deletedAfterFailure)
+        if (!IsRetryRelevant(context, out var retryElected))
         {
             return;
         }
@@ -74,6 +66,19 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
         {
             RaiseRetryLimit(context, limit);
         }
+    }
+
+    private static bool IsRetryRelevant(ElectStateContext context, out bool retryElected)
+    {
+        // Enqueued counts as a retry only after a traversed failure: an ordinary enqueue produces it too.
+        var failureTraversed = context.TraversedStates.Any(x => x is FailedState);
+        retryElected = context.CandidateState is ScheduledState
+            || (context.CandidateState is EnqueuedState && failureTraversed);
+        var failed = context.CandidateState is FailedState;
+
+        var deletedAfterFailure = context.CandidateState is DeletedState && failureTraversed;
+
+        return retryElected || failed || deletedAfterFailure;
     }
 
     /// <summary>

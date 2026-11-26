@@ -49,47 +49,52 @@ public sealed class ReferenceJobEngine(
 
         try
         {
-            for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
-            {
-                // Built before the cancellation check, so a cancel before this attempt closes with its attempt and
-                // total, not the envelope's defaults.
-                var attemptEnvelope = envelope with { Attempt = attempt, TotalAttempts = maxRetries + 1 };
-                var context = JobExecutionContextFactory.Create(pushNotificationManager, attemptEnvelope, jobId);
-
-                try
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    _states[jobId] = "Processing";
-                    using var scope = scopeFactory.CreateScope();
-                    var dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcher>();
-
-                    await dispatcher.Dispatch(attemptEnvelope, context, cancellationToken);
-                    _states[jobId] = "Succeeded";
-                    return;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    // The job's token has no writer but Delete: a requested cancel, never retried. Close it Canceled;
-                    // the dispatcher leaves it open.
-                    _states[jobId] = "Cancelled";
-                    await context.Progress.TryCompleteCanceledAsync(NullLogger.Instance, jobId);
-                    return;
-                }
-                catch
-                {
-                    // Failed is terminal: while an attempt is left to retry, the job is still Processing.
-                    if (attempt > maxRetries)
-                    {
-                        _states[jobId] = "Failed";
-                    }
-                }
-            }
+            await RunAttemptsAsync(jobId, envelope, maxRetries, cancellationToken);
         }
         finally
         {
             if (_running.TryRemove(jobId, out var cts))
             {
                 cts.Dispose();
+            }
+        }
+    }
+
+    private async Task RunAttemptsAsync(string jobId, JobEnvelope envelope, int maxRetries, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
+        {
+            // Built before the cancellation check, so a cancel before this attempt closes with its attempt and
+            // total, not the envelope's defaults.
+            var attemptEnvelope = envelope with { Attempt = attempt, TotalAttempts = maxRetries + 1 };
+            var context = JobExecutionContextFactory.Create(pushNotificationManager, attemptEnvelope, jobId);
+
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                _states[jobId] = "Processing";
+                using var scope = scopeFactory.CreateScope();
+                var dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcher>();
+
+                await dispatcher.Dispatch(attemptEnvelope, context, cancellationToken);
+                _states[jobId] = "Succeeded";
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The job's token has no writer but Delete: a requested cancel, never retried. Close it Canceled;
+                // the dispatcher leaves it open.
+                _states[jobId] = "Cancelled";
+                await context.Progress.TryCompleteCanceledAsync(NullLogger.Instance, jobId);
+                return;
+            }
+            catch
+            {
+                // Failed is terminal: while an attempt is left to retry, the job is still Processing.
+                if (attempt > maxRetries)
+                {
+                    _states[jobId] = "Failed";
+                }
             }
         }
     }

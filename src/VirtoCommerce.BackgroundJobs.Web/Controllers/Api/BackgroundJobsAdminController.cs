@@ -62,14 +62,9 @@ public class BackgroundJobsAdminController(
             return BadRequest(ModelState);
         }
 
-        if (!string.IsNullOrEmpty(request?.Options?.ProgressNotificationId))
+        if (GetRequestRejection(request) is { } rejection)
         {
-            return BadRequest("'options.progressNotificationId' is not accepted over REST: a progress notification is created by the endpoint when 'options.reportProgress' is set.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request?.Name))
-        {
-            return BadRequest("A registered job 'name' is required.");
+            return BadRequest(rejection);
         }
 
         var descriptor = query.FindRegisteredJob(request.Name);
@@ -120,5 +115,20 @@ public class BackgroundJobsAdminController(
             // Handler/payload mismatch (should be rare — the payload was already bound to the descriptor's type).
             return BadRequest(ex.Message);
         }
+    }
+
+    private static string? GetRequestRejection(EnqueueJobRequest? request)
+    {
+        if (!string.IsNullOrEmpty(request?.Options?.ProgressNotificationId))
+        {
+            return "'options.progressNotificationId' is not accepted over REST: a progress notification is created by the endpoint when 'options.reportProgress' is set.";
+        }
+
+        if (string.IsNullOrWhiteSpace(request?.Name))
+        {
+            return "A registered job 'name' is required.";
+        }
+
+        return null;
     }
 }

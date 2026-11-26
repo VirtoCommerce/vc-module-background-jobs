@@ -14,7 +14,7 @@ namespace VirtoCommerce.BackgroundJobs.Conformance;
 /// </summary>
 public abstract partial class JobEngineConformanceTests<TFixture>
 {
-    private static readonly string _mapReduceTitle = $"Map/reduce: {nameof(ConformanceMapItem)}";
+    private const string _mapReduceTitle =$"Map/reduce: {nameof(ConformanceMapItem)}";
 
     private async Task<ConformanceProbe.ReduceObservation> RunBatchAsync(string correlationId, ConformanceMapItem[] items, MapReduceOptions? options)
     {
