@@ -88,6 +88,7 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
                         new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },
                         cancellationToken);
 
+                    // Not the job's token: a cancel after the report must not skip re-sending a close the report raced.
                     if (await _store.GetProgressCloseAsync(envelope.BatchId, CancellationToken.None) is { } close)
                     {
                         await MapReduceBatchNotification.SendCloseAsync(_pushNotificationManager, batch, close, _logger);

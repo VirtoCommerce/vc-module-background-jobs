@@ -877,6 +877,7 @@ the same assertion; items an engine may not support are capability-gated with th
   marker and sends the close again when it is set, so a report that raced the close no longer leaves the bar running
   (§3.5). Accepting the check-then-send race was rejected: a fan-out close is concurrent with running map tasks by
   construction, so the window is not the rare one it was described as. The store's marker members take and return the
-  record instead of a flag, before any release. (2) A `Failed` close is skipped for a batch that is already gone. (3) The reduce's
-  results read and `FailFast` check moved inside the final-attempt close scope; the success and `FailFast` closes and
-  their `CompleteAsync` stay outside. Scenario 20 holds one map task until the close was seen, and scenario 21 covers (3).
+  record instead of a flag, before any release. (2) A `Failed` close is skipped for a batch that is already gone.
+  (3) The reduce's results read and `FailFast` check moved inside the final-attempt close scope; the success and
+  `FailFast` closes and their `CompleteAsync` stay outside. Scenario 20 holds one map task until the close was seen,
+  and scenario 21 covers (3).
