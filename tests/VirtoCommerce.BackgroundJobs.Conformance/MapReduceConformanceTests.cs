@@ -170,7 +170,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         Assert.NotNull(closing.Finished);
         Assert.Contains("Conformance-induced map failure", closing.Description);
 
-        // Both map tasks may observe the batch complete and fail on the claim, so the bar can close twice — always Failed.
+        // Both map tasks may observe the batch complete and fail on the claim: the bar can close twice, always Failed.
         await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
         var updates = Fixture.ProgressUpdates(notificationId);
         Assert.All(updates.Where(x => x.Outcome is not null), x => Assert.Equal(nameof(JobOutcome.Failed), x.Outcome));
@@ -193,6 +193,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
             notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
 
         Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.Contains("Conformance-induced fan-out checkpoint failure", closing.Description);
 
         await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
         Assert.Equal(nameof(JobOutcome.Failed), Fixture.ProgressUpdates(notificationId).Last().Outcome);

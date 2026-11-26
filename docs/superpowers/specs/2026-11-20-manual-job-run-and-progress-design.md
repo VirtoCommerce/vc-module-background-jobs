@@ -226,7 +226,8 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   after the message was routed); if a worker does run it, the worker's own sends replace the close, so the
   notification can show `Failed` and then change.
 - **One builder produces every `JobProgressPushNotification`** (today built in `PushNotificationJobProgress.Report`/
-  `Complete`, `MapReduceJob.TryCreateProgressNotificationAsync` and `MapReduceBatchNotification.CloseAsync`). For an
+  `Complete`, `JobProgressPushNotification.CreateQueued` / `CreateEnqueueFailed` and
+  `MapReduceBatchNotification.CloseAsync`). For an
   **owned** notification:
   - `Started` and `Created` come from the envelope's `JobHeaders.EnqueuedAt` and stay the same on every update.
   - Progress updates send `IsNew = false`, so the notification is not raised again while the job runs and one the
@@ -308,14 +309,16 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
     close is logged, never thrown.
 - **A closed batch notification stays closed.** Platform storage keeps only the last send to a notification id. A
   fan-out or map task that fails on its final attempt after some map tasks were already enqueued closes the bar
-  `Failed`, and the map tasks that then run send "Mapped k/N" under the same id, which replaces the close and, since the
-  total is never reached, leaves the bar running for good.
+  `Failed`, and the map tasks that then run send "Mapped k/N" under the same id, which replaces the close and, since no
+  later close follows, leaves the bar running for good.
   - `IMapReduceBatchStore` gains `MarkProgressClosedAsync` and `IsProgressClosedAsync`, with default implementations
     (mark does nothing, check returns `false`), so a third-party store compiles and keeps the earlier behaviour. The
     in-memory store keeps a flag on the batch entry; the Redis store a `progressclosed` key with the store's TTL,
     deleted by `CompleteAsync` with the batch's other keys.
-  - `MapReduceBatchNotification.CloseAsync` marks the batch before it sends the close, so every close of a batch with
-    a notification marks: the reduce's success, fault and failure, and the fan-out and map failures. A failure to mark
+  - `MapReduceBatchNotification.CloseAsync` marks the batch before it sends the close, so every coordinator close of a
+    batch with a notification marks: the reduce's success, fault and failure, and the fan-out and map failures. The
+    enqueue-failed close does not go through it; worker sends may replace that close, as accepted
+    above. A failure to mark
     is logged and the close is still sent.
   - `MapCoordinator` checks the marker before each throttled progress report and skips the report when it is set.
     The check runs inside the best-effort send, so a failed read is logged like a failed report and never fails the
