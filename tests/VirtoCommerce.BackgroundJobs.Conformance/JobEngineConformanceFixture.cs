@@ -11,6 +11,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
 using VirtoCommerce.BackgroundJobs.Core;
+using VirtoCommerce.BackgroundJobs.Core.MapReduce;
 using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.BackgroundJobs.Data.Cancellation;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
@@ -165,6 +166,7 @@ public abstract class JobEngineConformanceFixture : IAsyncLifetime
             options.DefaultQueue = "default";
             options.MaxRetryAttempts = RetryBudget;
         });
+        services.AddSingleton<IMapReduceBatchStore>(new ConformanceFaultInjectingBatchStore(new InMemoryMapReduceBatchStore()));
         services.AddMapReduce();
         services.AddJobCancellationStore();
 

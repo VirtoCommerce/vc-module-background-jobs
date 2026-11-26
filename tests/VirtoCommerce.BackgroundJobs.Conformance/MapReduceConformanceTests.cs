@@ -129,4 +129,48 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
         Assert.Single(Fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);
     }
+
+    // 18 — a fan-out that fails on its final attempt closes the batch's shared notification Failed.
+    [Fact]
+    public async Task MapReduce_FanOut_Failure_On_Final_Attempt_Closes_Notification_Failed()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            Fixture.Capabilities.SupportsRetry && Fixture.Capabilities.ReportsAttemptBudget,
+            "engine does not retry failed jobs or does not report its attempt budget.");
+        var id = NewId();
+
+        var notificationId = await EnqueueReportingBatchAsync<ConformanceFanOutFailureReduceHandler>(new ConformanceReduceState { CorrelationId = id });
+        var closing = await Fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.NotNull(closing.Finished);
+        Assert.Contains("Conformance-induced fan-out failure", closing.Description);
+
+        await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+        Assert.Single(Fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);
+    }
+
+    // 19 — the same for the map task that completes the batch and fails before the reduce is enqueued.
+    [Fact]
+    public async Task MapReduce_Map_Failure_On_Final_Attempt_Closes_Notification_Failed()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            Fixture.Capabilities.SupportsRetry && Fixture.Capabilities.ReportsAttemptBudget,
+            "engine does not retry failed jobs or does not report its attempt budget.");
+        var id = NewId();
+
+        var notificationId = await EnqueueReportingBatchAsync<ConformanceMapFailureReduceHandler>(new ConformanceReduceState { CorrelationId = id });
+        var closing = await Fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.NotNull(closing.Finished);
+        Assert.Contains("Conformance-induced map failure", closing.Description);
+
+        await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+        Assert.Single(Fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);
+    }
 }

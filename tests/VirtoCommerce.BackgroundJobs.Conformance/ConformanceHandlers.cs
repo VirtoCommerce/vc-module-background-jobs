@@ -150,3 +150,23 @@ public sealed class ConformanceUnregisteredReduceHandler : IReduceJobHandler<Con
     public Task Reduce(ConformanceReduceState state, IReadOnlyCollection<MapResult<ConformanceMapResult>> results, IJobExecutionContext context, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Never registered, so never resolved.");
 }
+
+/// <summary>
+/// A reduce handler that makes the fixture's batch store fail the fan-out step of its batch, on every attempt. Never
+/// executed: the batch does not reach reduce.
+/// </summary>
+public sealed class ConformanceFanOutFailureReduceHandler : IReduceJobHandler<ConformanceReduceState, ConformanceMapResult>
+{
+    public Task Reduce(ConformanceReduceState state, IReadOnlyCollection<MapResult<ConformanceMapResult>> results, IJobExecutionContext context, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("The batch never reaches reduce.");
+}
+
+/// <summary>
+/// A reduce handler that makes the fixture's batch store fail the map task that completes the batch, on every attempt.
+/// Never executed: the batch does not reach reduce.
+/// </summary>
+public sealed class ConformanceMapFailureReduceHandler : IReduceJobHandler<ConformanceReduceState, ConformanceMapResult>
+{
+    public Task Reduce(ConformanceReduceState state, IReadOnlyCollection<MapResult<ConformanceMapResult>> results, IJobExecutionContext context, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("The batch never reaches reduce.");
+}

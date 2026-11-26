@@ -144,8 +144,8 @@ public class MapReduceTests
         userResolver.Setup(x => x.GetCurrentUserName()).Returns("tester");
 
         var facade = new MapReduceJob(bus, store, serializer, userResolver.Object, Mock.Of<IPushNotificationManager>());
-        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
-        var map = new MapCoordinator(sp, serializer, store, bus, NullLogger<MapCoordinator>.Instance);
+        var fanOut = new FanOutCoordinator(store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<FanOutCoordinator>.Instance);
+        var map = new MapCoordinator(sp, serializer, store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<MapCoordinator>.Instance);
         var reduce = new ReduceCoordinator(sp, serializer, store, Mock.Of<IPushNotificationManager>(), NullLogger<ReduceCoordinator>.Instance);
 
         return (facade, fanOut, map, reduce, bus, store, reducer);
@@ -318,7 +318,7 @@ public class MapReduceTests
 
         var serializer = new JsonJobPayloadSerializer();
         var store = new InMemoryMapReduceBatchStore();
-        var map = new MapCoordinator(sp, serializer, store, new ThrowOnReduceBackgroundJob(), NullLogger<MapCoordinator>.Instance);
+        var map = new MapCoordinator(sp, serializer, store, new ThrowOnReduceBackgroundJob(), Mock.Of<IPushNotificationManager>(), NullLogger<MapCoordinator>.Instance);
 
         await store.CreateAsync(new MapReduceBatch
         {
@@ -349,7 +349,7 @@ public class MapReduceTests
         var ct = TestContext.Current.CancellationToken;
         var store = new InMemoryMapReduceBatchStore();
         var bus = new CapturingBackgroundJob();
-        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
+        var fanOut = new FanOutCoordinator(store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<FanOutCoordinator>.Instance);
 
         await store.CreateAsync(new MapReduceBatch { BatchId = "b", Total = 2 }, ct); // expects 2 items; none stored
 
@@ -368,7 +368,7 @@ public class MapReduceTests
         var serializer = new JsonJobPayloadSerializer();
         var store = new InMemoryMapReduceBatchStore();
         var bus = new CapturingBackgroundJob();
-        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
+        var fanOut = new FanOutCoordinator(store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<FanOutCoordinator>.Instance);
 
         await store.CreateAsync(new MapReduceBatch { BatchId = "b", Total = 4 }, ct);
         var items = Enumerable.Range(0, 4)
@@ -399,7 +399,7 @@ public class MapReduceTests
         var serializer = new JsonJobPayloadSerializer();
         var store = new InMemoryMapReduceBatchStore();
         var bus = new CrashOnceBackgroundJob(throwOnCall: 2); // enqueue index 0, then "crash" on index 1
-        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
+        var fanOut = new FanOutCoordinator(store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<FanOutCoordinator>.Instance);
 
         await store.CreateAsync(new MapReduceBatch { BatchId = "b", Total = 3 }, ct);
         var items = Enumerable.Range(0, 3)
@@ -443,8 +443,8 @@ public class MapReduceTests
         userResolver.Setup(x => x.GetCurrentUserName()).Returns("tester");
 
         var facade = new MapReduceJob(bus, store, serializer, userResolver.Object, Mock.Of<IPushNotificationManager>());
-        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
-        var map = new MapCoordinator(sp, serializer, store, bus, NullLogger<MapCoordinator>.Instance);
+        var fanOut = new FanOutCoordinator(store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<FanOutCoordinator>.Instance);
+        var map = new MapCoordinator(sp, serializer, store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<MapCoordinator>.Instance);
         var reduce = new ReduceCoordinator(sp, serializer, store, Mock.Of<IPushNotificationManager>(), NullLogger<ReduceCoordinator>.Instance);
 
         // Batch A — SquareHandler: 1,2,3 -> 1,4,9 = 14
@@ -574,8 +574,8 @@ public class MapReduceTests
             var sp = services.BuildServiceProvider();
 
             Facade = new MapReduceJob(bus, Store, Serializer, userResolver.Object, Manager.Object);
-            FanOut = new FanOutCoordinator(Store, bus, NullLogger<FanOutCoordinator>.Instance);
-            Map = new MapCoordinator(sp, Serializer, Store, bus, NullLogger<MapCoordinator>.Instance);
+            FanOut = new FanOutCoordinator(Store, bus, Manager.Object, NullLogger<FanOutCoordinator>.Instance);
+            Map = new MapCoordinator(sp, Serializer, Store, bus, Manager.Object, NullLogger<MapCoordinator>.Instance);
             Reduce = new ReduceCoordinator(sp, Serializer, Store, Manager.Object, NullLogger<ReduceCoordinator>.Instance);
         }
 

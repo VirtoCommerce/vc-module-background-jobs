@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.Platform.Core.Jobs;
+using VirtoCommerce.Platform.Core.PushNotifications;
 
 namespace VirtoCommerce.BackgroundJobs.Core.MapReduce;
 
@@ -22,6 +23,7 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
     private readonly IJobPayloadSerializer _serializer;
     private readonly IMapReduceBatchStore _store;
     private readonly IBackgroundJob _backgroundJob;
+    private readonly IPushNotificationManager _pushNotificationManager;
     private readonly ILogger<MapCoordinator> _logger;
 
     public MapCoordinator(
@@ -29,12 +31,14 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
         IJobPayloadSerializer serializer,
         IMapReduceBatchStore store,
         IBackgroundJob backgroundJob,
+        IPushNotificationManager pushNotificationManager,
         ILogger<MapCoordinator> logger)
     {
         _serviceProvider = serviceProvider;
         _serializer = serializer;
         _store = store;
         _backgroundJob = backgroundJob;
+        _pushNotificationManager = pushNotificationManager;
         _logger = logger;
     }
 
@@ -50,6 +54,20 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
             return;
         }
 
+        try
+        {
+            await MapAndJoinAsync(envelope, batch, context, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await MapReduceBatchNotification.CloseFailedOnFinalAttemptAsync(_pushNotificationManager, batch, context, ex, cancellationToken, "Map", _logger);
+
+            throw;
+        }
+    }
+
+    private async Task MapAndJoinAsync(MapTaskEnvelope envelope, MapReduceBatch batch, IJobExecutionContext context, CancellationToken cancellationToken)
+    {
         var record = await RunMapAsync(envelope, batch, context, cancellationToken);
         var completed = await _store.SaveResultAndCountAsync(envelope.BatchId, record, cancellationToken);
 
@@ -63,7 +81,10 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
                     new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },
                     cancellationToken),
                 ex => _logger.LogError(ex, "Could not report the map progress to notification {NotificationId}; the batch's outcome is unchanged.",
-                    batch.ProgressNotificationId));
+                    batch.ProgressNotificationId),
+                ex => _logger.LogInformation(ex, "Could not report the map progress to notification {NotificationId}: the job was canceled.",
+                    batch.ProgressNotificationId),
+                cancellationToken);
         }
 
         // The worker that observes the final completion (and wins the atomic claim) triggers reduce exactly once.
