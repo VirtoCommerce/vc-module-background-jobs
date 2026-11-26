@@ -102,8 +102,11 @@ public sealed class RecordingConformanceHandler(ConformanceProbe probe, IUserNam
     }
 }
 
-/// <summary>Map item for the map/reduce conformance scenario; a negative value makes the map handler throw.</summary>
-public sealed record ConformanceMapItem(int Value);
+/// <summary>
+/// Map item for the map/reduce conformance scenario; a negative value makes the map handler throw. When
+/// <paramref name="GateId"/> is set, the first map task of that id waits in the handler until the test releases it.
+/// </summary>
+public sealed record ConformanceMapItem(int Value, string? GateId = null);
 
 public sealed record ConformanceMapResult(int Square);
 
@@ -115,12 +118,19 @@ public sealed class ConformanceReduceState
     public bool FailAlways { get; set; }
 }
 
-public sealed class ConformanceMapHandler : IMapJobHandler<ConformanceMapItem, ConformanceMapResult>
+public sealed class ConformanceMapHandler(ConformanceProbe probe) : IMapJobHandler<ConformanceMapItem, ConformanceMapResult>
 {
-    public Task<ConformanceMapResult> Map(ConformanceMapItem item, IJobExecutionContext context, CancellationToken cancellationToken = default)
-        => item.Value < 0
+    public async Task<ConformanceMapResult> Map(ConformanceMapItem item, IJobExecutionContext context, CancellationToken cancellationToken = default)
+    {
+        if (item.GateId is not null)
+        {
+            await probe.HoldFirstMapTaskAsync(item.GateId, cancellationToken);
+        }
+
+        return item.Value < 0
             ? throw new InvalidOperationException("Conformance map failure (negative item).")
-            : Task.FromResult(new ConformanceMapResult(item.Value * item.Value));
+            : new ConformanceMapResult(item.Value * item.Value);
+    }
 }
 
 public sealed class ConformanceReduceHandler(ConformanceProbe probe) : IReduceJobHandler<ConformanceReduceState, ConformanceMapResult>

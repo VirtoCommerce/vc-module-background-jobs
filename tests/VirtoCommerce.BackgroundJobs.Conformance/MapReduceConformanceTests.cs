@@ -35,7 +35,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
     }
 
     // All reporting batches share one title, so the batch just enqueued is the notification that was not there before.
-    private async Task<string> EnqueueReportingBatchAsync<TReduce>(ConformanceReduceState state, int itemCount = 2)
+    private async Task<string> EnqueueReportingBatchAsync<TReduce>(ConformanceReduceState state, int itemCount = 2, string? gateId = null)
         where TReduce : class
     {
         var known = Fixture.ProgressNotifications.Where(x => x.Title == _mapReduceTitle).Select(x => x.Id).ToHashSet();
@@ -43,7 +43,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         using (var scope = Fixture.Services.CreateScope())
         {
             await scope.ServiceProvider.GetRequiredService<IMapReduceJob>().Enqueue<ConformanceMapHandler, TReduce>(
-                Enumerable.Range(1, itemCount).Select(x => new ConformanceMapItem(x)).ToArray(),
+                Enumerable.Range(1, itemCount).Select(x => new ConformanceMapItem(x, gateId)).ToArray(),
                 state,
                 new MapReduceOptions { ReportProgress = true },
                 TestContext.Current.CancellationToken);
@@ -177,7 +177,8 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         Assert.Equal(nameof(JobOutcome.Failed), updates.Last().Outcome);
     }
 
-    // 20 — map tasks enqueued before the fan-out failed do not reopen the closed notification.
+    // 20 — a map task that runs after the close of a fan-out that failed after it enqueued map tasks does not reopen the
+    // notification. One map task waits in its handler until the close was seen, so one is sure to run after it.
     [Fact]
     public async Task MapReduce_FanOut_Failure_After_Enqueuing_Map_Tasks_Keeps_Notification_Failed()
     {
@@ -187,16 +188,28 @@ public abstract partial class JobEngineConformanceTests<TFixture>
             "engine does not retry failed jobs or does not report its attempt budget.");
         var id = NewId();
 
-        var notificationId = await EnqueueReportingBatchAsync<ConformanceFanOutCheckpointFailureReduceHandler>(
-            new ConformanceReduceState { CorrelationId = id }, itemCount: 30);
-        var closing = await Fixture.WaitForProgressAsync(
-            notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+        try
+        {
+            var notificationId = await EnqueueReportingBatchAsync<ConformanceFanOutCheckpointFailureReduceHandler>(
+                new ConformanceReduceState { CorrelationId = id }, itemCount: 30, gateId: id);
+            var closing = await Fixture.WaitForProgressAsync(
+                notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
 
-        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
-        Assert.Contains("Conformance-induced fan-out checkpoint failure", closing.Description);
+            Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+            Assert.Contains("Conformance-induced fan-out checkpoint failure", closing.Description);
 
-        await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
-        Assert.Equal(nameof(JobOutcome.Failed), Fixture.ProgressUpdates(notificationId).Last().Outcome);
+            Fixture.Probe.ReleaseHeldMapTask(id);
+            await Fixture.Probe.WaitHeldMapTaskResumedAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+            Assert.Equal(1, Fixture.Probe.ResumedMapTasks(id));
+
+            await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+            Assert.Equal(nameof(JobOutcome.Failed), Fixture.ProgressUpdates(notificationId).Last().Outcome);
+        }
+        finally
+        {
+            // A failed assertion must not leave the worker blocked for the next scenario.
+            Fixture.Probe.ReleaseHeldMapTask(id);
+        }
     }
 
     // 21 — a reduce whose read of the map results fails on every attempt closes the notification Failed on the last.

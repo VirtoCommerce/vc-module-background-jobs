@@ -22,6 +22,7 @@ public sealed class ConformanceProbe
     private readonly ConcurrentDictionary<string, int> _executions = new();
     private readonly ConcurrentDictionary<string, List<string>> _executionJobIds = new();
     private readonly ConcurrentDictionary<string, ReduceObservation> _reduces = new();
+    private readonly ConcurrentDictionary<string, MapHold> _mapHolds = new();
 
     /// <summary>Records one handler execution for the correlation id and returns the running execution count
     /// (1 on the first run, 2 on the first retry, …) so retry scenarios can assert how many attempts ran.</summary>
@@ -71,6 +72,33 @@ public sealed class ConformanceProbe
     public Task WaitCancelledAsync(string correlationId, TimeSpan timeout, CancellationToken cancellationToken)
         => Cancelled(correlationId).Task.WaitAsync(timeout, cancellationToken);
 
+    /// <summary>
+    /// Holds the first map task that arrives for <paramref name="gateId"/> until <see cref="ReleaseHeldMapTask"/>; every
+    /// later one passes at once, so a batch blocks one worker, not the pool its retries need.
+    /// </summary>
+    public async Task HoldFirstMapTaskAsync(string gateId, CancellationToken cancellationToken)
+    {
+        var hold = MapHoldFor(gateId);
+        if (Interlocked.Exchange(ref hold.Claimed, 1) == 1)
+        {
+            return;
+        }
+
+        await hold.Released.Task.WaitAsync(cancellationToken);
+        Interlocked.Increment(ref hold.Resumed);
+        hold.ResumedSignal.TrySetResult();
+    }
+
+    /// <summary>Lets the map task held for <paramref name="gateId"/> run; also covers one that arrives later.</summary>
+    public void ReleaseHeldMapTask(string gateId) => MapHoldFor(gateId).Released.TrySetResult();
+
+    /// <summary>Waits until the held map task of <paramref name="gateId"/> ran on past its hold, or throws <see cref="TimeoutException"/>.</summary>
+    public Task WaitHeldMapTaskResumedAsync(string gateId, TimeSpan timeout, CancellationToken cancellationToken)
+        => MapHoldFor(gateId).ResumedSignal.Task.WaitAsync(timeout, cancellationToken);
+
+    /// <summary>How many map tasks of <paramref name="gateId"/> ran on past their hold.</summary>
+    public int ResumedMapTasks(string gateId) => Volatile.Read(ref MapHoldFor(gateId).Resumed);
+
     public JobObservation? Job(string correlationId) => _jobs.TryGetValue(correlationId, out var value) ? value : null;
 
     public int ExecutionCount(string correlationId) => _executions.TryGetValue(correlationId, out var value) ? value : 0;
@@ -93,6 +121,8 @@ public sealed class ConformanceProbe
 
     public ReduceObservation? Reduce(string correlationId) => _reduces.TryGetValue(correlationId, out var value) ? value : null;
 
+    private MapHold MapHoldFor(string gateId) => _mapHolds.GetOrAdd(gateId, _ => new MapHold());
+
     private TaskCompletionSource Completion(string correlationId)
         => _completions.GetOrAdd(correlationId, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
 
@@ -101,6 +131,14 @@ public sealed class ConformanceProbe
 
     private TaskCompletionSource Cancelled(string correlationId)
         => _cancelled.GetOrAdd(correlationId, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+
+    private sealed class MapHold
+    {
+        public int Claimed;
+        public int Resumed;
+        public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ResumedSignal { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 
     public sealed record JobObservation
     {
