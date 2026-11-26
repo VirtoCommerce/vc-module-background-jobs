@@ -139,25 +139,13 @@ public sealed class JobEngineBackgroundJob(
         }
         catch (Exception ex) when (queued is not null)
         {
-            // The engine never took the job, so no worker will close the notification sent above: close it here as failed.
-            // A failed close must not hide the error the caller needs.
-            await TryCloseAsFailed(queued, ex.Message);
+            // The engine reported a failure, so no worker may ever close the notification sent above: close it here as
+            // failed. If the engine did take the job after all (a broker publish can time out on its confirm after the
+            // message was routed), the worker's own sends replace this close. A failed close must not hide the error the
+            // caller needs.
+            await pushNotificationManager.TryCloseEnqueueFailedAsync(queued, ex.Message, _logger);
 
             throw;
-        }
-    }
-
-    // Closing the notification of a job the engine refused is a display concern: a failed send is logged and never replaces
-    // the engine's error the caller is about to get.
-    private async Task TryCloseAsFailed(JobProgressPushNotification queued, string error)
-    {
-        try
-        {
-            await pushNotificationManager.SendAsync(JobProgressPushNotification.CreateEnqueueFailed(queued, error));
-        }
-        catch (Exception sendError)
-        {
-            _logger.LogWarning(sendError, "Could not close the progress notification {NotificationId} of a job the engine did not accept as failed.", queued.Id);
         }
     }
 

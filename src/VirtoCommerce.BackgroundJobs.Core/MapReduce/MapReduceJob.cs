@@ -140,7 +140,7 @@ public sealed class MapReduceJob : IMapReduceJob
         {
             // Nothing past the Queued send is guaranteed to run, so no coordinator will close the batch's notification:
             // close it here as failed. A failed close must not hide the error the caller needs.
-            await TryCloseAsFailed(queued, ex.Message);
+            await _pushNotificationManager.TryCloseEnqueueFailedAsync(queued, ex.Message, _logger);
 
             throw;
         }
@@ -160,19 +160,5 @@ public sealed class MapReduceJob : IMapReduceJob
         await _pushNotificationManager.SendAsync(notification);
 
         return notification;
-    }
-
-    // Closing the notification of a batch that never got going is a display concern: a failed send is logged and never
-    // replaces the error the caller is about to get.
-    private async Task TryCloseAsFailed(JobProgressPushNotification queued, string error)
-    {
-        try
-        {
-            await _pushNotificationManager.SendAsync(JobProgressPushNotification.CreateEnqueueFailed(queued, error));
-        }
-        catch (Exception sendError)
-        {
-            _logger.LogWarning(sendError, "Could not close the progress notification {NotificationId} of a batch that was not fully enqueued as failed.", queued.Id);
-        }
     }
 }

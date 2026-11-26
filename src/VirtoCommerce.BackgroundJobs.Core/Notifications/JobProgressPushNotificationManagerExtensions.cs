@@ -1,0 +1,22 @@
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using VirtoCommerce.Platform.Core.PushNotifications;
+
+namespace VirtoCommerce.BackgroundJobs.Core.Notifications;
+
+public static class JobProgressPushNotificationManagerExtensions
+{
+    /// <summary>
+    /// Closes the notification <paramref name="queued"/> as failed (<see cref="JobProgressPushNotification.CreateEnqueueFailed"/>),
+    /// for a caller whose enqueue failed and that is about to rethrow. A failed send is logged and never thrown, so the
+    /// caller's own exception is the one that survives.
+    /// </summary>
+    public static Task TryCloseEnqueueFailedAsync(this IPushNotificationManager manager, JobProgressPushNotification queued, string error, ILogger logger)
+    {
+        return BestEffortNotificationSend.TrySendAsync(
+            () => manager.SendAsync(JobProgressPushNotification.CreateEnqueueFailed(queued, error)),
+            "close the notification as failed after the enqueue failed",
+            queued.Id,
+            logger);
+    }
+}
