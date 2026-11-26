@@ -69,6 +69,29 @@ public sealed class RabbitMqJobConsumerTests
         Assert.False(await store.IsCancelRequested(_jobId, ct));
     }
 
+    [Fact]
+    public async Task Delivery_FinalFailure_DeadLettered_AckFails_KeepsCancelFlagAndDiscardsRedelivery()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = new InMemoryJobCancellationStore();
+        var dispatcher = new FailingDispatcher(onDispatch: () => store.RequestCancel(_jobId));
+        var channel = new FakeChannel { AckThrows = true };
+        await using var host = await ConsumerHost.StartAsync(channel, dispatcher, store, ct);
+
+        // Attempt 4 is the last of 4: dead-lettered, then the ack of the original fails.
+        await host.DeliverAsync(deliveryTag: 1, attempt: 4, ct);
+
+        Assert.Equal(1, dispatcher.Runs);
+        Assert.Equal(1, channel.Published);
+        Assert.True(await store.IsCancelRequested(_jobId, ct), "the broker redelivers the unacked original, which still has to find the flag.");
+
+        channel.AckThrows = false;
+        await host.DeliverAsync(deliveryTag: 2, attempt: 4, ct);
+
+        Assert.Equal(1, dispatcher.Runs);
+        Assert.Equal(1, channel.Acked);
+    }
+
     private sealed class FailingDispatcher(Func<Task> onDispatch) : IJobDispatcher
     {
         public int Runs { get; private set; }
