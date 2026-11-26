@@ -51,7 +51,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
                 TestContext.Current.CancellationToken);
         }
 
-        return Fixture.ProgressNotifications.Single(x => x.Title == _mapReduceTitle && !known.Contains(x.Id)).Id;
+        return Fixture.ProgressNotifications.Where(x => x.Title == _mapReduceTitle && !known.Contains(x.Id)).Select(x => x.Id).Distinct().Single();
     }
 
     // 13 — the whole batch fans out, every item maps, and reduce runs once with the aggregated results.
