@@ -866,7 +866,7 @@ public class MapReduceTests
         Assert.Null(sent.Outcome);
     }
 
-    // The reduce already completed the batch, or it expired: nothing is left to close, and a close would reopen nothing.
+    // A batch the reduce already completed, or one that expired, has nothing left to close.
     [Theory]
     [InlineData(false, 1)]
     [InlineData(true, 0)]
