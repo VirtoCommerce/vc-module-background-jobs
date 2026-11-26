@@ -668,4 +668,70 @@ public class MapReduceTests
         Assert.NotEqual(harness.Sent[0].Description, harness.Sent[1].Description);
         Assert.All(harness.Sent, x => Assert.Equal(1, x.TotalCount));
     }
+
+    // Fails ONLY when the fan-out is enqueued — after the batch is stored and its Queued notification is sent.
+    private sealed class ThrowOnFanOutBackgroundJob(Exception error) : IBackgroundJob
+    {
+        public Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null, CancellationToken ct = default)
+            where THandler : class
+            => Enqueue(typeof(THandler), payload, options, ct);
+
+        public Task<string> Enqueue(Type handlerType, object payload, EnqueueOptions? options = null, CancellationToken ct = default)
+            => handlerType == typeof(FanOutCoordinator)
+                ? throw error
+                : Task.FromResult(Guid.NewGuid().ToString("N"));
+    }
+
+    private static (MapReduceJob Facade, List<JobProgressPushNotification> Sent) CreateReportingFacade(IBackgroundJob bus)
+    {
+        var sent = new List<JobProgressPushNotification>();
+        var manager = new Mock<IPushNotificationManager>();
+        manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+            .Callback<PushNotification>(x => sent.Add((JobProgressPushNotification)x))
+            .Returns(Task.CompletedTask);
+
+        var userResolver = new Mock<IUserNameResolver>();
+        userResolver.Setup(x => x.GetCurrentUserName()).Returns("tester");
+
+        var facade = new MapReduceJob(bus, new InMemoryMapReduceBatchStore(), new JsonJobPayloadSerializer(), userResolver.Object, manager.Object);
+
+        return (facade, sent);
+    }
+
+    // The batch's Queued notification is sent before the batch is stored and fanned out; if anything after that throws,
+    // no coordinator will ever close it, so the facade closes it as Failed and the caller still gets the original error.
+    [Fact]
+    public async Task Enqueue_FanOutEnqueueThrows_ClosesBatchNotificationAsFailed_AndRethrows()
+    {
+        var error = new InvalidOperationException("fan-out enqueue failed");
+        var (facade, sent) = CreateReportingFacade(new ThrowOnFanOutBackgroundJob(error));
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => facade.Enqueue<SquareHandler, SumReducer>(
+            [new SquareItem(1), new SquareItem(2)], new SumState("squares"), new MapReduceOptions { ReportProgress = true }, TestContext.Current.CancellationToken));
+
+        Assert.Same(error, thrown);
+        Assert.Equal(2, sent.Count);
+        var closing = sent[1];
+        Assert.Equal(sent[0].Id, closing.Id);
+        Assert.Equal(2, closing.TotalCount);
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.Equal("fan-out enqueue failed", closing.Error);
+        Assert.NotNull(closing.Finished);
+    }
+
+    [Fact]
+    public async Task Enqueue_ItemOfWrongType_ClosesBatchNotificationAsFailed_AndThrowsArgumentException()
+    {
+        var (facade, sent) = CreateReportingFacade(new CapturingBackgroundJob());
+
+        var thrown = await Assert.ThrowsAsync<ArgumentException>(() => facade.Enqueue<SquareHandler, SumReducer>(
+            [new SquareItem(1), "not a square item"], new SumState("squares"), new MapReduceOptions { ReportProgress = true }, TestContext.Current.CancellationToken));
+
+        Assert.Equal(2, sent.Count);
+        var closing = sent[1];
+        Assert.Equal(sent[0].Id, closing.Id);
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.Equal(thrown.Message, closing.Error);
+        Assert.NotNull(closing.Finished);
+    }
 }

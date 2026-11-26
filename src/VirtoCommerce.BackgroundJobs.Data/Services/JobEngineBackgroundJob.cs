@@ -5,6 +5,8 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
@@ -27,9 +29,13 @@ public sealed class JobEngineBackgroundJob(
     IUserNameResolver userNameResolver,
     // Optional: provided by the active engine module. Null when no engine is installed — enqueue then throws the
     // actionable BackgroundJobEngineNotInstalledException instead of failing DI resolution of this facade.
-    IJobEngine? engine = null) : IBackgroundJob, IBulkBackgroundJob
+    IJobEngine? engine = null,
+    // Last and optional, like the dispatcher's: a caller that builds the facade by hand stays source-compatible, and DI
+    // injects the logger in production. A failed send that closes the notification of a refused job is reported through it.
+    ILogger<JobEngineBackgroundJob>? logger = null) : IBackgroundJob, IBulkBackgroundJob
 {
     private readonly BackgroundJobsOptions _options = options.Value;
+    private readonly ILogger _logger = logger ?? NullLogger<JobEngineBackgroundJob>.Instance;
 
     public Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null,
         CancellationToken cancellationToken = default)
@@ -78,54 +84,81 @@ public sealed class JobEngineBackgroundJob(
 
         var progressNotificationId = options?.ProgressNotificationId;
         var ownsNotification = false;
+        JobProgressPushNotification? queued = null;
         if (options?.ReportProgress == true && string.IsNullOrEmpty(progressNotificationId))
         {
-            // The only send the facade makes: from here the worker owns the notification (it keeps this Started and
-            // adds the job id), so nothing is sent after the engine takes the job — that would race the worker.
-            var notification = JobProgressPushNotification.CreateQueued(userName ?? "system", title, enqueuedAt, totalCount: 0);
-            await pushNotificationManager.SendAsync(notification);
-            progressNotificationId = notification.Id;
+            // The only send the facade makes once the engine has the job: from here the worker owns the notification (it
+            // keeps this Started and adds the job id), so nothing is sent after the engine takes the job — that would race
+            // the worker. The one exception is a job the engine never takes, closed below.
+            queued = JobProgressPushNotification.CreateQueued(userName ?? "system", title, enqueuedAt, totalCount: 0);
+            await pushNotificationManager.SendAsync(queued);
+            progressNotificationId = queued.Id;
             ownsNotification = true;
         }
 
-        // Stamp the enqueue time (for queue-latency telemetry) and, if a producer set an ambient correlation id
-        // (e.g. a load-test run), the run id — so every job on every engine carries the same measurable headers.
-        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        try
         {
-            [JobHeaders.EnqueuedAt] = enqueuedAt.Ticks.ToString(CultureInfo.InvariantCulture),
-        };
+            // Stamp the enqueue time (for queue-latency telemetry) and, if a producer set an ambient correlation id
+            // (e.g. a load-test run), the run id — so every job on every engine carries the same measurable headers.
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [JobHeaders.EnqueuedAt] = enqueuedAt.Ticks.ToString(CultureInfo.InvariantCulture),
+            };
 
-        var runId = JobEnqueueContext.RunId;
-        if (!string.IsNullOrEmpty(runId))
-        {
-            headers[JobHeaders.RunId] = runId;
+            var runId = JobEnqueueContext.RunId;
+            if (!string.IsNullOrEmpty(runId))
+            {
+                headers[JobHeaders.RunId] = runId;
+            }
+
+            // A map task of a shared (map/reduce) notification cannot learn the batch start time from its own envelope, so the
+            // fan-out passes it through the ambient scope. Only an enqueue that reports into an existing notification needs it.
+            var batchStartedAt = JobEnqueueContext.BatchStartedAt;
+            if (batchStartedAt.HasValue && !string.IsNullOrEmpty(options?.ProgressNotificationId))
+            {
+                headers[JobHeaders.BatchStartedAt] = batchStartedAt.Value.Ticks.ToString(CultureInfo.InvariantCulture);
+            }
+
+            var envelope = new JobEnvelope
+            {
+                JobType = payloadContractType.AssemblyQualifiedName!,
+                HandlerType = handlerType.AssemblyQualifiedName!,
+                PayloadType = payloadType,
+                PayloadJson = payloadJson,
+                Queue = options?.Queue ?? _options.DefaultQueue,
+                MaxRetryAttempts = options?.MaxRetryAttempts,
+                UniqueKey = options?.UniqueKey,
+                ProgressNotificationId = progressNotificationId,
+                Title = title,
+                CompletesProgressNotification = ownsNotification,
+                UserName = userName,
+                Headers = headers,
+            };
+
+            return await engine.Enqueue(envelope, options ?? new EnqueueOptions(), cancellationToken);
         }
-
-        // A map task of a shared (map/reduce) notification cannot learn the batch start time from its own envelope, so the
-        // fan-out passes it through the ambient scope. Only an enqueue that reports into an existing notification needs it.
-        var batchStartedAt = JobEnqueueContext.BatchStartedAt;
-        if (batchStartedAt.HasValue && !string.IsNullOrEmpty(options?.ProgressNotificationId))
+        catch (Exception ex) when (queued is not null)
         {
-            headers[JobHeaders.BatchStartedAt] = batchStartedAt.Value.Ticks.ToString(CultureInfo.InvariantCulture);
+            // The engine never took the job, so no worker will close the notification sent above: close it here as failed.
+            // A failed close must not hide the error the caller needs.
+            await TryCloseAsFailed(queued, ex.Message);
+
+            throw;
         }
+    }
 
-        var envelope = new JobEnvelope
+    // Closing the notification of a job the engine refused is a display concern: a failed send is logged and never replaces
+    // the engine's error the caller is about to get.
+    private async Task TryCloseAsFailed(JobProgressPushNotification queued, string error)
+    {
+        try
         {
-            JobType = payloadContractType.AssemblyQualifiedName!,
-            HandlerType = handlerType.AssemblyQualifiedName!,
-            PayloadType = payloadType,
-            PayloadJson = payloadJson,
-            Queue = options?.Queue ?? _options.DefaultQueue,
-            MaxRetryAttempts = options?.MaxRetryAttempts,
-            UniqueKey = options?.UniqueKey,
-            ProgressNotificationId = progressNotificationId,
-            Title = title,
-            CompletesProgressNotification = ownsNotification,
-            UserName = userName,
-            Headers = headers,
-        };
-
-        return await engine.Enqueue(envelope, options ?? new EnqueueOptions(), cancellationToken);
+            await pushNotificationManager.SendAsync(JobProgressPushNotification.CreateEnqueueFailed(queued, error));
+        }
+        catch (Exception sendError)
+        {
+            _logger.LogWarning(sendError, "Could not close the progress notification {NotificationId} of a job the engine did not accept as failed.", queued.Id);
+        }
     }
 
     public async Task<IReadOnlyList<string>> EnqueueBatch<THandler>(IReadOnlyCollection<object> payloads,

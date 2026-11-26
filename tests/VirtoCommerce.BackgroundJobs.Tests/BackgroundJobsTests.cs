@@ -17,6 +17,7 @@ using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.Platform.Core.Common;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.JsonConverters;
+using VirtoCommerce.Platform.Core.Modularity;
 using VirtoCommerce.Platform.Core.PushNotifications;
 using VirtoCommerce.Platform.Core.Security;
 using Xunit;
@@ -411,6 +412,73 @@ public class BackgroundJobsTests
 
         Assert.Equal(1, sentAtEngineEnqueue);
         Assert.Equal(sentAtEngineEnqueue, sent.Count);
+    }
+
+    // The facade sends the Queued notification before the engine takes the job; if the engine refuses, no worker will
+    // ever close it, so the facade closes that same notification as Failed and the caller still gets the engine's error.
+    private static (JobEngineBackgroundJob Sut, List<JobProgressPushNotification> Sent) CreateFacadeWithFailingEngine(
+        Exception engineError, Func<int, Exception> sendError = null)
+    {
+        var sent = new List<JobProgressPushNotification>();
+        var manager = new Mock<IPushNotificationManager>();
+        manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+            .Returns<PushNotification>(x =>
+            {
+                sent.Add((JobProgressPushNotification)x);
+                var error = sendError?.Invoke(sent.Count);
+
+                return error is null ? Task.CompletedTask : Task.FromException(error);
+            });
+
+        var engine = new Mock<IJobEngine>();
+        engine.SetupGet(x => x.ProviderName).Returns("Test");
+        engine.Setup(x => x.Enqueue(It.IsAny<JobEnvelope>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(engineError);
+
+        var sut = new JobEngineBackgroundJob(
+            new JsonJobPayloadSerializer(),
+            Options.Create(new BackgroundJobsOptions { DefaultQueue = "default" }),
+            manager.Object,
+            Mock.Of<IUserNameResolver>(),
+            engine.Object);
+
+        return (sut, sent);
+    }
+
+    [Fact]
+    public async Task Enqueue_EngineThrows_ClosesQueuedNotificationAsFailed_AndRethrows()
+    {
+        var engineError = new InvalidOperationException("boom");
+        var (sut, sent) = CreateFacadeWithFailingEngine(engineError);
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => sut.Enqueue<RecordingHandler>(
+            new TestPayload { Value = "a" }, new EnqueueOptions { ReportProgress = true }, TestContext.Current.CancellationToken));
+
+        Assert.Same(engineError, thrown);
+        Assert.Equal(2, sent.Count);
+        var closing = sent[1];
+        Assert.Equal(sent[0].Id, closing.Id);
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.Equal("boom", closing.Error);
+        Assert.NotNull(closing.Finished);
+        Assert.Equal(sent[0].Started, closing.Started);
+        var entry = Assert.Single(closing.ProgressLog);
+        Assert.Equal(ProgressMessageLevel.Error, entry.Level);
+        Assert.Equal("boom", entry.Message);
+    }
+
+    [Fact]
+    public async Task Enqueue_EngineThrowsAndClosingSendThrows_RethrowsTheEngineError()
+    {
+        var engineError = new InvalidOperationException("boom");
+        var (sut, sent) = CreateFacadeWithFailingEngine(
+            engineError, sendCount => sendCount == 2 ? new TimeoutException("push channel down") : null);
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => sut.Enqueue<RecordingHandler>(
+            new TestPayload { Value = "a" }, new EnqueueOptions { ReportProgress = true }, TestContext.Current.CancellationToken));
+
+        Assert.Same(engineError, thrown);
+        Assert.Equal(2, sent.Count);
     }
 
     [Fact]

@@ -41,6 +41,38 @@ public class JobProgressPushNotification : PushNotification
             IsNew: true));
     }
 
+    /// <summary>
+    /// Closes the notification <paramref name="queued"/> as failed, for a job the engine never took: no worker will run it,
+    /// so no worker will close the notification either, and the admin UI would keep showing it as queued. It replaces the
+    /// queued notification (same id, creator, title, start time and total) and records <paramref name="error"/> the way the
+    /// worker's own failed close does.
+    /// </summary>
+    public static JobProgressPushNotification CreateEnqueueFailed(JobProgressPushNotification queued, string error)
+    {
+        ArgumentNullException.ThrowIfNull(queued);
+
+        var outcome = JobOutcome.Failed.ToString();
+        var notification = JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
+            queued.Id,
+            queued.Creator,
+            queued.Title,
+            queued.Started,
+            outcome,
+            ProcessedCount: 0,
+            TotalCount: queued.TotalCount,
+            JobId: null,
+            Attempt: null,
+            TotalAttempts: null,
+            Outcome: outcome,
+            Error: error,
+            Finished: DateTime.UtcNow,
+            IsNew: true));
+
+        notification.ProgressLog.Add(new ProgressMessage { Level = ProgressMessageLevel.Error, Message = error });
+
+        return notification;
+    }
+
     public DateTime? Started { get; set; }
 
     public DateTime? Finished { get; set; }
