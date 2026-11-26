@@ -86,7 +86,9 @@ public sealed class JobEngineBackgroundJob(
         if (options?.ReportProgress == true && string.IsNullOrEmpty(progressNotificationId))
         {
             queued = JobProgressPushNotification.CreateQueued(userName ?? "system", title, enqueuedAt, totalCount: 0);
-            await pushNotificationManager.SendAsync(queued);
+            await BestEffortNotificationSend.TrySendAsync(
+                () => pushNotificationManager.SendAsync(queued),
+                ex => _logger.LogError(ex, "Could not send the queued progress notification {NotificationId}; the job is enqueued regardless.", queued.Id));
             progressNotificationId = queued.Id;
             ownsNotification = true;
         }
