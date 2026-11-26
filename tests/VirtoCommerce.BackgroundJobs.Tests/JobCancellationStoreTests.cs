@@ -25,8 +25,8 @@ public class JobCancellationStoreTests
     }
 
     // The Redis store's key expires after six hours; a flag nothing clears (the consumer leaves it behind for a discarded
-    // job's redelivery) must not live in this one for the life of the process, or a stale one would cancel a job id
-    // that is reused.
+    // job's redelivery) must not live in this one for the life of the process: the TTL keeps the store from growing
+    // without bound.
     [Fact]
     public async Task InMemory_FlagOlderThanTtl_ReadsAsNotRequested()
     {

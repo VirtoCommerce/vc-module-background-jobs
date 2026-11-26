@@ -89,7 +89,7 @@ public sealed class JobEngineBackgroundJob(
         {
             // The only send the facade makes once the engine has the job: from here the worker owns the notification (it
             // keeps this Started and adds the job id), so nothing is sent after the engine takes the job — that would race
-            // the worker. The one exception is a job the engine never takes, closed below.
+            // the worker. The one exception is a job the engine reported a failure for, closed below.
             queued = JobProgressPushNotification.CreateQueued(userName ?? "system", title, enqueuedAt, totalCount: 0);
             await pushNotificationManager.SendAsync(queued);
             progressNotificationId = queued.Id;
