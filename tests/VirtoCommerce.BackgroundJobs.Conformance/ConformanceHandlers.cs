@@ -140,3 +140,13 @@ public sealed class ConformanceReduceHandler(ConformanceProbe probe) : IReduceJo
         return Task.CompletedTask;
     }
 }
+
+/// <summary>
+/// A reduce handler the fixture never registers: a batch that names it fails in the reduce step before any handler code
+/// runs, which drives the scenarios for a reduce that fails on its setup rather than in its handler.
+/// </summary>
+public sealed class ConformanceUnregisteredReduceHandler : IReduceJobHandler<ConformanceReduceState, ConformanceMapResult>
+{
+    public Task Reduce(ConformanceReduceState state, IReadOnlyCollection<MapResult<ConformanceMapResult>> results, IJobExecutionContext context, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Never registered, so never resolved.");
+}

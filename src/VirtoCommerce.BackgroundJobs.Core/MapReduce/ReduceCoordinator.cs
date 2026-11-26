@@ -65,34 +65,37 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             return;
         }
 
-        var resultType = Type.GetType(batch.ResultType)
-            ?? throw new InvalidOperationException($"Cannot resolve map result type '{batch.ResultType}'.");
-        var stateType = Type.GetType(batch.StateType)
-            ?? throw new InvalidOperationException($"Cannot resolve reduce state type '{batch.StateType}'.");
-
-        var state = _serializer.Deserialize(batch.StateType, batch.StateJson);
-        var mapResults = BuildMapResults(results, resultType);
-
-        var handlerInterfaceType = typeof(IReduceJobHandler<,>).MakeGenericType(stateType, resultType);
-
-        // Handler-explicit batch names the concrete reduce handler; resolve it by type. Otherwise resolve by interface.
-        object handler;
-        if (!string.IsNullOrEmpty(batch.ReduceHandlerType))
-        {
-            var concreteHandlerType = Type.GetType(batch.ReduceHandlerType)
-                ?? throw new InvalidOperationException($"Cannot resolve reduce handler type '{batch.ReduceHandlerType}'.");
-            handler = _serviceProvider.GetService(concreteHandlerType)
-                ?? throw new InvalidOperationException($"No reduce handler '{concreteHandlerType.Name}' is registered.");
-        }
-        else
-        {
-            handler = _serviceProvider.GetService(handlerInterfaceType)
-                ?? throw new InvalidOperationException($"No IReduceJobHandler<{stateType.Name}, {resultType.Name}> is registered.");
-        }
-
-        var reduceMethod = handlerInterfaceType.GetMethod(nameof(IReduceJobHandler<object, object>.Reduce))!;
+        // The try covers everything a final attempt can fail on, not just the handler call: an unresolvable type, a state
+        // that does not deserialize or a reduce handler that is not registered fail the attempt like the handler does,
+        // and the batch bar is shared, so the dispatcher never closes it for this job.
         try
         {
+            var resultType = Type.GetType(batch.ResultType)
+                ?? throw new InvalidOperationException($"Cannot resolve map result type '{batch.ResultType}'.");
+            var stateType = Type.GetType(batch.StateType)
+                ?? throw new InvalidOperationException($"Cannot resolve reduce state type '{batch.StateType}'.");
+
+            var state = _serializer.Deserialize(batch.StateType, batch.StateJson);
+            var mapResults = BuildMapResults(results, resultType);
+
+            var handlerInterfaceType = typeof(IReduceJobHandler<,>).MakeGenericType(stateType, resultType);
+
+            // Handler-explicit batch names the concrete reduce handler; resolve it by type. Otherwise resolve by interface.
+            object handler;
+            if (!string.IsNullOrEmpty(batch.ReduceHandlerType))
+            {
+                var concreteHandlerType = Type.GetType(batch.ReduceHandlerType)
+                    ?? throw new InvalidOperationException($"Cannot resolve reduce handler type '{batch.ReduceHandlerType}'.");
+                handler = _serviceProvider.GetService(concreteHandlerType)
+                    ?? throw new InvalidOperationException($"No reduce handler '{concreteHandlerType.Name}' is registered.");
+            }
+            else
+            {
+                handler = _serviceProvider.GetService(handlerInterfaceType)
+                    ?? throw new InvalidOperationException($"No IReduceJobHandler<{stateType.Name}, {resultType.Name}> is registered.");
+            }
+
+            var reduceMethod = handlerInterfaceType.GetMethod(nameof(IReduceJobHandler<object, object>.Reduce))!;
             await (Task)reduceMethod.Invoke(handler, [state, mapResults, context, cancellationToken])!;
         }
         catch (Exception ex)
@@ -101,9 +104,9 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             // stack) so the engine retries/dead-letters on the actual cause, not the reflection wrapper.
             var actual = ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
 
-            // The batch bar is shared, so the dispatcher never closes it for this job: with nobody else to do it, a reduce
-            // that fails for the last time would leave the bar running forever. A failure with a retry pending leaves it
-            // open (the retry may finish the batch), and so does a cancel (the engine decides what a cancel means).
+            // With nobody else to close the shared bar, a reduce that fails for the last time would leave it running
+            // forever. A failure with a retry pending leaves it open (the retry may finish the batch), and so does a cancel
+            // (the engine decides what a cancel means).
             // The batch stays in the store, as for a failure with a retry pending: a retry or a requeue reads it again.
             var canceled = actual is OperationCanceledException && cancellationToken.IsCancellationRequested;
             if (context is JobExecutionContext { IsFinalAttempt: true } && !canceled)
