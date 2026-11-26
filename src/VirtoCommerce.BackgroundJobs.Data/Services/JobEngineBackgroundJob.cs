@@ -31,7 +31,7 @@ public sealed class JobEngineBackgroundJob(
     // actionable BackgroundJobEngineNotInstalledException instead of failing DI resolution of this facade.
     IJobEngine? engine = null,
     // Last and optional, like the dispatcher's: a caller that builds the facade by hand stays source-compatible, and DI
-    // injects the logger in production. A failed send that closes the notification of a refused job is reported through it.
+    // injects the logger in production. A failed send that closes the notification of a job whose enqueue failed is reported through it.
     ILogger<JobEngineBackgroundJob>? logger = null) : IBackgroundJob, IBulkBackgroundJob
 {
     private readonly BackgroundJobsOptions _options = options.Value;

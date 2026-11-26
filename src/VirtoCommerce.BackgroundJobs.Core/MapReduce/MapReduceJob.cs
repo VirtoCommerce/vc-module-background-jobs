@@ -34,7 +34,7 @@ public sealed class MapReduceJob : IMapReduceJob
         IUserNameResolver userNameResolver,
         IPushNotificationManager pushNotificationManager,
         // Last and optional, like the dispatcher's: a caller that builds the facade by hand stays source-compatible, and DI
-        // injects the logger in production. A failed send that closes the notification of a refused batch is reported through it.
+        // injects the logger in production. A failed send that closes the notification of a batch whose enqueue failed is reported through it.
         ILogger<MapReduceJob>? logger = null)
     {
         _backgroundJob = backgroundJob;
