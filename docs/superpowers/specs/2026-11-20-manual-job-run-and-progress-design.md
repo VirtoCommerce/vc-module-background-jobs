@@ -226,7 +226,8 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   after the message was routed); if a worker does run it, the worker's own sends replace the close, so the
   notification can show `Failed` and then change.
 - **One builder produces every `JobProgressPushNotification`** (today built in `PushNotificationJobProgress.Report`/
-  `Complete`, `MapReduceJob.cs:131-142`, `ReduceCoordinator.cs:120-127`). For an **owned** notification:
+  `Complete`, `MapReduceJob.TryCreateProgressNotificationAsync` and `MapReduceBatchNotification.CloseAsync`). For an
+  **owned** notification:
   - `Started` and `Created` come from the envelope's `JobHeaders.EnqueuedAt` and stay the same on every update.
   - Progress updates send `IsNew = false`, so the notification is not raised again while the job runs and one the
     user has read stays read. The closing update (`Complete` of an owned notification, the reduce close of a shared
@@ -293,17 +294,34 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   enqueued without a `ProgressNotificationId`, so `context.Progress` does nothing for them, and a map task's `Complete`
   leaves the shared bar alone (§3.4). `FanOutCoordinator`, `MapCoordinator` and `ReduceCoordinator` therefore close the
   batch's notification through `IPushNotificationManager` with the batch's own title, start and total, and the
-  description "Fan-out failed: <message>", "Map failed: <message>" or "Reduce failed: <message>". `FanOutCoordinator` and
-  `MapCoordinator` take `IPushNotificationManager` in their constructors for it.
+  description "Fan-out failed: <message>", "Map failed: <message>" or "Reduce failed: <message>". `FanOutCoordinator`
+  and `MapCoordinator` take `IPushNotificationManager` in their constructors for it.
   - For the fan-out it covers any exception after the batch is loaded; for a map task, any exception after the batch is
     loaded (the batch store's `SaveResultAndCountAsync` and `TryBeginReduceAsync`, and the reduce enqueue, whose failure
-    still releases the reduce claim first); for the reduce, the handler and its setup (not the store reads before them). A map item handler's own failure is
-    recorded in the batch and does not throw.
+    still releases the reduce claim first); for the reduce, the handler and its setup (not the store reads before
+    them). A map item handler's own failure is recorded in the batch and does not throw, except an
+    `OperationCanceledException`, which `MapCoordinator.RunMapAsync` rethrows.
   - The condition is the dispatcher's final attempt: `JobExecutionContextFactory` sets the context's final-attempt flag
     from the envelope, and a context built any other way never closes a batch. A cancel (an
     `OperationCanceledException` while the token is cancelled) leaves the bar open for the engine.
   - The original exception is rethrown unchanged, so the engine's retry or dead-letter acts on the real cause; a failed
     close is logged, never thrown.
+- **A closed batch notification stays closed.** Platform storage keeps only the last send to a notification id. A
+  fan-out or map task that fails on its final attempt after some map tasks were already enqueued closes the bar
+  `Failed`, and the map tasks that then run send "Mapped k/N" under the same id, which replaces the close and, since the
+  total is never reached, leaves the bar running for good.
+  - `IMapReduceBatchStore` gains `MarkProgressClosedAsync` and `IsProgressClosedAsync`, with default implementations
+    (mark does nothing, check returns `false`), so a third-party store compiles and keeps the earlier behaviour. The
+    in-memory store keeps a flag on the batch entry; the Redis store a `progressclosed` key with the store's TTL,
+    deleted by `CompleteAsync` with the batch's other keys.
+  - `MapReduceBatchNotification.CloseAsync` marks the batch before it sends the close, so every close of a batch with
+    a notification marks: the reduce's success, fault and failure, and the fan-out and map failures. A failure to mark
+    is logged and the close is still sent.
+  - `MapCoordinator` checks the marker before each throttled progress report and skips the report when it is set.
+  - The reduce close is not gated. A batch is not deleted on a coordinator failure, so that a replay of the
+    dead-lettered job can finish it; a replay that completes the batch closes it `Succeeded`.
+  - What remains: a map task that checked the marker just before the close can still send its report after it. That
+    window is of the same order as a map report delayed past the reduce's close, and is accepted.
 - **The engine closes the notification `Canceled` when the cancel was requested**, through the completion seam,
   because only the engine knows who tripped the token:
   - Hangfire: a cancel is a move to `Deleted` (`HangfireJobEngine.Delete`, or Delete in the Hangfire dashboard). The
@@ -646,6 +664,11 @@ the same assertion; items an engine may not support are capability-gated with th
     clears it (`Delivery_FailedAttemptWithRetryPublished_AckFails_KeepsCancelFlagAndDiscardsRedelivery`,
     `Delivery_FinalFailure_DeadLettered_AckFails_KeepsCancelFlagAndDiscardsRedelivery`,
     `Delivery_FinalFailure_Acked_ClearsCancelFlag`). Data: a cancelled job run again.
+19. Conformance, gated on `SupportsRetry` and `ReportsAttemptBudget`: a fan-out that fails on every attempt after it
+    enqueued map tasks (a batch of 30 items; the kit's batch store fails the fan-out's first checkpoint) closes the
+    shared notification `Failed`, and the last update to it is still that close after the map tasks have run
+    (`MapReduce_FanOut_Failure_After_Enqueuing_Map_Tasks_Keeps_Notification_Failed`). Wrong state: the batch's bar
+    shows running for good. (§3.5)
 
 ## 9. Risks and open points
 
@@ -793,7 +816,15 @@ the same assertion; items an engine may not support are capability-gated with th
   progress, owned notification or not; the reporter decides whether to close (§3.4). (3) The four-argument
   `PushNotificationJobProgress` constructor is `[Obsolete]` (VC0016) instead of removed, because it was released
   (§3.4). (4) One public best-effort helper, `BestEffortNotificationSend.TrySendAsync`, and each caller logs with a
-  constant message template: a template passed to a helper as a parameter trips CA2254 and was rejected (§3.4). (5) The "Enqueue failed" close is kept with its trade-off: a failure report may be wrong about a
+  constant message template: a template passed to a helper as a parameter trips CA2254 and was rejected (§3.4).
+  (5) The "Enqueue failed" close is kept with its trade-off: a failure report may be wrong about a
   job a broker did route, and the worker's own sends then replace the close (§3.4). (6) The batch close is one shared
   internal helper (`MapReduceBatchNotification`) used by the fan-out, map and reduce coordinators, not a copy per
   coordinator; a fan-out or map failure on the final attempt now closes the batch `Failed` like the reduce (§3.5).
+- 2026-11-26 — Operator, after a defect found in the previous entry's item 6: a map report sent after a fan-out or map
+  failure close replaced the close and left the bar running (§3.5). (1) The batch store records that the notification
+  was closed, through two `IMapReduceBatchStore` members with default implementations, and map progress reports skip a
+  closed batch. Abandoning the batch on a coordinator failure (deleting it) was rejected: a replay of the dead-lettered
+  job would find no batch and skip. (2) The `FanOutCoordinator` and `MapCoordinator` constructors
+  that gained `IPushNotificationManager` (§3.5) stay a breaking change: they are DI-registered, and an `[Obsolete]`
+  overload would need a no-op notification manager, which would silently lose the close.
