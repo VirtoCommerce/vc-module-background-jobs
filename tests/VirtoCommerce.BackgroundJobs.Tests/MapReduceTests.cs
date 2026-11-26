@@ -780,6 +780,7 @@ public class MapReduceTests
     private sealed class MapTaskHarness
     {
         public Mock<IMapReduceBatchStore> Store { get; } = new();
+        public Mock<IPushNotificationManager> Manager { get; } = new();
         public List<JobProgressPushNotification> Sent { get; } = [];
         public MapReduceBatch Batch { get; }
         public MapCoordinator Map { get; }
@@ -803,8 +804,7 @@ public class MapReduceTests
             Store.Setup(x => x.GetAsync(Batch.BatchId, It.IsAny<CancellationToken>())).ReturnsAsync(Batch);
             Store.Setup(x => x.SaveResultAndCountAsync(Batch.BatchId, It.IsAny<MapResultRecord>(), It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
-            var manager = new Mock<IPushNotificationManager>();
-            manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+            Manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
                 .Callback<PushNotification>(x => Sent.Add((JobProgressPushNotification)x))
                 .Returns(Task.CompletedTask);
 
@@ -812,14 +812,14 @@ public class MapReduceTests
             services.AddSingleton(new SquareHandler());
             var serializer = new JsonJobPayloadSerializer();
 
-            Map = new MapCoordinator(services.BuildServiceProvider(), serializer, Store.Object, new CapturingBackgroundJob(), manager.Object,
+            Map = new MapCoordinator(services.BuildServiceProvider(), serializer, Store.Object, new CapturingBackgroundJob(), Manager.Object,
                 NullLogger<MapCoordinator>.Instance);
 
             var (itemType, itemJson) = serializer.Serialize(new SquareItem(2));
             Envelope = new MapTaskEnvelope { BatchId = Batch.BatchId, Index = 0, ItemType = itemType, ItemJson = itemJson };
 
             Context = JobExecutionContextFactory.Create(
-                manager.Object,
+                Manager.Object,
                 new JobEnvelope
                 {
                     JobType = typeof(MapTaskEnvelope).AssemblyQualifiedName!,
@@ -847,6 +847,34 @@ public class MapReduceTests
 
         Assert.Equal(2, harness.Sent.Count);
         Assert.Null(harness.Sent[0].Outcome);
+        var last = harness.Sent[^1];
+        Assert.Equal(harness.Batch.ProgressNotificationId, last.Id);
+        Assert.Equal(nameof(JobOutcome.Failed), last.Outcome);
+        Assert.Equal(close.Finished, last.Finished);
+        Assert.Equal(close.Description, last.Description);
+    }
+
+    [Fact]
+    public async Task MapTask_ReportSendThrowsAfterItWasStored_SendsTheCloseAgain()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new MapTaskHarness();
+        var close = new ProgressClose("Faulted: 1/2 map items failed.", JobOutcome.Failed, new DateTime(2026, 11, 26, 10, 0, 0, DateTimeKind.Utc));
+        harness.Store.SetupSequence(x => x.GetProgressCloseAsync(harness.Batch.BatchId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProgressClose?)null)
+            .ReturnsAsync(close);
+        harness.Manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+            .Returns<PushNotification>(x =>
+            {
+                var notification = (JobProgressPushNotification)x;
+                harness.Sent.Add(notification);
+
+                return notification.Outcome is null ? throw new InvalidOperationException("hub down") : Task.CompletedTask;
+            });
+
+        await harness.Map.Execute(harness.Envelope, harness.Context, ct);
+
+        Assert.Equal(2, harness.Sent.Count);
         var last = harness.Sent[^1];
         Assert.Equal(harness.Batch.ProgressNotificationId, last.Id);
         Assert.Equal(nameof(JobOutcome.Failed), last.Outcome);

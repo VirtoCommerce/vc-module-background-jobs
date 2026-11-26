@@ -84,14 +84,19 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
                         return;
                     }
 
-                    await context.Progress.Report(
-                        new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },
-                        cancellationToken);
-
-                    // Not the job's token: a cancel after the report must not skip re-sending a close the report raced.
-                    if (await _store.GetProgressCloseAsync(envelope.BatchId, CancellationToken.None) is { } close)
+                    try
                     {
-                        await MapReduceBatchNotification.SendCloseAsync(_pushNotificationManager, batch, close, _logger);
+                        await context.Progress.Report(
+                            new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },
+                            cancellationToken);
+                    }
+                    finally
+                    {
+                        // Not the job's token: a cancel after the report must not skip re-sending a close the report raced.
+                        if (await _store.GetProgressCloseAsync(envelope.BatchId, CancellationToken.None) is { } close)
+                        {
+                            await MapReduceBatchNotification.SendCloseAsync(_pushNotificationManager, batch, close, _logger);
+                        }
                     }
                 },
                 ex => _logger.LogError(ex, "Could not report the map progress to notification {NotificationId}; the batch's outcome is unchanged.",
