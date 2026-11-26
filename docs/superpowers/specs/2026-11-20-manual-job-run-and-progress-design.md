@@ -318,6 +318,8 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
     a notification marks: the reduce's success, fault and failure, and the fan-out and map failures. A failure to mark
     is logged and the close is still sent.
   - `MapCoordinator` checks the marker before each throttled progress report and skips the report when it is set.
+    The check runs inside the best-effort send, so a failed read is logged like a failed report and never fails the
+    map task, which by then has saved its result and may still have to trigger the reduce.
   - The reduce close is not gated. A batch is not deleted on a coordinator failure, so that a replay of the
     dead-lettered job can finish it; a replay that completes the batch closes it `Succeeded`.
   - What remains: a map task that checked the marker just before the close can still send its report after it. That
@@ -645,8 +647,9 @@ the same assertion; items an engine may not support are capability-gated with th
     `MapReduce_Reduce_Setup_Failure_On_Final_Attempt_Closes_Notification_Failed`,
     `MapReduce_FanOut_Failure_On_Final_Attempt_Closes_Notification_Failed`,
     `MapReduce_Map_Failure_On_Final_Attempt_Closes_Notification_Failed`). The kit's batch store fails the fan-out or the
-    join step for a batch whose reduce handler is the matching marker type. Wrong state: the batch's bar stays
-    "running" for good.
+    join step for a batch whose reduce handler is the matching marker type. In the map case both map tasks may observe
+    the batch complete and both fail on the claim, so the bar may close twice, always `Failed`, and ends `Failed`.
+    Wrong state: the batch's bar stays "running" for good.
 16. A failed enqueue closes the Queued notification `Failed` and rethrows the original exception, also when the closing
     send throws (`Enqueue_EngineThrows_ClosesQueuedNotificationAsFailed_AndRethrows`,
     `Enqueue_EngineThrowsAndClosingSendThrows_RethrowsTheEngineError`,

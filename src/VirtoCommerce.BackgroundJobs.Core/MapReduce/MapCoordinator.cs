@@ -74,14 +74,20 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
         // Throttle progress to ~100 updates plus the last one, so a large batch doesn't flood the admin UI / SignalR
         // with one notification per item.
         var step = Math.Max(1, batch.Total / 100);
-        if (!string.IsNullOrEmpty(batch.ProgressNotificationId)
-            && (completed >= batch.Total || completed % step == 0)
-            && !await _store.IsProgressClosedAsync(envelope.BatchId, cancellationToken))
+        if (!string.IsNullOrEmpty(batch.ProgressNotificationId) && (completed >= batch.Total || completed % step == 0))
         {
             await BestEffortNotificationSend.TrySendAsync(
-                () => context.Progress.Report(
-                    new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },
-                    cancellationToken),
+                async () =>
+                {
+                    if (await _store.IsProgressClosedAsync(envelope.BatchId, cancellationToken))
+                    {
+                        return;
+                    }
+
+                    await context.Progress.Report(
+                        new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },
+                        cancellationToken);
+                },
                 ex => _logger.LogError(ex, "Could not report the map progress to notification {NotificationId}; the batch's outcome is unchanged.",
                     batch.ProgressNotificationId),
                 ex => _logger.LogInformation(ex, "Could not report the map progress to notification {NotificationId}: the job was canceled.",

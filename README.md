@@ -634,9 +634,10 @@ In the **`IMapReduceBatchStore`** — never in the message itself. Two implement
 `VirtoCommerce.BackgroundJobs.Data` and are selected automatically:
 
 - **Redis** (`RedisMapReduceBatchStore`) when a Redis connection is configured — **fleet-safe across instances**.
-  Per batch it keeps four keys under `vc:mapreduce:{batchId}:*` — `:meta` (batch metadata), `:items` (the input
+  Per batch it keeps these keys under `vc:mapreduce:{batchId}:*` — `:meta` (batch metadata), `:items` (the input
   items the fan-out worker reads), `:results` (a **hash, one field per item index** → that item's serialized
-  `TResult`), and `:reduce` (the atomic reduce-claim flag). All carry a **7-day TTL** so abandoned batches
+  `TResult`), `:reduce` (the atomic reduce-claim flag), `:fanoutprogress` (the fan-out dispatch checkpoint) and
+  `:progressclosed` (set once the batch's notification is closed). All carry a **7-day TTL** so abandoned batches
   self-clean, and the whole set is deleted once reduce succeeds.
 - **In-memory** (`InMemoryMapReduceBatchStore`) for a single instance — same shape in a `ConcurrentDictionary`.
   Not shared across instances; use Redis for a multi-instance fleet.
