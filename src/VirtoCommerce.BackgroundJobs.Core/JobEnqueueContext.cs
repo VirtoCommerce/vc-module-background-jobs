@@ -31,7 +31,10 @@ public static class JobEnqueueContext
     /// <summary>The start time of the map/reduce batch being fanned out, or null when none is active.</summary>
     public static DateTime? BatchStartedAt => _batchStartedAt.Value;
 
-    /// <summary>Sets the ambient batch start time for the current async scope; dispose the returned handle to restore the previous value. The enqueue facade stamps it only on an enqueue that carries a progress notification id.</summary>
+    /// <summary>
+    /// Sets the ambient batch start time for the current async scope; dispose the returned handle to restore the
+    /// previous value. The enqueue facade stamps it only on an enqueue that carries a progress notification id.
+    /// </summary>
     public static IDisposable BeginBatch(DateTime started)
     {
         var previous = _batchStartedAt.Value;

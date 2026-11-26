@@ -177,7 +177,8 @@ public class DispatcherTests
         Assert.StartsWith("Attempt 1 of 3 failed, retrying: ", progress.Reports[^1].Message);
     }
 
-    // An owned notification is updated when the attempt starts: the queued one carries no job id, so a silent handler would look queued all run.
+    // An owned notification is updated when the attempt starts: the queued one carries no job id, so a silent handler
+    // would look queued all run.
     [Fact]
     public async Task Dispatch_OwnedNotification_ReportsBeforeHandlerRuns()
     {
@@ -290,7 +291,8 @@ public class DispatcherTests
         Assert.Same(expected, thrown);
     }
 
-    // The outcome reaches the progress whoever owns the notification (a wrapper must see every outcome); only attempt reports are owner-only.
+    // The outcome reaches the progress whoever owns the notification (a wrapper must see every outcome); only attempt
+    // reports are owner-only.
     [Fact]
     public async Task Dispatch_SharedNotification_DeliversOutcomeButNotAttemptReports()
     {

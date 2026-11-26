@@ -361,7 +361,8 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
         Assert.Equal(0, fixture.Probe.ExecutionCount(id));
     }
 
-    // 19 — a cancel wins over a handler that then fails with another exception: it closes Canceled and the handler does not run again.
+    // 19 — a cancel wins over a handler that then fails with another exception: it closes Canceled and the handler does
+    // not run again.
     [Fact]
     public async Task Running_Job_Cancel_Then_Handler_Failure_Closes_Canceled()
     {

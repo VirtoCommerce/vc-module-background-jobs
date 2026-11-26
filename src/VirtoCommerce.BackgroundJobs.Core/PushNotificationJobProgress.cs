@@ -50,7 +50,8 @@ public sealed class PushNotificationJobProgress : IJobProgress
     }
 
     /// <summary>
-    /// Reports for the job <paramref name="envelope"/> describes: its own notification with its job id, or a shared one (a map/reduce batch) without it.
+    /// Reports for the job <paramref name="envelope"/> describes: its own notification with its job id, or a shared one
+    /// (a map/reduce batch) without it.
     /// </summary>
     public PushNotificationJobProgress(IPushNotificationManager pushNotificationManager, JobEnvelope envelope, string jobId)
     {
@@ -86,7 +87,8 @@ public sealed class PushNotificationJobProgress : IJobProgress
     }
 
     /// <summary>
-    /// Marks the notification finished, keeping the last counts, title and message, with an error entry on failure. Does nothing for a shared notification: its owner closes it.
+    /// Marks the notification finished, keeping the last counts, title and message, with an error entry on failure.
+    /// Does nothing for a shared notification: its owner closes it.
     /// </summary>
     public Task Complete(JobOutcome outcome, string? error = null, CancellationToken cancellationToken = default)
     {

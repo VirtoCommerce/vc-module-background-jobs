@@ -33,7 +33,10 @@ using Xunit;
 
 namespace VirtoCommerce.BackgroundJobs.Tests;
 
-/// <summary><c>POST api/background-jobs/enqueue</c> through the real MVC pipeline, facade and dispatcher, with and without a stand-in for the platform's global <c>JsonElement</c> converter.</summary>
+/// <summary>
+/// <c>POST api/background-jobs/enqueue</c> through the real MVC pipeline, facade and dispatcher, with and without a
+/// stand-in for the platform's global <c>JsonElement</c> converter.
+/// </summary>
 public class EnqueueEndpointTests
 {
     public class ProbeItem

@@ -20,7 +20,9 @@ using Xunit;
 
 namespace VirtoCommerce.BackgroundJobs.Tests;
 
-/// <summary>Drives <see cref="RabbitMqJobConsumer"/> through a fake channel to see what it does to the job's cancellation flag.</summary>
+/// <summary>
+/// Drives <see cref="RabbitMqJobConsumer"/> through a fake channel to see what it does to the job's cancellation flag.
+/// </summary>
 public sealed class RabbitMqJobConsumerTests
 {
     private const string _jobId = "job-1";

@@ -235,7 +235,8 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         }
         catch (OperationCanceledException) when (jobCts.IsCancellationRequested)
         {
-            // jobCts trips only on a cancel request read from the store, never on shutdown: close it Canceled (the dispatcher leaves it open), then ack and discard. Do NOT re-route to retry/DLQ.
+            // jobCts trips only on a cancel request read from the store, never on shutdown: close it Canceled (the
+            // dispatcher leaves it open), then ack and discard. Do NOT re-route to retry/DLQ.
             _logger.LogInformation("Job {JobId} ({JobType}) was cancelled while running; discarding.", jobId, envelope.JobType);
             await context.Progress.TryCompleteCanceledAsync(_logger, jobId);
             acked = await TryAckAsync(channel, eventArgs.DeliveryTag);
@@ -263,7 +264,8 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         }
         finally
         {
-            // Clear the flag only when the job settled for good (acked, no retry published): a redelivery or a retry still needs it for its pre-dispatch discard. A flag left behind expires with the store's TTL.
+            // Clear the flag only when the job settled for good (acked, no retry published): a redelivery or a retry
+            // still needs it for its pre-dispatch discard. A flag left behind expires with the store's TTL.
             await watchStop.CancelAsync();
             try
             {

@@ -18,14 +18,20 @@ using Xunit;
 
 namespace VirtoCommerce.BackgroundJobs.Tests;
 
-/// <summary>Tests that replace the process-wide <see cref="GlobalJobFilters"/>; run alone, since the Hangfire conformance fixture rebuilds the same static.</summary>
+/// <summary>
+/// Tests that replace the process-wide <see cref="GlobalJobFilters"/>; run alone, since the Hangfire conformance
+/// fixture rebuilds the same static.
+/// </summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class GlobalJobFiltersCollection
 {
     public const string Name = "GlobalJobFilters";
 }
 
-/// <summary>Runs <see cref="PerJobRetryFilterAttribute"/> on a real <see cref="ElectStateContext"/> after the real <see cref="AutomaticRetryAttribute"/> elected, as Hangfire's state machine does.</summary>
+/// <summary>
+/// Runs <see cref="PerJobRetryFilterAttribute"/> on a real <see cref="ElectStateContext"/> after the real
+/// <see cref="AutomaticRetryAttribute"/> elected, as Hangfire's state machine does.
+/// </summary>
 [Collection(GlobalJobFiltersCollection.Name)]
 public sealed class PerJobRetryFilterElectionTests : IDisposable
 {
@@ -39,7 +45,8 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
 
     public PerJobRetryFilterElectionTests()
     {
-        // An earlier conformance fixture can leave Hangfire's static log provider bound to a disposed host, and AutomaticRetryAttribute takes its logger from it.
+        // An earlier conformance fixture can leave Hangfire's static log provider bound to a disposed host, and
+        // AutomaticRetryAttribute takes its logger from it.
         LogProvider.SetCurrentLogProvider(new SilentLogProvider());
 
         foreach (var filter in _originalFilters)
@@ -75,7 +82,8 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
     [Fact]
     public void Deleted_WithoutTraversedFailure_IsNotTouched()
     {
-        // Global retry registered and the count below the limit, so only the traversed-failure check keeps this untouched.
+        // Global retry registered and the count below the limit, so only the traversed-failure check keeps this
+        // untouched.
         RegisterGlobalRetry(AttemptsExceededAction.Delete);
         var deleted = new DeletedState();
         var context = CreateContext(deleted, retryCountStored: _globalAttempts, out var connection);
@@ -121,7 +129,8 @@ public sealed class PerJobRetryFilterElectionTests : IDisposable
         public ILog GetLogger(string name) => new Mock<ILog>().Object;
     }
 
-    // Elects through the global filter first, so a Delete is reached as in Hangfire (Failed, then Deleted with the failure traversed), then through the per-job filter.
+    // Elects through the global filter first, so a Delete is reached as in Hangfire (Failed, then Deleted with the
+    // failure traversed), then through the per-job filter.
     private (ElectStateContext Context, Mock<IStorageConnection> Connection) Elect(int retryCountStored, AttemptsExceededAction onExceeded, FailedState failure, int jobLimit = _jobLimit)
     {
         var global = RegisterGlobalRetry(onExceeded);

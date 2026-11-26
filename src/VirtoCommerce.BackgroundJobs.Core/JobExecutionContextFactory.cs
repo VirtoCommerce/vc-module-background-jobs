@@ -15,7 +15,10 @@ public static class JobExecutionContextFactory
     public static IJobExecutionContext Create(IPushNotificationManager pushNotificationManager, JobEnvelope envelope, string jobId)
         => Create(pushNotificationManager, envelope, jobId, x => x);
 
-    /// <summary>As <see cref="Create(IPushNotificationManager, JobEnvelope, string)"/>, with the context's progress wrapped by <paramref name="wrapProgress"/>; the context keeps what it knows about the attempt.</summary>
+    /// <summary>
+    /// As <see cref="Create(IPushNotificationManager, JobEnvelope, string)"/>, with the context's progress wrapped by
+    /// <paramref name="wrapProgress"/>; the context keeps what it knows about the attempt.
+    /// </summary>
     public static IJobExecutionContext Create(
         IPushNotificationManager pushNotificationManager,
         JobEnvelope envelope,

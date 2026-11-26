@@ -5,10 +5,16 @@ using VirtoCommerce.BackgroundJobs.Core.Models;
 
 namespace VirtoCommerce.BackgroundJobs.Hangfire;
 
-/// <summary>The engine-wide Hangfire retry count, read from the registered <see cref="AutomaticRetryAttribute"/> so the attempt total shown matches what Hangfire does, whoever installed the attribute.</summary>
+/// <summary>
+/// The engine-wide Hangfire retry count, read from the registered <see cref="AutomaticRetryAttribute"/> so the attempt
+/// total shown matches what Hangfire does, whoever installed the attribute.
+/// </summary>
 internal static class HangfireGlobalRetry
 {
-    /// <summary>The last registered <see cref="AutomaticRetryAttribute"/>, which is the one Hangfire applies; null when none is registered.</summary>
+    /// <summary>
+    /// The last registered <see cref="AutomaticRetryAttribute"/>, which is the one Hangfire applies; null when none is
+    /// registered.
+    /// </summary>
     public static AutomaticRetryAttribute? Current()
     {
         AutomaticRetryAttribute? current = null;
@@ -38,7 +44,10 @@ internal static class HangfireGlobalRetry
         return Math.Max(0, envelope.MaxRetryAttempts ?? global.Attempts);
     }
 
-    /// <summary><paramref name="envelope"/> with the attempt a job that spent <paramref name="retryCount"/> retries is about to run, and its total attempts.</summary>
+    /// <summary>
+    /// <paramref name="envelope"/> with the attempt a job that spent <paramref name="retryCount"/> retries is about to
+    /// run, and its total attempts.
+    /// </summary>
     public static JobEnvelope WithAttemptBudget(JobEnvelope envelope, int retryCount)
     {
         ArgumentNullException.ThrowIfNull(envelope);

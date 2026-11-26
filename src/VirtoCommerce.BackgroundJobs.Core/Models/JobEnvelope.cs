@@ -34,7 +34,10 @@ public sealed record JobEnvelope
     /// </summary>
     public int? MaxRetryAttempts { get; init; }
 
-    /// <summary>De-duplication key from <c>EnqueueOptions.UniqueKey</c>. Honored only by an engine that implements de-duplication itself; any other engine carries it and runs duplicates.</summary>
+    /// <summary>
+    /// De-duplication key from <c>EnqueueOptions.UniqueKey</c>. Honored only by an engine that implements
+    /// de-duplication itself; any other engine carries it and runs duplicates.
+    /// </summary>
     public string? UniqueKey { get; init; }
 
     /// <summary>Push-notification id to report progress against, or null for fire-and-forget without progress.</summary>

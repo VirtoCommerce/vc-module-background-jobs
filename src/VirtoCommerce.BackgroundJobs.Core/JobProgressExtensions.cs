@@ -8,7 +8,10 @@ namespace VirtoCommerce.BackgroundJobs;
 
 public static class JobProgressExtensions
 {
-    /// <summary>Closes the job's progress notification as <see cref="JobOutcome.Canceled"/>; a failed close is logged and swallowed, leaving the notification open.</summary>
+    /// <summary>
+    /// Closes the job's progress notification as <see cref="JobOutcome.Canceled"/>; a failed close is logged and
+    /// swallowed, leaving the notification open.
+    /// </summary>
     public static async Task TryCompleteCanceledAsync(
         this IJobProgress progress,
         ILogger logger,

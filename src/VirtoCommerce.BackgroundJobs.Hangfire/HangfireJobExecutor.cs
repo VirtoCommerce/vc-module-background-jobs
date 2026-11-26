@@ -56,7 +56,8 @@ public sealed class HangfireJobExecutor(
         }
         catch (Exception ex) when (cancellationToken.IsCancellationRequested && (ex is OperationCanceledException || !enriched.IsFinalAttempt()))
         {
-            // Not only OperationCanceledException: a handler may throw another once its token trips — except on the final attempt, where the dispatcher's Failed close stands.
+            // Not only OperationCanceledException: a handler may throw another once its token trips — except on the
+            // final attempt, where the dispatcher's Failed close stands.
             await CloseIfDeleted(performContext, context, jobId);
 
             throw;
@@ -83,7 +84,8 @@ public sealed class HangfireJobExecutor(
         }
     }
 
-    // Only a stored Deleted state is a cancel; a shutdown, an ownership change or a requeue runs the job again. A failed read counts as not deleted: better an open notification than Canceled on a job that reruns.
+    // Only a stored Deleted state is a cancel; a shutdown, an ownership change or a requeue runs the job again. A
+    // failed read counts as not deleted: better an open notification than Canceled on a job that reruns.
     private async Task CloseIfDeleted(PerformContext? performContext, IJobExecutionContext context, string jobId)
     {
         try

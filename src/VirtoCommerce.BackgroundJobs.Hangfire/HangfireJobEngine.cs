@@ -74,7 +74,8 @@ public sealed class HangfireJobEngine(IBackgroundJobClient client) : IJobEngine
                 return Task.FromResult(false);
             }
 
-            // Pass the state just read: a job that moved on since (finished, or picked up) is refused, and the loop re-reads it.
+            // Pass the state just read: a job that moved on since (finished, or picked up) is refused, and the loop
+            // re-reads it.
             deleted = client.ChangeState(jobId, new DeletedState(), stateName);
             if (deleted)
             {

@@ -69,7 +69,8 @@ public sealed class HangfireConformanceFixture : JobEngineConformanceFixture
             GlobalJobFilters.Filters.Remove(filter);
         }
 
-        // Production's order: Hangfire's default (10 attempts) first, the configured one after it. A reader of the first one would show 10.
+        // Production's order: Hangfire's default (10 attempts) first, the configured one after it. A reader of the
+        // first one would show 10.
         GlobalJobFilters.Filters.Add(new AutomaticRetryAttribute());
         GlobalJobFilters.Filters.Add(new AutomaticRetryAttribute { Attempts = RetryBudget, DelaysInSeconds = new int[RetryBudget], OnAttemptsExceeded = AttemptsExceededAction.Fail });
 
@@ -162,7 +163,8 @@ public class HangfireConformanceTests(HangfireConformanceFixture fixture)
         {
             Assert.True(Fixture.Services.GetRequiredService<IBackgroundJobClient>().Requeue(jobId), "Hangfire refused to requeue the running job.");
 
-            // The requeued job restarts at once while the first run is still blocked: wait for the second execution and for the first to observe the cancel.
+            // The requeued job restarts at once while the first run is still blocked: wait for the second execution and
+            // for the first to observe the cancel.
             await WaitForExecutionCountAsync(correlationId, 2);
             await Fixture.Probe.WaitCancelledAsync(correlationId, ConformanceConstants.CancellationTimeout, TestContext.Current.CancellationToken);
 

@@ -15,7 +15,10 @@ public class JobProgressPushNotification : PushNotification
         NotifyType = nameof(JobProgressPushNotification);
     }
 
-    /// <summary>The notification a job gets when it is enqueued; <paramref name="enqueuedAt"/> is its start and creation time, and <paramref name="totalCount"/> the work already known (0 when none).</summary>
+    /// <summary>
+    /// The notification a job gets when it is enqueued; <paramref name="enqueuedAt"/> is its start and creation time,
+    /// and <paramref name="totalCount"/> the work already known (0 when none).
+    /// </summary>
     public static JobProgressPushNotification CreateQueued(string creator, string title, DateTime enqueuedAt, long totalCount)
     {
         return JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
@@ -76,7 +79,10 @@ public class JobProgressPushNotification : PushNotification
     /// <summary>The engine's job id, written by the worker once it runs the job (null while queued).</summary>
     public string? JobId { get; set; }
 
-    /// <summary>The <see cref="JobOutcome"/> name once the job ended; null while queued or running. A string because enum serialization on the live channel depends on the deployment.</summary>
+    /// <summary>
+    /// The <see cref="JobOutcome"/> name once the job ended; null while queued or running. A string because enum
+    /// serialization on the live channel depends on the deployment.
+    /// </summary>
     public string? Outcome { get; set; }
 
     public int? Attempt { get; set; }

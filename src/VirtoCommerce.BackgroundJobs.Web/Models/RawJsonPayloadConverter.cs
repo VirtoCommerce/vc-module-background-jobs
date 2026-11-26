@@ -5,7 +5,10 @@ using Newtonsoft.Json.Linq;
 
 namespace VirtoCommerce.BackgroundJobs.Web.Models;
 
-/// <summary>Reads an enqueue request's <c>payload</c> as a raw <see cref="JToken"/>, keeping date-like strings as strings and fractional numbers as decimals, independent of the platform's global converters.</summary>
+/// <summary>
+/// Reads an enqueue request's <c>payload</c> as a raw <see cref="JToken"/>, keeping date-like strings as strings and
+/// fractional numbers as decimals, independent of the platform's global converters.
+/// </summary>
 public sealed class RawJsonPayloadConverter : JsonConverter
 {
     public override bool CanConvert(Type objectType) => typeof(JToken).IsAssignableFrom(objectType);

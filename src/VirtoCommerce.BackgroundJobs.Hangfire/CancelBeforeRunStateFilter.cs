@@ -11,7 +11,10 @@ using VirtoCommerce.Platform.Core.PushNotifications;
 
 namespace VirtoCommerce.BackgroundJobs.Hangfire;
 
-/// <summary>Closes the progress notification of a job deleted before it ran or while it waited for a retry, which no executor will close. Never throws: a failed close must not fail Hangfire's state transition.</summary>
+/// <summary>
+/// Closes the progress notification of a job deleted before it ran or while it waited for a retry, which no executor
+/// will close. Never throws: a failed close must not fail Hangfire's state transition.
+/// </summary>
 public sealed class CancelBeforeRunStateFilter(IPushNotificationManager pushNotificationManager) : JobFilterAttribute, IApplyStateFilter
 {
     private static readonly ILog _logger = LogProvider.For<CancelBeforeRunStateFilter>();

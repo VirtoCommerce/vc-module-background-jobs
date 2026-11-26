@@ -67,7 +67,8 @@ public sealed class InMemoryJobEngine(
         {
             for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
             {
-                // Built before the cancellation check, so a cancel before this attempt closes with its attempt and total, not the envelope's defaults.
+                // Built before the cancellation check, so a cancel before this attempt closes with its attempt and
+                // total, not the envelope's defaults.
                 var attemptEnvelope = envelope with { Attempt = attempt, TotalAttempts = maxRetries + 1 };
                 var context = JobExecutionContextFactory.Create(pushNotificationManager, attemptEnvelope, jobId);
 
@@ -88,7 +89,8 @@ public sealed class InMemoryJobEngine(
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    // The job's token has no writer but Delete, so this is a requested cancel: close it Canceled (the dispatcher leaves it open), never retry.
+                    // The job's token has no writer but Delete, so this is a requested cancel: close it Canceled (the
+                    // dispatcher leaves it open), never retry.
                     _states[jobId] = "Cancelled";
                     logger.LogInformation("In-memory job {JobId} ({JobType}) was cancelled.", jobId, envelope.JobType);
                     await context.Progress.TryCompleteCanceledAsync(logger, jobId);
@@ -146,7 +148,8 @@ public sealed class InMemoryJobEngine(
             }
         }
 
-        // Settled between the check and the cancel: decide from its state, so a cancel racing a finishing job is refused.
+        // Settled between the check and the cancel: decide from its state, so a cancel racing a finishing job is
+        // refused.
         return Task.FromResult(_states.TryGetValue(jobId, out var settled) && !IsTerminal(settled));
     }
 

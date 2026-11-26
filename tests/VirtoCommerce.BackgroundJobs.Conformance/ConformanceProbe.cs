@@ -75,7 +75,9 @@ public sealed class ConformanceProbe
 
     public int ExecutionCount(string correlationId) => _executions.TryGetValue(correlationId, out var value) ? value : 0;
 
-    /// <summary>The job id the context carried on each execution of <paramref name="correlationId"/>, in execution order.</summary>
+    /// <summary>
+    /// The job id the context carried on each execution of <paramref name="correlationId"/>, in execution order.
+    /// </summary>
     public IReadOnlyList<string> ExecutionJobIds(string correlationId)
     {
         if (!_executionJobIds.TryGetValue(correlationId, out var jobIds))

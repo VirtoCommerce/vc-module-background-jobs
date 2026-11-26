@@ -70,7 +70,8 @@ public class CancelBeforeRunStateFilterTests
         return (new CancelBeforeRunStateFilter(manager.Object), sent);
     }
 
-    // Scheduled with 2 retries spent is attempt 3; Enqueued with none stored is attempt 1. 3 retries allowed: 4 attempts.
+    // Scheduled with 2 retries spent is attempt 3; Enqueued with none stored is attempt 1. 3 retries allowed: 4
+    // attempts.
     [Theory]
     [InlineData("Scheduled", "2", 3)]
     [InlineData("Enqueued", null, 1)]

@@ -83,7 +83,8 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         Assert.Equal(4 + 16, reduce.Total); // failed item excluded from the aggregate
     }
 
-    // 17 — a reduce that fails on its final attempt closes the batch's shared notification Failed; earlier attempts leave it open.
+    // 17 — a reduce that fails on its final attempt closes the batch's shared notification Failed; earlier attempts
+    // leave it open.
     [Fact]
     public async Task MapReduce_Reduce_Failure_On_Final_Attempt_Closes_Notification_Failed()
     {

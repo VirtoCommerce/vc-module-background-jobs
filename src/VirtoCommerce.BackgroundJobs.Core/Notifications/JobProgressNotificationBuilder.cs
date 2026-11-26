@@ -18,7 +18,10 @@ internal sealed record JobProgressNotificationFields(
     DateTime? Finished,
     bool IsNew);
 
-/// <summary>Builds every job-progress notification send. Push storage replaces a notification by id, so each send carries the whole set of display fields.</summary>
+/// <summary>
+/// Builds every job-progress notification send. Push storage replaces a notification by id, so each send carries the
+/// whole set of display fields.
+/// </summary>
 internal static class JobProgressNotificationBuilder
 {
     public static JobProgressPushNotification Build(JobProgressNotificationFields fields)

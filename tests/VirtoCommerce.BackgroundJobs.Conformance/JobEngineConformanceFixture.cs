@@ -56,7 +56,10 @@ public abstract class JobEngineConformanceFixture : IAsyncLifetime
 
     private static readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(25);
 
-    /// <summary>The engine's global retry count; a job gets <c>RetryBudget + 1</c> attempts. Scenarios state expectations from it, never as a literal.</summary>
+    /// <summary>
+    /// The engine's global retry count; a job gets <c>RetryBudget + 1</c> attempts. Scenarios state expectations from
+    /// it, never as a literal.
+    /// </summary>
     public virtual int RetryBudget => 3;
 
     /// <summary>A queue no worker of the engine under test drains.</summary>
@@ -70,7 +73,9 @@ public abstract class JobEngineConformanceFixture : IAsyncLifetime
     public JobProgressPushNotification? LastProgressUpdate(string title)
         => _progressUpdates.LastOrDefault(x => x.Title == title);
 
-    /// <summary>Waits for the first send to <paramref name="notificationId"/> matching <paramref name="predicate"/>.</summary>
+    /// <summary>
+    /// Waits for the first send to <paramref name="notificationId"/> matching <paramref name="predicate"/>.
+    /// </summary>
     public async Task<JobProgressPushNotification> WaitForProgressAsync(
         string notificationId,
         Func<JobProgressPushNotification, bool> predicate,
@@ -101,7 +106,9 @@ public abstract class JobEngineConformanceFixture : IAsyncLifetime
         }
     }
 
-    /// <summary>Waits until the engine's <c>GetStatus</c> for <paramref name="jobId"/> satisfies <paramref name="predicate"/>.</summary>
+    /// <summary>
+    /// Waits until the engine's <c>GetStatus</c> for <paramref name="jobId"/> satisfies <paramref name="predicate"/>.
+    /// </summary>
     public async Task<Job> WaitForStatusAsync(
         string jobId,
         Func<Job, bool> predicate,

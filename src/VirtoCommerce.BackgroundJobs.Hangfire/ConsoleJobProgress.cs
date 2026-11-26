@@ -10,7 +10,9 @@ using VirtoCommerce.Platform.Core.Jobs;
 
 namespace VirtoCommerce.BackgroundJobs.Hangfire;
 
-/// <summary>Mirrors a job's progress into the Hangfire dashboard console and forwards every call to the wrapped progress.</summary>
+/// <summary>
+/// Mirrors a job's progress into the Hangfire dashboard console and forwards every call to the wrapped progress.
+/// </summary>
 public sealed class ConsoleJobProgress(IJobProgress inner, PerformContext? performContext, ILogger logger) : IJobProgress
 {
     private readonly object _lock = new();

@@ -59,7 +59,8 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
         var limit = Math.Max(0, maxRetryAttempts.Value);
 
         // allowStale: false on purpose. When AutomaticRetryAttribute elected a retry it wrote the incremented count
-        // through the storage connection moments ago; the job's parameter snapshot still holds the value from before this failure.
+        // through the storage connection moments ago; the job's parameter snapshot still holds the value from before
+        // this failure.
         var retryCount = context.GetJobParameter<int>(RetryCountParameter, allowStale: false);
 
         if (retryElected)
@@ -88,7 +89,10 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
                 $"Job failed and exceeded its per-job retry limit of {limit}."));
     }
 
-    /// <summary>Elects the retry the global filter would have elected with this job's limit, through a copy of the registered attribute so delays, exception filters and <c>RetryCount</c> bookkeeping stay Hangfire's own.</summary>
+    /// <summary>
+    /// Elects the retry the global filter would have elected with this job's limit, through a copy of the registered
+    /// attribute so delays, exception filters and <c>RetryCount</c> bookkeeping stay Hangfire's own.
+    /// </summary>
     private static void RaiseRetryLimit(ElectStateContext context, int limit)
     {
         var global = HangfireGlobalRetry.Current();

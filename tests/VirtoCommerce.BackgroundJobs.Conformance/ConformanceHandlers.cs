@@ -27,7 +27,10 @@ public class ConformancePayload
     /// <summary>Block in the handler until the <c>CancellationToken</c> trips — drives the cancellation scenario.</summary>
     public bool BlockUntilCancelled { get; set; }
 
-    /// <summary>With <see cref="BlockUntilCancelled"/>: once the token trips, throw <see cref="InvalidOperationException"/> instead of rethrowing the cancellation.</summary>
+    /// <summary>
+    /// With <see cref="BlockUntilCancelled"/>: once the token trips, throw <see cref="InvalidOperationException"/>
+    /// instead of rethrowing the cancellation.
+    /// </summary>
     public bool FailOnCancel { get; set; }
 }
 
@@ -138,7 +141,10 @@ public sealed class ConformanceReduceHandler(ConformanceProbe probe) : IReduceJo
     }
 }
 
-/// <summary>A reduce handler the fixture never registers: a batch naming it fails in the reduce step before any handler code runs.</summary>
+/// <summary>
+/// A reduce handler the fixture never registers: a batch naming it fails in the reduce step before any handler code
+/// runs.
+/// </summary>
 public sealed class ConformanceUnregisteredReduceHandler : IReduceJobHandler<ConformanceReduceState, ConformanceMapResult>
 {
     public Task Reduce(ConformanceReduceState state, IReadOnlyCollection<MapResult<ConformanceMapResult>> results, IJobExecutionContext context, CancellationToken cancellationToken = default)

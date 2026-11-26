@@ -10,7 +10,8 @@ namespace VirtoCommerce.BackgroundJobs.Data.Cancellation;
 
 /// <summary>
 /// Single-process <see cref="IJobCancellationStore"/> for dev/testing and no-Redis deployments. Not fleet-safe: a
-/// flag set on one instance is invisible to others, so cancellation only reaches jobs running in this process. A flag expires after <see cref="_ttl"/>.
+/// flag set on one instance is invisible to others, so cancellation only reaches jobs running in this process. A flag
+/// expires after <see cref="_ttl"/>.
 /// </summary>
 public sealed class InMemoryJobCancellationStore : IJobCancellationStore
 {

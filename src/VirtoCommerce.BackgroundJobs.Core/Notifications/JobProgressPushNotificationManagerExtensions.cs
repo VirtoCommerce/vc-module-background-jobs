@@ -6,7 +6,10 @@ namespace VirtoCommerce.BackgroundJobs.Core.Notifications;
 
 public static class JobProgressPushNotificationManagerExtensions
 {
-    /// <summary>Closes <paramref name="queued"/> as failed for a caller whose enqueue failed; a failed send is logged, never thrown, so the caller's exception survives.</summary>
+    /// <summary>
+    /// Closes <paramref name="queued"/> as failed for a caller whose enqueue failed; a failed send is logged, never
+    /// thrown, so the caller's exception survives.
+    /// </summary>
     public static Task TryCloseEnqueueFailedAsync(this IPushNotificationManager manager, JobProgressPushNotification queued, string error, ILogger logger)
     {
         return BestEffortNotificationSend.TrySendAsync(
