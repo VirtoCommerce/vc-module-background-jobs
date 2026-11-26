@@ -33,7 +33,10 @@ internal sealed class ConformanceFaultInjectingBatchStore(IMapReduceBatchStore i
     }
 
     public Task SetFanOutProgressAsync(string batchId, int dispatched, CancellationToken cancellationToken = default)
-        => inner.SetFanOutProgressAsync(batchId, dispatched, cancellationToken);
+    {
+        ThrowIfFaulted<ConformanceFanOutCheckpointFailureReduceHandler>(batchId, "Conformance-induced fan-out checkpoint failure.");
+        return inner.SetFanOutProgressAsync(batchId, dispatched, cancellationToken);
+    }
 
     public Task<int> SaveResultAndCountAsync(string batchId, MapResultRecord result, CancellationToken cancellationToken = default)
         => inner.SaveResultAndCountAsync(batchId, result, cancellationToken);
@@ -49,6 +52,12 @@ internal sealed class ConformanceFaultInjectingBatchStore(IMapReduceBatchStore i
 
     public Task<IReadOnlyCollection<MapResultRecord>> GetResultsAsync(string batchId, CancellationToken cancellationToken = default)
         => inner.GetResultsAsync(batchId, cancellationToken);
+
+    public Task MarkProgressClosedAsync(string batchId, CancellationToken cancellationToken = default)
+        => inner.MarkProgressClosedAsync(batchId, cancellationToken);
+
+    public Task<bool> IsProgressClosedAsync(string batchId, CancellationToken cancellationToken = default)
+        => inner.IsProgressClosedAsync(batchId, cancellationToken);
 
     public Task CompleteAsync(string batchId, CancellationToken cancellationToken = default)
         => inner.CompleteAsync(batchId, cancellationToken);

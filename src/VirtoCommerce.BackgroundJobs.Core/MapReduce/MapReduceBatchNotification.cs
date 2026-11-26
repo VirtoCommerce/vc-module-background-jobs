@@ -10,7 +10,8 @@ namespace VirtoCommerce.BackgroundJobs.Core.MapReduce;
 
 internal static class MapReduceBatchNotification
 {
-    public static Task CloseAsync(
+    public static async Task CloseAsync(
+        IMapReduceBatchStore store,
         IPushNotificationManager pushNotificationManager,
         MapReduceBatch batch,
         string description,
@@ -19,10 +20,20 @@ internal static class MapReduceBatchNotification
     {
         if (string.IsNullOrEmpty(batch.ProgressNotificationId))
         {
-            return Task.CompletedTask;
+            return;
         }
 
-        return BestEffortNotificationSend.TrySendAsync(
+        // Marked before the close is sent: a map report that checks the marker afterwards skips the bar.
+        try
+        {
+            await store.MarkProgressClosedAsync(batch.BatchId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not mark the progress of batch {BatchId} closed; a late map report may reopen the notification.", batch.BatchId);
+        }
+
+        await BestEffortNotificationSend.TrySendAsync(
             () => pushNotificationManager.SendAsync(JobProgressNotificationBuilder.Build(new JobProgressNotificationFields(
                 batch.ProgressNotificationId,
                 batch.UserName ?? "system",
@@ -44,18 +55,19 @@ internal static class MapReduceBatchNotification
 
     // A cancel leaves the bar open: the engine decides what a cancel means.
     public static Task CloseFailedOnFinalAttemptAsync(
+        IMapReduceBatchStore store,
         IPushNotificationManager pushNotificationManager,
         MapReduceBatch batch,
         IJobExecutionContext context,
         Exception exception,
-        CancellationToken cancellationToken,
         string stage,
-        ILogger logger)
+        ILogger logger,
+        CancellationToken cancellationToken)
     {
         var canceled = exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
         if (context is JobExecutionContext { IsFinalAttempt: true } && !canceled)
         {
-            return CloseAsync(pushNotificationManager, batch, $"{stage} failed: {exception.Message}", JobOutcome.Failed, logger);
+            return CloseAsync(store, pushNotificationManager, batch, $"{stage} failed: {exception.Message}", JobOutcome.Failed, logger);
         }
 
         return Task.CompletedTask;

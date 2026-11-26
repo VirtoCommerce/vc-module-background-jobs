@@ -35,7 +35,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
     }
 
     // All reporting batches share one title, so the batch just enqueued is the notification that was not there before.
-    private async Task<string> EnqueueReportingBatchAsync<TReduce>(ConformanceReduceState state)
+    private async Task<string> EnqueueReportingBatchAsync<TReduce>(ConformanceReduceState state, int itemCount = 2)
         where TReduce : class
     {
         var known = Fixture.ProgressNotifications.Where(x => x.Title == _mapReduceTitle).Select(x => x.Id).ToHashSet();
@@ -43,7 +43,7 @@ public abstract partial class JobEngineConformanceTests<TFixture>
         using (var scope = Fixture.Services.CreateScope())
         {
             await scope.ServiceProvider.GetRequiredService<IMapReduceJob>().Enqueue<ConformanceMapHandler, TReduce>(
-                [new ConformanceMapItem(1), new ConformanceMapItem(2)],
+                Enumerable.Range(1, itemCount).Select(x => new ConformanceMapItem(x)).ToArray(),
                 state,
                 new MapReduceOptions { ReportProgress = true },
                 TestContext.Current.CancellationToken);
@@ -172,5 +172,26 @@ public abstract partial class JobEngineConformanceTests<TFixture>
 
         await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
         Assert.Single(Fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);
+    }
+
+    // 20 — map tasks enqueued before the fan-out failed do not reopen the closed notification.
+    [Fact]
+    public async Task MapReduce_FanOut_Failure_After_Enqueuing_Map_Tasks_Keeps_Notification_Failed()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            Fixture.Capabilities.SupportsRetry && Fixture.Capabilities.ReportsAttemptBudget,
+            "engine does not retry failed jobs or does not report its attempt budget.");
+        var id = NewId();
+
+        var notificationId = await EnqueueReportingBatchAsync<ConformanceFanOutCheckpointFailureReduceHandler>(
+            new ConformanceReduceState { CorrelationId = id }, itemCount: 30);
+        var closing = await Fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+
+        await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+        Assert.Equal(nameof(JobOutcome.Failed), Fixture.ProgressUpdates(notificationId).Last().Outcome);
     }
 }

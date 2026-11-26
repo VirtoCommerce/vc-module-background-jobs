@@ -60,7 +60,7 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
         }
         catch (Exception ex)
         {
-            await MapReduceBatchNotification.CloseFailedOnFinalAttemptAsync(_pushNotificationManager, batch, context, ex, cancellationToken, "Map", _logger);
+            await MapReduceBatchNotification.CloseFailedOnFinalAttemptAsync(_store, _pushNotificationManager, batch, context, ex, "Map", _logger, cancellationToken);
 
             throw;
         }
@@ -74,7 +74,9 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
         // Throttle progress to ~100 updates plus the last one, so a large batch doesn't flood the admin UI / SignalR
         // with one notification per item.
         var step = Math.Max(1, batch.Total / 100);
-        if (!string.IsNullOrEmpty(batch.ProgressNotificationId) && (completed >= batch.Total || completed % step == 0))
+        if (!string.IsNullOrEmpty(batch.ProgressNotificationId)
+            && (completed >= batch.Total || completed % step == 0)
+            && !await _store.IsProgressClosedAsync(envelope.BatchId, cancellationToken))
         {
             await BestEffortNotificationSend.TrySendAsync(
                 () => context.Progress.Report(

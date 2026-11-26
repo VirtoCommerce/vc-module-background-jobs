@@ -59,7 +59,7 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
         {
             _logger.LogError("Map/reduce batch {BatchId} faulted: {Failures}/{Total} map items failed (FailFast); reduce skipped.",
                 envelope.BatchId, failures, batch.Total);
-            await MapReduceBatchNotification.CloseAsync(_pushNotificationManager, batch, $"Faulted: {failures}/{batch.Total} map items failed.", JobOutcome.Failed, _logger);
+            await MapReduceBatchNotification.CloseAsync(_store, _pushNotificationManager, batch, $"Faulted: {failures}/{batch.Total} map items failed.", JobOutcome.Failed, _logger);
             await _store.CompleteAsync(envelope.BatchId, cancellationToken);
             return;
         }
@@ -100,12 +100,12 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             // stack) so the engine retries/dead-letters on the actual cause, not the reflection wrapper.
             var actual = ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
 
-            await MapReduceBatchNotification.CloseFailedOnFinalAttemptAsync(_pushNotificationManager, batch, context, actual, cancellationToken, "Reduce", _logger);
+            await MapReduceBatchNotification.CloseFailedOnFinalAttemptAsync(_store, _pushNotificationManager, batch, context, actual, "Reduce", _logger, cancellationToken);
 
             ExceptionDispatchInfo.Throw(actual);
         }
 
-        await MapReduceBatchNotification.CloseAsync(_pushNotificationManager, batch, $"Completed ({batch.Total} items, {failures} failed).", JobOutcome.Succeeded, _logger);
+        await MapReduceBatchNotification.CloseAsync(_store, _pushNotificationManager, batch, $"Completed ({batch.Total} items, {failures} failed).", JobOutcome.Succeeded, _logger);
         await _store.CompleteAsync(envelope.BatchId, cancellationToken);
         _logger.LogInformation("Map/reduce batch {BatchId} reduced ({Total} items, {Failures} failed).",
             envelope.BatchId, batch.Total, failures);

@@ -50,7 +50,7 @@ public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
         }
         catch (Exception ex)
         {
-            await MapReduceBatchNotification.CloseFailedOnFinalAttemptAsync(_pushNotificationManager, batch, context, ex, cancellationToken, "Fan-out", _logger);
+            await MapReduceBatchNotification.CloseFailedOnFinalAttemptAsync(_store, _pushNotificationManager, batch, context, ex, "Fan-out", _logger, cancellationToken);
 
             throw;
         }
