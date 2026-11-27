@@ -916,4 +916,6 @@ the same assertion; items an engine may not support are capability-gated with th
   notes are rewritten (§3.5, §9). New risk: a running job can leave the history.
 - 2026-11-27 — `Started` is now the start of the attempt, `Created` keeps the queue/batch time; the old values were
   identical, so a consumer could not tell when execution began (§2, §3.4, AC 12, AC 13, test 7). The progress page
-  counts elapsed time from `Created`.
+  counts elapsed time from `Created`. AC 13's batch-time check moves from E2E back to a test, reversing item (5) of
+  the 2026-11-25 whole-branch review entry: a batch time in the wrong field, or a start time on a shared notification,
+  is a wrong value that raises no error.

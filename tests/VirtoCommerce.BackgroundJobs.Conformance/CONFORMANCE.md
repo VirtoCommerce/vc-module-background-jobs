@@ -123,6 +123,8 @@ These are the engine duties the scenarios above assert; the README's
 - **Close `Canceled`.** On a requested cancel, close the notification through `context.Progress.Complete(JobOutcome.Canceled)`,
   for a running job, a queued one, and a job waiting for a retry, showing the attempt it was canceled at and the job's
   total (17–19). On the final attempt a handler that then fails with another exception stays `Failed` (20).
+  Close a running job through the `context.Progress` of the attempt being canceled: that reporter has seen the attempt
+  report, so its close carries `Started`. A reporter built afresh just to close sends none and fails 17.
 - **Refuse `Delete` of a finished job** and leave its state alone (21).
 
 `JobProgressPushNotification.Outcome` is a **string** — `Succeeded`, `Failed` or `Canceled`, the name of the
