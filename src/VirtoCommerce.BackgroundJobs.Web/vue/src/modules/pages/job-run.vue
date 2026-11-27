@@ -6,8 +6,10 @@
     width="40%"
   >
     <VcContainer>
+      <!-- maxlength is explicit: vc-shell's default may cap a textarea, which would cut a pasted payload -->
       <VcTextarea
         v-model="payloadText"
+        maxlength="1000000"
         :label="$t('BACKGROUND_JOBS.PAGES.RUN.PAYLOAD')"
         :placeholder="$t('BACKGROUND_JOBS.PAGES.RUN.PAYLOAD_PLACEHOLDER')"
         :hint="$t('BACKGROUND_JOBS.PAGES.RUN.PAYLOAD_HINT')"
