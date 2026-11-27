@@ -500,8 +500,9 @@ Hangfire and RabbitMQ. This delivery only adds scenarios and capability flags to
 - vc-platform#3175 sends `SendSystemEvents` to the creator's hub group only: the creator and the users an
   `IPushNotificationAudienceProvider` admits, administrators included in the restriction. With Redis configured the
   history is shared by all instances, otherwise it stays in memory; both keep a user's newest 20 notifications for 24
-  hours by default. A notification no user created (a recurring job's `system:<id>`, a module install's `system`)
-  reaches nobody live.
+  hours by default. An audience provider admits users to the live
+  broadcasts only; the history holds a user's own notifications. A notification no user created (a recurring job's
+  `system:<id>`) is in no user's history and reaches nobody live unless a provider admits them.
 - The Admin Shell host filters nothing. It requires the platform that carries the change, in its manifest and its
   `Platform.Core` reference, as this module does.
 
@@ -539,8 +540,8 @@ token. Rows still marked `read-from-code` are re-observed by the smoke call afte
 | Swagger schema of `payload` after the change to `JToken` (`/docs/VirtoCommerce.BackgroundJobs/swagger.json`) | — | `EnqueueJobRequest.payload` = `{ "description": "The job payload as JSON; …" }` — no `type`, i.e. any JSON value; a generated client types it as `any` | observed |
 | Stored notification, `POST api/platform/pushnotifications` `{ take, skip }` | — | `{ totalCount, newCount, notifyEvents[] }`; the probe's item: `notifyType: "JobProgressPushNotification"`, `id`, `creator`, `title`, `description: "Completed"`, `started: null`, `finished`, `created` (= completion time), `isNew: true`, `processedCount: 0`, `totalCount: 0`, `progressLog: []`, `repeatCount: 0`, `serverId: null` | observed (MVC serialization of the stored copy) |
 | Platform storage, new notification equal to the previous one in title, type and description | — | folded into the previous notification (`PushNotificationInMemoryStorage.cs:36-48`); vc-platform#3175 stops folding | read-from-code |
-| SignalR `Send` (creator) / `SendSystemEvents` (all) | — | same members; the hub protocol's serializer settings differ from MVC (camelCase, `$type` only in scale-out mode). vc-platform#3175 (`318225a69`): `SendSystemEvents` goes to the creator's group, and every mode uses the default JSON protocol | read-from-code |
-| Enum members of a notification, by channel | — | MVC (REST history): string (`StringEnumConverter`, platform `Startup.cs:202`); SignalR default protocol (System.Text.Json, `AddSignalR()` at `Startup.cs:137`, aspnetcore `JsonHubProtocol` defaults): number; SignalR scale-out (Newtonsoft, `SignalRBuilderExtensions.cs:30-34`): number. `ProgressMessage.Level`'s Newtonsoft-only attribute does not reach System.Text.Json. Hence `Outcome` is a string (§3.4) | read-from-code; E2E reads a SignalR frame |
+| SignalR `Send` (creator) / `SendSystemEvents` (all on 3.1097) | — | same members; on 3.1097 the hub protocol's serializer settings differ from MVC (camelCase, `$type` only in scale-out mode). vc-platform#3175 (`318225a69`): `SendSystemEvents` goes to the creator's group, and every mode uses the default JSON protocol | read-from-code |
+| Enum members of a notification, by channel | — | MVC (REST history): string (`StringEnumConverter`, platform `Startup.cs:202`); SignalR default protocol (System.Text.Json, `AddSignalR()` at `Startup.cs:137`, aspnetcore `JsonHubProtocol` defaults): number; SignalR scale-out (Newtonsoft, `SignalRBuilderExtensions.cs:30-34`, removed by vc-platform#3175): number. `ProgressMessage.Level`'s Newtonsoft-only attribute does not reach System.Text.Json. Hence `Outcome` is a string (§3.4) | read-from-code; E2E reads a SignalR frame |
 | `GET api/platform/jobs/{id}` | (`background_jobs:manage`) | 200 `{ state: "Succeeded", completed: true, id }`; unknown id → 200 `{ state: null, completed: true, id }` (never 404) | observed |
 | `POST api/platform/jobs/{id}/cancel` | (`background_jobs:manage`) | on a **finished** Hangfire job: 200, and the job's state becomes `Deleted` (`GET` then answers `state: "Deleted"`); 404 when the engine rejects, 501 when the engine cannot cancel | observed (finished job); read-from-code (404/501, `JobsController.cs:57-68`) |
 | Admin Shell notification store | — | `EXCLUDED_NOTIFICATION_TYPES = ["IndexProgressPushNotification"]` in `@vc-shell/framework` v2.12.0 (`framework/core/notifications/types.ts`), so `JobProgressPushNotification` is stored | read-from-code (framework source at the host's tag) |
@@ -606,8 +607,8 @@ Each criterion names its check: `test` only where the failure is silent and harm
     line — E2E.
 18. WHILE an InMemory job waits for a retry, THE engine SHALL NOT report it completed; WHEN it is canceled, THEN the
     engine SHALL report it completed. — E2E (development engine)
-19. WHILE the platform carries vc-platform#3175, THE user SHALL NOT receive a notification created by another user,
-    live or from the history, unless an audience provider admits them. — E2E (platform behaviour)
+19. WHILE the platform carries vc-platform#3175, THE user SHALL NOT receive a notification created by another user
+    from the history, nor live unless an audience provider admits them. — E2E (platform behaviour)
 20. THE README SHALL state that the per-job retry limit is honored on every engine with no upper bound, that no shipped
     engine de-duplicates by `UniqueKey`, that REST refuses `options.progressNotificationId`, and the engine duties of
     §3.8. — E2E (review)
@@ -765,8 +766,8 @@ the same assertion; items an engine may not support are capability-gated with th
   concrete type (`PushNotificationJsonSerializer`), so `JobProgressPushNotification` with `JobId`, `Outcome` and
   attempts is what every instance serves, provided it survives the Newtonsoft round trip. E2E on the stand.
 - **A running job can leave the history** (read-from-code at `318225a69`): the history keeps a user's newest 20
-  notifications by creation time for 24 hours, and a job keeps its start time across updates. The progress page then
-  finds no notification for the job id.
+  notifications by creation time for 24 hours, and a job keeps its start time across updates. After a reload, the
+  progress page and the bell then have no notification for the job; an open page keeps receiving live updates.
 - **The platform floor rises** (§3.4): a host on an older platform cannot install this module version. The companion
   vc-platform PR ships first; the module pins its alpha, then its release.
 - **Live and stored enum shapes differ** (found 2026-11-24, outside this delivery): the hub uses System.Text.Json,
