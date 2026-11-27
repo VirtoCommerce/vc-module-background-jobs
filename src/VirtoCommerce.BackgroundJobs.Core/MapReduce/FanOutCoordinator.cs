@@ -1,7 +1,10 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
+using VirtoCommerce.Platform.Core.PushNotifications;
 
 namespace VirtoCommerce.BackgroundJobs.Core.MapReduce;
 
@@ -21,12 +24,14 @@ public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
 
     private readonly IMapReduceBatchStore _store;
     private readonly IBackgroundJob _backgroundJob;
+    private readonly IPushNotificationManager _pushNotificationManager;
     private readonly ILogger<FanOutCoordinator> _logger;
 
-    public FanOutCoordinator(IMapReduceBatchStore store, IBackgroundJob backgroundJob, ILogger<FanOutCoordinator> logger)
+    public FanOutCoordinator(IMapReduceBatchStore store, IBackgroundJob backgroundJob, IPushNotificationManager pushNotificationManager, ILogger<FanOutCoordinator> logger)
     {
         _store = store;
         _backgroundJob = backgroundJob;
+        _pushNotificationManager = pushNotificationManager;
         _logger = logger;
     }
 
@@ -39,6 +44,20 @@ public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
             return;
         }
 
+        try
+        {
+            await FanOutAsync(envelope, batch, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await MapReduceBatchNotification.CloseFailedOnFinalAttemptAsync(_store, _pushNotificationManager, batch, context, ex, "Fan-out", _logger, cancellationToken);
+
+            throw;
+        }
+    }
+
+    private async Task FanOutAsync(MapFanOutEnvelope envelope, MapReduceBatch batch, CancellationToken cancellationToken)
+    {
         var items = await _store.GetItemsAsync(envelope.BatchId, cancellationToken);
 
         // Defensive: fan-out only runs for a non-empty batch (MapReduceJob enqueues reduce directly when Total == 0
@@ -74,6 +93,7 @@ public sealed class FanOutCoordinator : IBackgroundJobHandler<MapFanOutEnvelope>
 
         _logger.LogInformation("Fanning out map task(s) {Start}..{Total} for batch {BatchId}.", startIndex, items.Count, envelope.BatchId);
 
+        using var batchScope = batch.Started.HasValue ? JobEnqueueContext.BeginBatch(batch.Started.Value) : null;
         for (var index = startIndex; index < items.Count; index++)
         {
             var item = items[index];

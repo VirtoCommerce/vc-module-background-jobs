@@ -1,5 +1,6 @@
 #nullable enable
-using System.Text.Json;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using VirtoCommerce.Platform.Core.Jobs;
 
 namespace VirtoCommerce.BackgroundJobs.Web.Models;
@@ -11,7 +12,8 @@ public sealed class EnqueueJobRequest
     public string Name { get; set; } = string.Empty;
 
     /// <summary>The job payload as JSON; bound to the handler's payload type. Omit for a parameterless payload.</summary>
-    public JsonElement Payload { get; set; }
+    [JsonConverter(typeof(RawJsonPayloadConverter))]
+    public JToken? Payload { get; set; }
 
     /// <summary>Optional enqueue options (queue, title, progress, retries, unique key).</summary>
     public EnqueueOptions? Options { get; set; }

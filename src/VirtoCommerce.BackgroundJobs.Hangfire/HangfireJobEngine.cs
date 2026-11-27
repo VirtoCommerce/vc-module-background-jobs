@@ -5,9 +5,9 @@ using System.Threading.Tasks;
 using Hangfire;
 using Hangfire.States;
 using Newtonsoft.Json;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
 using HangfireJob = Hangfire.Common.Job;
 
@@ -20,7 +20,11 @@ namespace VirtoCommerce.BackgroundJobs.Hangfire;
 /// </summary>
 public sealed class HangfireJobEngine(IBackgroundJobClient client) : IJobEngine
 {
+    private const int _maxDeleteAttempts = 3;
+
     private static readonly string[] _finalStates = [DeletedState.StateName, FailedState.StateName, SucceededState.StateName];
+
+    private static readonly string[] _cancellableStates = [.. CancelBeforeRunStateFilter.NotYetRunStates, ProcessingState.StateName];
 
     public string ProviderName => BackgroundJobsProviders.Hangfire;
 
@@ -57,7 +61,30 @@ public sealed class HangfireJobEngine(IBackgroundJobClient client) : IJobEngine
     }
 
     public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default)
-        => Task.FromResult(global::Hangfire.BackgroundJob.Delete(jobId));
+    {
+        var deleted = false;
+
+        for (var attempt = 1; attempt <= _maxDeleteAttempts; attempt++)
+        {
+            using var connection = JobStorage.Current.GetConnection();
+            var stateName = connection.GetStateData(jobId)?.Name;
+
+            if (stateName is null || !_cancellableStates.Contains(stateName))
+            {
+                return Task.FromResult(false);
+            }
+
+            // Pass the state just read: a job that moved on since (finished, or picked up) is refused, and the loop
+            // re-reads it.
+            deleted = client.ChangeState(jobId, new DeletedState(), stateName);
+            if (deleted)
+            {
+                break;
+            }
+        }
+
+        return Task.FromResult(deleted);
+    }
 
     // Hangfire removes a not-started job from its queue and transitions a running one to Deleted, which trips the
     // CancellationToken already flowed through HangfireJobExecutor into the dispatcher/handler.

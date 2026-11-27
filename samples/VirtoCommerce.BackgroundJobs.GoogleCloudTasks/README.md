@@ -22,7 +22,8 @@ Producer (any instance)                Google Cloud Tasks                 Callba
 ```
 
 - **`GoogleCloudTasksJobEngine : IJobEngine`** — `Enqueue` creates an HTTP-target Cloud Task that POSTs the serialized
-  `JobEnvelope` (plus a signed OIDC token) to the callback; the task resource name is the job id. `GetStatus` maps to
+  `JobEnvelope` (plus a signed OIDC token) to the callback; the full task resource name is the job id `Enqueue`
+  returns, and the callback passes the same id to the worker (see the note under Configuration). `GetStatus` maps to
   `GetTask` (exists ⇒ scheduled/in-flight, NotFound ⇒ delivered/done); `Delete` maps to `DeleteTask`. It does **not**
   implement `IExpressionJobEngine`.
 - **`GoogleCloudTasksCallbackController`** — the processing host (a push engine has no `IHostedService` consumer).
@@ -61,6 +62,15 @@ Engine-specific settings (`VirtoCommerce:GoogleCloudTasks`):
 **Credentials** use Application Default Credentials (ADC): on GCP use Workload Identity or the attached service
 account; locally point the standard `GOOGLE_APPLICATION_CREDENTIALS` environment variable at a service-account JSON
 key file. No credential path is configured in code on purpose — ADC is the recommended, rotation-friendly mechanism.
+
+### One job id: the enqueuing and the callback instance share the options
+
+The job id `Enqueue` returns is the **full task resource name**
+(`projects/<ProjectId>/locations/<LocationId>/queues/<QueueId>/tasks/<task id>`). Cloud Tasks sends the callback only the
+task id, in the `X-CloudTasks-TaskName` header, so the callback rebuilds the full name from its own `ProjectId`,
+`LocationId` and `QueueId` options. The instance that enqueues and the instance that serves the callback must therefore
+use the **same** `ProjectId`, `LocationId` and `QueueId`; with different ones the worker's job id does not match the id
+`Enqueue` returned, and the progress page cannot find its job (nothing reports an error).
 
 ### Queue & de-duplication semantics
 

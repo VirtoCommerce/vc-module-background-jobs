@@ -1,11 +1,18 @@
+using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Google.Cloud.Tasks.V2;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Newtonsoft.Json;
+using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs.GoogleCloudTasks;
+using VirtoCommerce.BackgroundJobs.GoogleCloudTasks.Controllers;
 using Xunit;
 
 namespace VirtoCommerce.BackgroundJobs.Tests;
@@ -110,5 +117,32 @@ public class GoogleCloudTasksTests
         var ok = await validator.ValidateAsync("Bearer anything", TestContext.Current.CancellationToken);
 
         Assert.False(ok);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Callback_Passes_Full_Task_Name_As_JobId()
+    {
+        var runner = new Mock<IJobEnvelopeRunner>();
+        string receivedJobId = null;
+        runner
+            .Setup(x => x.Run(It.IsAny<JobEnvelope>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<JobEnvelope, string, CancellationToken>((_, jobId, _) => receivedJobId = jobId)
+            .Returns(System.Threading.Tasks.Task.CompletedTask);
+        var validator = new Mock<IGoogleCloudTasksTokenValidator>();
+        validator
+            .Setup(x => x.ValidateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var options = new GoogleCloudTasksOptions { ProjectId = "p", LocationId = "l", QueueId = "q" };
+        var controller = new GoogleCloudTasksCallbackController(
+            Options.Create(options), runner.Object, validator.Object, NullLogger<GoogleCloudTasksCallbackController>.Instance);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers["X-CloudTasks-TaskName"] = "abc";
+        httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(BuildEnvelope())));
+        controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
+
+        var result = await controller.Callback(TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkResult>(result);
+        Assert.Equal("projects/p/locations/l/queues/q/tasks/abc", receivedJobId);
     }
 }

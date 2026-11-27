@@ -10,11 +10,10 @@ using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Cancellation;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs;
-using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 
 namespace VirtoCommerce.BackgroundJobs.RabbitMQ;
@@ -196,17 +195,26 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
         var jobId = eventArgs.BasicProperties.MessageId ?? string.Empty;
 
+        // Built before the discard check, so a close without a run shows this attempt and the total.
+        var attemptEnvelope = envelope with { TotalAttempts = MaxRetriesFor(envelope) + 1 };
+        var context = JobExecutionContextFactory.Create(_pushNotificationManager, attemptEnvelope, jobId);
+
         // Not started: cancelled before this worker picked it up. RabbitMQ can't remove a specific queued message, so
-        // the cancellation is honored here, at dequeue — ack and discard without running the handler.
+        // the cancellation is honored here, at dequeue — close its notification Canceled, then ack and discard without
+        // running the handler.
         if (!string.IsNullOrEmpty(jobId) && await _cancellationStore.IsCancelRequested(jobId))
         {
             _logger.LogInformation("Job {JobId} ({JobType}) was cancelled before start; discarding.", jobId, envelope.JobType);
+            await context.Progress.TryCompleteCanceledAsync(_logger, jobId);
             await TryAckAsync(channel, eventArgs.DeliveryTag);
-            await _cancellationStore.Clear(jobId);
+
             return;
         }
 
         var dispatched = false;
+
+        var acked = false;
+        var retryPublished = false;
 
         // Per-job cancellation: the handler runs under jobCts.Token; a watch loop polls the shared store and trips it
         // when a cancel is requested for this job. watchStop ends the watch loop once the job settles.
@@ -216,22 +224,22 @@ public sealed class RabbitMqJobConsumer : BackgroundService
 
         try
         {
-            var context = JobExecutionContextFactory.Create(_pushNotificationManager, envelope, jobId);
-
             _logger.LogDebug("Dispatching job {JobId} ({JobType})", jobId, envelope.JobType);
 
-            await _dispatcher.Dispatch(envelope, context, jobCts.Token);
+            await _dispatcher.Dispatch(attemptEnvelope, context, jobCts.Token);
             dispatched = true;
 
             await RunChannelOpAsync(async () => await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false));
+            acked = true;
             _logger.LogDebug("Completed and acked job {JobId} ({JobType})", jobId, envelope.JobType);
         }
         catch (OperationCanceledException) when (jobCts.IsCancellationRequested)
         {
-            // Cancelled while running (cooperative cancel): ack and discard. Do NOT re-route to retry/DLQ — the
-            // cancellation was intentional, not a failure.
+            // jobCts trips only on a cancel request read from the store, never on shutdown: close it Canceled (the
+            // dispatcher leaves it open), then ack and discard. Do NOT re-route to retry/DLQ.
             _logger.LogInformation("Job {JobId} ({JobType}) was cancelled while running; discarding.", jobId, envelope.JobType);
-            await TryAckAsync(channel, eventArgs.DeliveryTag);
+            await context.Progress.TryCompleteCanceledAsync(_logger, jobId);
+            acked = await TryAckAsync(channel, eventArgs.DeliveryTag);
         }
         catch (Exception ex) when (!dispatched)
         {
@@ -239,8 +247,9 @@ public sealed class RabbitMqJobConsumer : BackgroundService
             // succeeds, otherwise leave it unacked so the broker redelivers it (no silent loss).
             try
             {
-                await HandleFailureAsync(channel, envelope, jobId, ex);
+                retryPublished = await HandleFailureAsync(channel, envelope, jobId, ex);
                 await RunChannelOpAsync(async () => await channel.BasicAckAsync(eventArgs.DeliveryTag, multiple: false));
+                acked = true;
             }
             catch (Exception failureEx)
             {
@@ -255,7 +264,8 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         }
         finally
         {
-            // Stop the watch loop and clear the cancellation flag now that the job has settled.
+            // Clear the flag only when the job settled for good (acked, no retry published): a redelivery or a retry
+            // still needs it for its pre-dispatch discard. A flag left behind expires with the store's TTL.
             await watchStop.CancelAsync();
             try
             {
@@ -266,12 +276,15 @@ public sealed class RabbitMqJobConsumer : BackgroundService
                 // expected when the watch loop is stopped
             }
 
-            if (!string.IsNullOrEmpty(jobId))
+            if (ShouldClearCancelFlag(jobId, acked, retryPublished))
             {
                 await _cancellationStore.Clear(jobId);
             }
         }
     }
+
+    private static bool ShouldClearCancelFlag(string jobId, bool acked, bool retryPublished)
+        => !string.IsNullOrEmpty(jobId) && acked && !retryPublished;
 
     // Polls the shared cancellation store for a running job and trips its token when a cancel is requested. Stops when
     // the job settles (watchStopToken) or once a cancel has been observed and signaled.
@@ -316,31 +329,39 @@ public sealed class RabbitMqJobConsumer : BackgroundService
         }
     }
 
-    private async Task TryAckAsync(IChannel channel, ulong deliveryTag)
+    private async Task<bool> TryAckAsync(IChannel channel, ulong deliveryTag)
     {
         try
         {
             await RunChannelOpAsync(async () => await channel.BasicAckAsync(deliveryTag, multiple: false));
+
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to acknowledge RabbitMQ delivery {DeliveryTag}", deliveryTag);
+
+            return false;
         }
     }
+
+    // MaxRetryAttempts counts retries: the first run is Attempt 1, so requeue while Attempt <= MaxRetryAttempts
+    // (e.g. default 3 → up to 3 re-publications), then dead-letter. Floor at 0 (not 1) so MaxRetryAttempts = 0
+    // disables retries entirely — dead-letter on the first failure — matching Hangfire's AutomaticRetry { Attempts = 0 }.
+    // The envelope's per-job value (EnqueueOptions.MaxRetryAttempts) wins over the engine-wide default; it rides on
+    // the message, so the retry decision is the same on whichever worker picks the job up.
+    private int MaxRetriesFor(JobEnvelope envelope)
+        => Math.Max(0, envelope.MaxRetryAttempts ?? _jobsOptions.MaxRetryAttempts);
 
     /// <summary>
     /// Re-routes a failed job: requeue (incremented attempt) until <see cref="BackgroundJobsOptions.MaxRetryAttempts"/>,
     /// then dead-letter (or drop). Does NOT ack — the caller acks the original only after this succeeds, so a failure
     /// here leaves the original unacked for redelivery rather than losing it.
+    /// Returns <c>true</c> when a retry was re-published, <c>false</c> when the job was dead-lettered or dropped.
     /// </summary>
-    private async Task HandleFailureAsync(IChannel channel, JobEnvelope envelope, string jobId, Exception ex)
+    private async Task<bool> HandleFailureAsync(IChannel channel, JobEnvelope envelope, string jobId, Exception ex)
     {
-        // MaxRetryAttempts counts retries: the first run is Attempt 1, so requeue while Attempt <= MaxRetryAttempts
-        // (e.g. default 3 → up to 3 re-publications), then dead-letter. Floor at 0 (not 1) so MaxRetryAttempts = 0
-        // disables retries entirely — dead-letter on the first failure — matching Hangfire's AutomaticRetry { Attempts = 0 }.
-        // The envelope's per-job value (EnqueueOptions.MaxRetryAttempts) wins over the engine-wide default; it rides on
-        // the message, so the retry decision is the same on whichever worker picks the job up.
-        var maxAttempts = Math.Max(0, envelope.MaxRetryAttempts ?? _jobsOptions.MaxRetryAttempts);
+        var maxAttempts = MaxRetriesFor(envelope);
 
         if (envelope.Attempt <= maxAttempts)
         {
@@ -389,19 +410,23 @@ public sealed class RabbitMqJobConsumer : BackgroundService
                         mandatory: false, basicProperties: properties, body: body);
                 });
             }
+
+            return true;
         }
         else if (_rabbitMqOptions.UseDeadLetterQueue)
         {
-            _logger.LogError(ex, "Job {JobId} ({JobType}) failed on final attempt {Attempt}/{MaxAttempts}; dead-lettering",
-                jobId, envelope.JobType, envelope.Attempt, maxAttempts);
+            _logger.LogError(ex, "Job {JobId} ({JobType}) failed on final attempt {Attempt}/{TotalAttempts}; dead-lettering",
+                jobId, envelope.JobType, envelope.Attempt, maxAttempts + 1);
 
             await PublishToDeadLetterAsync(channel, envelope, jobId, ex);
         }
         else
         {
-            _logger.LogError(ex, "Job {JobId} ({JobType}) failed on final attempt {Attempt}/{MaxAttempts}; dropping (dead-letter queue disabled)",
-                jobId, envelope.JobType, envelope.Attempt, maxAttempts);
+            _logger.LogError(ex, "Job {JobId} ({JobType}) failed on final attempt {Attempt}/{TotalAttempts}; dropping (dead-letter queue disabled)",
+                jobId, envelope.JobType, envelope.Attempt, maxAttempts + 1);
         }
+
+        return false;
     }
 
     private async Task PublishToDeadLetterAsync(IChannel channel, JobEnvelope envelope, string jobId, Exception ex)

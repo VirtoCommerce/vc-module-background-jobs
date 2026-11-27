@@ -1,0 +1,17 @@
+{
+  "remote": { "name": "background_jobs_admin", "exposed": "./Module" },
+  "contributions": {
+    "menu": [
+      {
+        "id": "background-jobs",
+        "sectionId": "configuration",
+        "title": "Background jobs",
+        "titleKey": "BACKGROUND_JOBS.MENU.TITLE",
+        "icon": "lucide-timer",
+        "route": "/background-jobs",
+        "permission": "background-jobs:access",
+        "priority": 70
+      }
+    ]
+  }
+}

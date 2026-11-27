@@ -1,0 +1,185 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Threading.Tasks;
+using Moq;
+using VirtoCommerce.BackgroundJobs.Core.Models;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
+using VirtoCommerce.Platform.Core.Jobs;
+using VirtoCommerce.Platform.Core.PushNotifications;
+using Xunit;
+
+namespace VirtoCommerce.BackgroundJobs.Tests;
+
+public class PushNotificationJobProgressTests
+{
+    private static readonly DateTime _enqueuedAt = new(2026, 11, 24, 10, 0, 0, DateTimeKind.Utc);
+
+    private static JobEnvelope CreateEnvelope(int attempt = 1) => new()
+    {
+        JobType = "t",
+        PayloadType = "t",
+        PayloadJson = "{}",
+        ProgressNotificationId = "notification-1",
+        Title = "Import",
+        UserName = "tester",
+        CompletesProgressNotification = true,
+        Attempt = attempt,
+        TotalAttempts = 3,
+        Headers = new Dictionary<string, string>
+        {
+            [JobHeaders.EnqueuedAt] = _enqueuedAt.Ticks.ToString(CultureInfo.InvariantCulture),
+        },
+    };
+
+    private static (PushNotificationJobProgress Progress, List<JobProgressPushNotification> Sent) CreateProgress(JobEnvelope envelope)
+    {
+        var sent = new List<JobProgressPushNotification>();
+        var manager = new Mock<IPushNotificationManager>();
+        manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+            .Callback<PushNotification>(x => sent.Add((JobProgressPushNotification)x))
+            .Returns(Task.CompletedTask);
+
+        return (new PushNotificationJobProgress(manager.Object, envelope, "job-1"), sent);
+    }
+
+    [Fact]
+    public async Task Report_KeepsCreatedAndJobIdStable()
+    {
+        var (progress, sent) = CreateProgress(CreateEnvelope());
+
+        await progress.Report(new JobProgressInfo { Message = "one", ProcessedCount = 1, TotalCount = 10 }, TestContext.Current.CancellationToken);
+        await progress.Report(new JobProgressInfo { Message = "two", ProcessedCount = 2 }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, sent.Count);
+        Assert.All(sent, x =>
+        {
+            Assert.Equal(_enqueuedAt, x.Created);
+            Assert.Equal("job-1", x.JobId);
+            Assert.Equal("notification-1", x.Id);
+            Assert.False(x.IsNew);
+        });
+    }
+
+    [Fact]
+    public async Task Report_AcrossAttempts_KeepsCreatedAndJobId()
+    {
+        var (first, firstSent) = CreateProgress(CreateEnvelope(attempt: 1));
+        var (second, secondSent) = CreateProgress(CreateEnvelope(attempt: 2));
+
+        await first.Report(new JobProgressInfo { Message = "a", ProcessedCount = 50, TotalCount = 100 }, TestContext.Current.CancellationToken);
+        await second.Report(new JobProgressInfo { Message = "b", ProcessedCount = 5 }, TestContext.Current.CancellationToken);
+
+        var a = Assert.Single(firstSent);
+        var b = Assert.Single(secondSent);
+        Assert.Equal(1, a.Attempt);
+        Assert.Equal(2, b.Attempt);
+        Assert.Equal(3, b.TotalAttempts);
+
+        // Against the expected values, not against each other: two sends that both lost the creation time, the job id or
+        // the title would still be equal to one another.
+        Assert.All(new[] { a, b }, x =>
+        {
+            Assert.Equal(_enqueuedAt, x.Created);
+            Assert.Equal("job-1", x.JobId);
+            Assert.Equal("Import", x.Title);
+        });
+        Assert.Equal(5, b.ProcessedCount);
+        Assert.Equal(0, b.TotalCount);
+    }
+
+    [Fact]
+    public async Task Report_SetsStartedOnTheFirstReport_AndKeepsItThroughClose()
+    {
+        var (progress, sent) = CreateProgress(CreateEnvelope());
+
+        var before = DateTime.UtcNow;
+        await progress.Report(new JobProgressInfo { Message = "one" }, TestContext.Current.CancellationToken);
+        var after = DateTime.UtcNow;
+        await progress.Report(new JobProgressInfo { Message = "two" }, TestContext.Current.CancellationToken);
+        await progress.Complete(JobOutcome.Succeeded, error: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, sent.Count);
+        var started = sent[0].Started;
+        Assert.NotNull(started);
+        Assert.InRange(started.Value, before, after);
+        Assert.All(sent, x =>
+        {
+            Assert.Equal(started, x.Started);
+            Assert.Equal(_enqueuedAt, x.Created);
+        });
+    }
+
+    // A cancel before the run, or between attempts, only completes the reporter.
+    [Fact]
+    public async Task Complete_WithoutReport_LeavesStartedNull()
+    {
+        var (progress, sent) = CreateProgress(CreateEnvelope());
+
+        await progress.Complete(JobOutcome.Canceled, error: null, TestContext.Current.CancellationToken);
+
+        var closing = Assert.Single(sent);
+        Assert.Null(closing.Started);
+        Assert.Equal(_enqueuedAt, closing.Created);
+    }
+
+    [Fact]
+    public async Task Report_WithoutCounts_KeepsLastCounts()
+    {
+        var (progress, sent) = CreateProgress(CreateEnvelope());
+
+        await progress.Report(new JobProgressInfo { ProcessedCount = 7, TotalCount = 20 }, TestContext.Current.CancellationToken);
+        await progress.Report(new JobProgressInfo { Message = "still going" }, TestContext.Current.CancellationToken);
+
+        var last = sent.Last();
+        Assert.Equal(7, last.ProcessedCount);
+        Assert.Equal(20, last.TotalCount);
+        Assert.Equal("still going", last.Description);
+    }
+
+    [Fact]
+    public async Task Report_WithoutMessage_KeepsLastMessage()
+    {
+        var (progress, sent) = CreateProgress(CreateEnvelope());
+
+        await progress.Report(new JobProgressInfo { Message = "Importing products" }, TestContext.Current.CancellationToken);
+        await progress.Report(new JobProgressInfo { ProcessedCount = 7, TotalCount = 20 }, TestContext.Current.CancellationToken);
+
+        var last = sent.Last();
+        Assert.Equal("Importing products", last.Description);
+        Assert.Equal(7, last.ProcessedCount);
+    }
+
+    [Fact]
+    public async Task Complete_Succeeded_KeepsLastMessageAsDescription()
+    {
+        var (progress, sent) = CreateProgress(CreateEnvelope());
+
+        await progress.Report(new JobProgressInfo { Message = "Imported 900 of 1000, 100 errors", ProcessedCount = 900, TotalCount = 1000 }, TestContext.Current.CancellationToken);
+        await progress.Complete(JobOutcome.Succeeded, error: null, TestContext.Current.CancellationToken);
+
+        var completed = sent.Last();
+        Assert.Equal("Imported 900 of 1000, 100 errors", completed.Description);
+        Assert.Equal(nameof(JobOutcome.Succeeded), completed.Outcome);
+        Assert.NotNull(completed.Finished);
+        Assert.Equal(900, completed.ProcessedCount);
+        Assert.Equal("job-1", completed.JobId);
+    }
+
+    [Theory]
+    [InlineData(JobOutcome.Succeeded, null)]
+    [InlineData(JobOutcome.Failed, "boom")]
+    [InlineData(JobOutcome.Canceled, null)]
+    public async Task Complete_SendsTheCloseAsUnread_AfterReadUpdates(JobOutcome outcome, string error)
+    {
+        var (progress, sent) = CreateProgress(CreateEnvelope());
+
+        await progress.Report(new JobProgressInfo { Message = "working", ProcessedCount = 1, TotalCount = 2 }, TestContext.Current.CancellationToken);
+        await progress.Complete(outcome, error, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, sent.Count);
+        Assert.False(sent[0].IsNew);
+        Assert.True(sent[1].IsNew);
+    }
+}

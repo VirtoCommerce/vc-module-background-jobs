@@ -5,11 +5,13 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 using VirtoCommerce.BackgroundJobs.Core.Notifications;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 using VirtoCommerce.Platform.Core.Security;
@@ -27,9 +29,11 @@ public sealed class JobEngineBackgroundJob(
     IUserNameResolver userNameResolver,
     // Optional: provided by the active engine module. Null when no engine is installed — enqueue then throws the
     // actionable BackgroundJobEngineNotInstalledException instead of failing DI resolution of this facade.
-    IJobEngine? engine = null) : IBackgroundJob, IBulkBackgroundJob
+    IJobEngine? engine = null,
+    ILogger<JobEngineBackgroundJob>? logger = null) : IBackgroundJob, IBulkBackgroundJob
 {
     private readonly BackgroundJobsOptions _options = options.Value;
+    private readonly ILogger _logger = logger ?? NullLogger<JobEngineBackgroundJob>.Instance;
 
     public Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null,
         CancellationToken cancellationToken = default)
@@ -74,51 +78,66 @@ public sealed class JobEngineBackgroundJob(
         var userName = userNameResolver.GetCurrentUserName();
         var title = string.IsNullOrEmpty(options?.Title) ? $"Background job: {payload.GetType().Name}" : options.Title;
 
+        var enqueuedAt = DateTime.UtcNow;
+
         var progressNotificationId = options?.ProgressNotificationId;
         var ownsNotification = false;
+        JobProgressPushNotification? queued = null;
         if (options?.ReportProgress == true && string.IsNullOrEmpty(progressNotificationId))
         {
-            var notification = new JobProgressPushNotification(userName ?? "system")
-            {
-                Title = title,
-                Description = "Queued",
-                Started = DateTime.UtcNow,
-            };
-            await pushNotificationManager.SendAsync(notification);
-            progressNotificationId = notification.Id;
+            queued = JobProgressPushNotification.CreateQueued(userName ?? "system", title, enqueuedAt, totalCount: 0);
+            await BestEffortNotificationSend.TrySendAsync(
+                () => pushNotificationManager.SendAsync(queued),
+                ex => _logger.LogError(ex, "Could not send the queued progress notification {NotificationId}; enqueueing continues.", queued.Id));
+            progressNotificationId = queued.Id;
             ownsNotification = true;
         }
 
-        // Stamp the enqueue time (for queue-latency telemetry) and, if a producer set an ambient correlation id
-        // (e.g. a load-test run), the run id — so every job on every engine carries the same measurable headers.
-        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        try
         {
-            [JobHeaders.EnqueuedAt] = DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture),
-        };
+            // Stamp the enqueue time (for queue-latency telemetry) and, if a producer set an ambient correlation id
+            // (e.g. a load-test run), the run id — so every job on every engine carries the same measurable headers.
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [JobHeaders.EnqueuedAt] = enqueuedAt.Ticks.ToString(CultureInfo.InvariantCulture),
+            };
 
-        var runId = JobEnqueueContext.RunId;
-        if (!string.IsNullOrEmpty(runId))
-        {
-            headers[JobHeaders.RunId] = runId;
+            var runId = JobEnqueueContext.RunId;
+            if (!string.IsNullOrEmpty(runId))
+            {
+                headers[JobHeaders.RunId] = runId;
+            }
+
+            var batchStartedAt = JobEnqueueContext.BatchStartedAt;
+            if (batchStartedAt.HasValue && !string.IsNullOrEmpty(options?.ProgressNotificationId))
+            {
+                headers[JobHeaders.BatchStartedAt] = batchStartedAt.Value.Ticks.ToString(CultureInfo.InvariantCulture);
+            }
+
+            var envelope = new JobEnvelope
+            {
+                JobType = payloadContractType.AssemblyQualifiedName!,
+                HandlerType = handlerType.AssemblyQualifiedName!,
+                PayloadType = payloadType,
+                PayloadJson = payloadJson,
+                Queue = options?.Queue ?? _options.DefaultQueue,
+                MaxRetryAttempts = options?.MaxRetryAttempts,
+                UniqueKey = options?.UniqueKey,
+                ProgressNotificationId = progressNotificationId,
+                Title = title,
+                CompletesProgressNotification = ownsNotification,
+                UserName = userName,
+                Headers = headers,
+            };
+
+            return await engine.Enqueue(envelope, options ?? new EnqueueOptions(), cancellationToken);
         }
-
-        var envelope = new JobEnvelope
+        catch (Exception ex) when (queued is not null)
         {
-            JobType = payloadContractType.AssemblyQualifiedName!,
-            HandlerType = handlerType.AssemblyQualifiedName!,
-            PayloadType = payloadType,
-            PayloadJson = payloadJson,
-            Queue = options?.Queue ?? _options.DefaultQueue,
-            MaxRetryAttempts = options?.MaxRetryAttempts,
-            UniqueKey = options?.UniqueKey,
-            ProgressNotificationId = progressNotificationId,
-            Title = title,
-            CompletesProgressNotification = ownsNotification,
-            UserName = userName,
-            Headers = headers,
-        };
+            await pushNotificationManager.TryCloseEnqueueFailedAsync(queued, ex.Message, _logger);
 
-        return await engine.Enqueue(envelope, options ?? new EnqueueOptions(), cancellationToken);
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<string>> EnqueueBatch<THandler>(IReadOnlyCollection<object> payloads,

@@ -12,4 +12,7 @@ public sealed class JobExecutionContext(string jobId, IJobProgress progress, IRe
     public IJobProgress Progress { get; } = progress;
 
     public IReadOnlyDictionary<string, string> Headers { get; } = headers;
+
+    /// <summary>Whether a failure of the attempt this context was built for ends the job.</summary>
+    internal bool IsFinalAttempt { get; init; }
 }

@@ -46,6 +46,12 @@ platform Hangfire assembly keep working once this module is installed.
 * **Graceful when absent** — if no engine module is installed, the platform boots and surfaces an actionable
   "install via the Virto Commerce CLI" message instead of silently dropping work.
 
+## Requirements
+
+The module needs a platform release that carries `IJobProgress.Complete` and the `JobOutcome` enum in
+`VirtoCommerce.Platform.Core.Jobs`. The module closes a job's progress notification through `Complete`, so a host on an
+older platform cannot install this version of the module.
+
 ## Configuration
 
 Background processing is configured under `VirtoCommerce:BackgroundJobs`. Provider-specific options keep their own
@@ -234,8 +240,8 @@ Ready-made Kusto queries (throughput, p95 duration, queue latency, failure rate 
 | GET | `api/platform/jobs/{id}` | Get the status of a background job (engine-agnostic). Requires `background_jobs:manage`. |
 | GET | `api/background-jobs/registered` | List registered handlers (name, handler type, payload type). Requires `background-jobs:read`. |
 | GET | `api/background-jobs/recurring` | List recurring jobs with effective cron, enabled, last/next run. Requires `background-jobs:read`. |
-| POST | `api/background-jobs/enqueue` | Trigger a registered job by name — body `{ name, payload, options? }` → engine job id. Requires `background-jobs:execute`. |
-| POST | `api/platform/jobs/{id}/cancel` | Request cancellation of a job. `501` when the active engine can't cancel, `404` when nothing was cancelled. Requires `background_jobs:manage`. |
+| POST | `api/background-jobs/enqueue` | Trigger a registered job by name — body `{ name, payload, options? }` → engine job id. `options.progressNotificationId` is refused with `400`. Requires `background-jobs:execute`. |
+| POST | `api/platform/jobs/{id}/cancel` | Request cancellation of a job. `501` when the active engine can't cancel, `404` when the engine reports nothing was cancelled (an unknown job, or one that already finished, on an engine that reports status: Hangfire, InMemory). RabbitMQ only records the request for any id and answers `200`. Requires `background_jobs:manage`. |
 
 ## Usage
 
@@ -293,13 +299,36 @@ default queue. Pass `EnqueueOptions` only when you need one of these behaviors:
 | Option | Why you'd set it | Notes / engine support |
 |---|---|---|
 | `Queue` | **Isolate workloads.** Route heavy or slow jobs (catalog indexing, bulk export) to a dedicated queue/worker pool so they don't starve short interactive jobs — e.g. `Queue = "indexing"`. | Honored by **Hangfire** and **RabbitMQ** (the worker drains the configured queues). Google Cloud Tasks is single-queue and ignores it. Falls back to `VirtoCommerce:BackgroundJobs:DefaultQueue` when unset. |
-| `ReportProgress` | **The user is watching.** For long jobs, stream `context.Progress.Report(...)` to the admin UI over SignalR (progress bar + log). Skip it for fire-and-forget work to avoid needless notifications. | The engine creates a progress push-notification and returns its id via the notification stream. Works on every engine. |
-| `ProgressNotificationId` | **Report into an existing notification** instead of a new one — e.g. a parent operation, or one shared bar across several jobs (this is how map/reduce shows an aggregate bar). | When set you don't also need `ReportProgress`; updates flow to that id. |
-| `UniqueKey` | **De-duplicate re-enqueues.** Collapse repeated triggers of the "same" work (a debounce/idempotency key) into a single job. | Honored where the engine supports dedup — **Google Cloud Tasks** (task-name dedup). Hangfire and RabbitMQ currently ignore it. |
+| `ReportProgress` | **The user is watching.** For long jobs, stream `context.Progress.Report(...)` to the admin UI over SignalR (progress bar + log). Skip it for fire-and-forget work to avoid needless notifications. | The `IBackgroundJob` facade creates the job's progress push-notification at enqueue (before the engine takes the job), and the worker updates and closes it. Works on every engine. |
+| `ProgressNotificationId` | **Report into an existing notification** instead of a new one — e.g. a parent operation, or one shared bar across several jobs (this is how map/reduce shows an aggregate bar). | When set you don't also need `ReportProgress`; updates flow to that id. The caller owns that notification: a job reporting into it never closes it. In-process callers only — `POST api/background-jobs/enqueue` refuses it (see [Admin & integration API](#admin--integration-api)). |
+| `UniqueKey` | **De-duplicate re-enqueues.** Collapse repeated triggers of the "same" work (a debounce/idempotency key) into a single job. | **No shipped engine de-duplicates by it** — Hangfire, RabbitMQ and InMemory ignore the key, so do not rely on it to prevent duplicate runs; make handlers idempotent. Only the [Google Cloud Tasks sample](samples/VirtoCommerce.BackgroundJobs.GoogleCloudTasks/README.md) honors it (task-name dedup). |
 
-**Retries** are configured globally, not per enqueue: `VirtoCommerce:BackgroundJobs:MaxRetryAttempts` governs how many
-times a failed job is retried before being dead-lettered/dropped (RabbitMQ); Hangfire uses its own retry filter.
-(`EnqueueOptions.MaxRetryAttempts` is reserved for a future per-job override and is not yet honored.)
+**Retries.** `VirtoCommerce:BackgroundJobs:MaxRetryAttempts` is the default count of retries a failed job gets on top
+of its first run (so a job runs at most `MaxRetryAttempts + 1` times). `EnqueueOptions.MaxRetryAttempts` overrides it
+for one job, on **every shipped engine** (Hangfire, RabbitMQ, InMemory): `N` means `N + 1` runs when the job fails every
+time, `0` disables retries, and a negative value counts as `0`. The override may **raise** the count above the default
+as well as lower it, and there is **no upper bound** — a caller who sets a large limit gets that many retries. Once
+the retries are spent RabbitMQ dead-letters or drops the job (see [Configuration](#configuration)). On Hangfire the
+default is the engine's own retry filter (it follows `VirtoCommerce:BackgroundJobs:MaxRetryAttempts` when that key is
+configured), and the per-job value is applied on top of it. A custom engine must honor the per-job value too — the
+conformance kit asserts it (see [What a custom engine owes the standard](#what-a-custom-engine-owes-the-standard)).
+
+#### Progress notification: attempts and outcome
+
+With `ReportProgress` the facade creates the job's notification at enqueue and the worker keeps it up to date; it
+carries the job id (`JobId`, written by the worker, so it is empty while the job waits in the queue), the attempt
+(`Attempt`, `TotalAttempts`) and, once the job ended, the `Outcome` and the `Error`. `Outcome` is a **string** holding
+the name of the `JobOutcome` value — `Succeeded`, `Failed` or `Canceled` — not a number, because how an enum is
+serialized on the live channel depends on the deployment.
+
+* A handler that returns closes the notification `Succeeded`.
+* A failed attempt that has a retry pending leaves it open and says so (`Attempt 1 of 4 failed, retrying: …`); only the
+  failure of the final attempt closes it `Failed`, with the error. An engine that does not report the total number of
+  attempts treats every attempt as the final one.
+* A cancel requested through `Cancel` closes it `Canceled` — also for a job that was canceled before it ran or while it
+  waited for a retry. A handler that fails with another exception after the cancel does not run again; on the final
+  attempt, where no retry was pending for the cancel to stop, the failure is closed `Failed` with its error.
+* A notification passed in by the caller (`ProgressNotificationId`, map/reduce) is never closed by a job.
 
 ### Static enqueue (Hangfire migration)
 
@@ -342,10 +371,42 @@ POST /api/background-jobs/enqueue
 // → "a1b2c3d4"   (engine job id; poll via GET api/platform/jobs/{id})
 ```
 
-An unknown name returns **404**; a payload that doesn't match the handler returns **400**. The addressable name
+An unknown name returns **404**; a payload that doesn't match the handler returns **400**, and so does a request body
+that is not valid JSON or a `payload` that cannot be read (the response names the failing member, and no job is
+enqueued).
+
+**`options.progressNotificationId` is refused with 400**, naming the field. A REST caller cannot own a notification
+that was created elsewhere, and accepting the id would let any caller with `background-jobs:execute` write into another
+person's notification. To follow a job, set `options.reportProgress`: the endpoint then creates the notification itself
+and the worker stamps it with the job id the endpoint returns. A caller that passed `progressNotificationId` before this
+version gets a 400 after the upgrade; in-process callers (`IBackgroundJob`, map/reduce) keep the option. The addressable name
 defaults to the handler's type name; pass `AddBackgroundJob<THandler, TPayload>(name: "my-name")` to set a custom one.
 When distinct handlers share a name (e.g. a `LogEntityChangesJobHandler` in several modules), each is listed and
 addressed by its full handler type name, such as `VirtoCommerce.CatalogModule.Data.Jobs.LogEntityChangesJobHandler`.
+
+### Payload serialization
+
+The job serializer reads a payload exactly as it was written: date-like strings stay strings and numbers with a
+fraction are read as `decimal` (`JobJsonSettings` sets `DateParseHandling.None` and `FloatParseHandling.Decimal`, for
+both the default instance and the one registered in DI). Without that a polymorphic member (one read through the
+platform's `PolymorphJsonConverter`) lost fidelity on every engine, in-process enqueues included: a nested decimal was
+cut to `double` precision and a nested date-like string was parsed and re-formatted in the host's culture. The same
+applies to the payload `POST api/background-jobs/enqueue` receives: the controller deserializes the raw JSON with the
+same settings, so the handler gets every member the payload type declares unchanged. Members the type does not declare
+are dropped.
+
+What changes for members **typed `object` or `JToken`** (and the like — `JObject`, `JValue`): they now receive a
+`string` for a date-like value instead of a `DateTime`, and a `decimal` instead of a `double` for a number with a
+fraction. A fractional number outside the `decimal` range in such a member fails to read instead of becoming a
+`double`. Members with a declared type (`DateTime`, `double`, `decimal`, …) are not affected.
+
+> **Behaviour change — date properties in bulk actions.** A bulk update of a *date* property (vc-module-bulk-actions
+> with vc-module-catalog) carries the value in an `object` member, so it now arrives as a `string`. The catalog parses
+> it with `Convert.ToDateTime(value, CultureInfo.InvariantCulture)`, which turns a `…Z` string into local time. **On a
+> host whose time zone is not UTC — a local Windows stand among them — the stored value is shifted by the host's UTC
+> offset.** Hosts on UTC store the same value as before; number properties keep the exact decimal instead of a
+> `double`. The parsing is in the catalog module and also affects any other caller that passes it a date string; it is
+> tracked as VCST-6984.
 
 ### Cancellation
 
@@ -374,6 +435,11 @@ the token can't be stopped mid-run. Per engine:
 | **Hangfire** | removed from the queue | transitioned to *Deleted*; the handler's `CancellationToken` trips | native; no extra infrastructure |
 | **RabbitMQ** | discarded when the worker dequeues it (a published message can't be recalled) | the handler's `CancellationToken` trips | **cooperative** via `IJobCancellationStore`; needs **Redis** for fleet-wide cancel (in-memory fallback is single-instance). The worker polls the store on a short interval, so running-cancel has bounded latency |
 | **In-Memory** | removed | the running task's `CancellationToken` trips | dev/test only, single process |
+
+A job that has already **finished** has nothing to cancel: an engine that reports status refuses the request
+(`Cancel` returns `false`, the REST endpoint answers `404`) and the job keeps the state it ended in, so a late cancel
+cannot rewrite a finished job's history. A cancel closes the job's progress notification with the outcome `Canceled`
+(see [Progress notification: attempts and outcome](#progress-notification-attempts-and-outcome)).
 
 `Cancel` returns `true` when the active engine accepted the request. On RabbitMQ that means "recorded" (it has no job
 ledger to confirm the id existed); on Hangfire/In-Memory it reflects whether a job was actually found. Cancelling a
@@ -568,10 +634,11 @@ In the **`IMapReduceBatchStore`** — never in the message itself. Two implement
 `VirtoCommerce.BackgroundJobs.Data` and are selected automatically:
 
 - **Redis** (`RedisMapReduceBatchStore`) when a Redis connection is configured — **fleet-safe across instances**.
-  Per batch it keeps four keys under `vc:mapreduce:{batchId}:*` — `:meta` (batch metadata), `:items` (the input
+  Per batch it keeps these keys under `vc:mapreduce:{batchId}:*` — `:meta` (batch metadata), `:items` (the input
   items the fan-out worker reads), `:results` (a **hash, one field per item index** → that item's serialized
-  `TResult`), and `:reduce` (the atomic reduce-claim flag). All carry a **7-day TTL** so abandoned batches
-  self-clean, and the whole set is deleted once reduce succeeds.
+  `TResult`), `:reduce` (the atomic reduce-claim flag), `:fanoutprogress` (the fan-out dispatch checkpoint) and
+  `:progressclosed` (holds the close once the batch's notification is closed). All carry a **7-day TTL** so abandoned
+  batches self-clean, and the whole set is deleted once reduce succeeds.
 - **In-memory** (`InMemoryMapReduceBatchStore`) for a single instance — same shape in a `ConcurrentDictionary`.
   Not shared across instances; use Redis for a multi-instance fleet.
 
@@ -715,6 +782,34 @@ telemetry, and the in-process recurring scheduler). Both are published as NuGet 
 | Recurring | Either call `services.AddInProcessRecurringScheduler()` (reuses the Cronos + distributed-lock + occurrence-marker scheduler, enqueues via `IBackgroundJob`), **or** implement `IRecurringJobScheduler` natively. |
 | Reuse — do **not** reimplement | `IBackgroundJob`, `IJobDispatcher`, `IJobEnvelopeRunner`, `IJobPayloadSerializer`, `JobEnvelope`, `JobExecutionContext`, progress, `RecurringJobsApplier`, `IRecurringJobStateStore` + its Redis/in-memory impls. The host module registers these once. |
 
+### What a custom engine owes the standard
+
+Besides moving the envelope to a worker, the engine carries the facts the shared dispatch path and the admin UI need.
+Each duty is asserted by the [conformance kit](#certify-your-engine-conformance-kit); the optional ones are gated by a
+capability flag on the fixture, and an engine that declares the flag false gets the documented fallback asserted
+instead.
+
+| Duty | What to do | Without it |
+|---|---|---|
+| **One job id** | Pass the worker the exact id `Enqueue` returned, on **every attempt** (`IJobEnvelopeRunner.Run(envelope, jobId, ct)` for a push engine). The id is how the admin UI finds the job's notification. | The progress page never finds its job, and nothing reports an error. Required of every engine, no flag. |
+| **Attempts** | Fill `Attempt` (the first run is 1) and `TotalAttempts` on the `JobEnvelope` **before** `IJobDispatcher.Dispatch`, and build the worker's context from that envelope with `JobExecutionContextFactory.Create`. `TotalAttempts` is `Math.Max(0, envelope.MaxRetryAttempts ?? BackgroundJobsOptions.MaxRetryAttempts) + 1`. | `TotalAttempts` stays null and the dispatcher treats every attempt as final: the first failure closes the notification `Failed`, even when the engine retries. A context built any other way lacks the final-attempt flag, so a map/reduce batch whose last attempt fails stays on "running". The reverse also holds: with `TotalAttempts` null every attempt is final, so the first infrastructure failure in a fan-out or map task closes the batch `Failed` and marks it, which silences map progress while the engine retries; a later successful reduce still closes it `Succeeded`. Flag `ReportsAttemptBudget`. |
+| **Per-job retry limit** | Honor `JobEnvelope.MaxRetryAttempts` the way the formula above does: it overrides the global count both ways, and a negative value counts as `0`. | A job runs the global number of times whatever the caller asked. |
+| **Close a notification** | The dispatcher closes the job's notification on success and on a final failure. An engine closes it itself, through `context.Progress.Complete(JobOutcome.Canceled)` (`IJobProgress.Complete`, `VirtoCommerce.Platform.Core.Jobs`), when it ended the job for a **requested cancel** — only the engine can tell a requested cancel from a shutdown or a lost lock. That includes a job canceled before it ran or while it waited for a retry: close it with the attempt it was about to start and the job's total. | A canceled job's notification stays open on "running" for good. Flag `ClosesCanceledNotification`. |
+| **Honor a cancel** | `Delete` of a running job trips its handler's `CancellationToken`, and a cancel requested during an attempt whose handler then fails with another exception stops the retries: no further attempt runs the handler, and the notification closes `Canceled`. On the **final** attempt that failure is a failure, and stays `Failed`. | Flag `SupportsCancellation` (and `SupportsRetry` for the retry case). |
+| **Refuse `Delete` of a finished job** | An engine that reports status returns `false` for a job that already finished (succeeded, failed or already deleted) and leaves its state as it was. | A late cancel rewrites a finished job's history. Flags `SupportsStatusQuery` and `SupportsDelete`. |
+
+`Complete` is a method on the platform's `IJobProgress`; a progress wrapper an engine puts around the context's progress
+must forward it, or the wrapped reporter never learns the outcome. Wrap through the `wrapProgress` overload of
+`JobExecutionContextFactory.Create`; a context rebuilt around the wrapped progress loses the final-attempt flag.
+`JobOutcome` is `Succeeded`, `Failed` or `Canceled`;
+the notification carries the **name** as a string (`JobProgressPushNotification.Outcome`), never the enum.
+
+A push engine that rebuilds the job id in its callback must derive it the same way `Enqueue` did. The Google Cloud
+Tasks sample returns the full task resource name from `Enqueue`, while Cloud Tasks hands the callback only the task id
+in `X-CloudTasks-TaskName`, so the callback builds the full name from its own `ProjectId`, `LocationId` and `QueueId`.
+The instance that enqueues and the instance that serves the callback must therefore use the **same** `Project`,
+`Location` and `Queue` options, or the worker's job id will not match the one `Enqueue` returned.
+
 ### Recipe
 
 ```csharp
@@ -759,7 +854,8 @@ reuses the shared `IJobEnvelopeRunner` (over `IJobDispatcher`) — no new platfo
 Don't guess whether your engine follows the standard — run the **conformance suite**. The packable
 [`VirtoCommerce.BackgroundJobs.Conformance`](tests/VirtoCommerce.BackgroundJobs.Conformance/CONFORMANCE.md) project
 ships an abstract xUnit base with **one clear scenario per feature** (enqueue→dispatch, payload fidelity, user
-context, status, delete, unique-key, queue routing, retry, progress, map/reduce, recurring). Reference
+context, status, delete, unique-key, queue routing, retry, progress, cancellation and the notification outcome,
+per-job retry limits, one job id, map/reduce, recurring). Reference
 it from your engine's test project, write one small fixture wiring your **real** engine against **real**
 infrastructure (a connection string), derive one test class, and `dotnet test` — green means conformant:
 
@@ -781,9 +877,16 @@ public class MyEngineConformanceTests(MyEngineConformanceFixture fixture)
     : JobEngineConformanceTests<MyEngineConformanceFixture>(fixture);
 ```
 
-The kit certifies Hangfire (in-process) and RabbitMQ (against a broker via `VC_CONFORMANCE_RABBITMQ`) in this repo,
-and includes an infrastructure-free `ReferenceJobEngine` as the copy-paste template. Capability-gated scenarios
-assert the documented fallback (or skip) for features your engine doesn't provide, so it's never penalized for them.
+The kit certifies Hangfire (in-process), InMemory and RabbitMQ (against a broker via `VC_CONFORMANCE_RABBITMQ`) in this
+repo, and includes an infrastructure-free `ReferenceJobEngine` as the copy-paste template. The RabbitMQ fixture runs
+only when `VC_CONFORMANCE_RABBITMQ` is set and skips otherwise; CI sets none, so a green CI run says nothing about
+RabbitMQ. Capability-gated scenarios assert the documented fallback (or skip) for features your engine doesn't
+provide, so it's never penalized for them. The capability flags added for the engine duties above
+(`ReportsAttemptBudget`, `ClosesCanceledNotification`, `CanHoldQueuedJob`) default to `false`, so a fixture written
+against an earlier version of the kit passes a gated scenario after an upgrade, on the fallback or skipped, until it
+declares them. A scenario with no flag runs on every engine and fails an engine that breaks it whatever its fixture
+declares. That includes one job id (`Worker_JobId_Equals_Enqueue_Result`), `Final_Failure_Closes_Notification_Failed`
+and `Success_Closes_Notification_Succeeded`, which an engine written before them may not satisfy.
 
 ## Documentation
 

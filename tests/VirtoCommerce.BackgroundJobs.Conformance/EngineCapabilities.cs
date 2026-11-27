@@ -36,4 +36,22 @@ public sealed record EngineCapabilities
     /// natively (Hangfire) or cooperatively via the shared cancellation store (RabbitMQ). When true, cancelling a
     /// running job trips its handler's <c>CancellationToken</c>. Skipped when unsupported.</summary>
     public bool SupportsCancellation { get; init; }
+
+    /// <summary>
+    /// The engine fills <c>Attempt</c> and <c>TotalAttempts</c> before dispatch, so only the final failure closes the
+    /// notification. When false every attempt counts as final.
+    /// </summary>
+    public bool ReportsAttemptBudget { get; init; }
+
+    /// <summary>
+    /// A requested cancel (<c>Delete</c>) closes the job's notification <c>Canceled</c>. When false it stays open after
+    /// a cancel.
+    /// </summary>
+    public bool ClosesCanceledNotification { get; init; }
+
+    /// <summary>
+    /// A job enqueued onto <see cref="JobEngineConformanceFixture.UnservedQueue"/> stays queued, so a scenario can
+    /// cancel a job that never ran.
+    /// </summary>
+    public bool CanHoldQueuedJob { get; init; }
 }

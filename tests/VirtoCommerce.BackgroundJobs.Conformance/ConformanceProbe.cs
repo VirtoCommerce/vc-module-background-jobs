@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,13 +20,21 @@ public sealed class ConformanceProbe
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _cancelled = new();
     private readonly ConcurrentDictionary<string, JobObservation> _jobs = new();
     private readonly ConcurrentDictionary<string, int> _executions = new();
+    private readonly ConcurrentDictionary<string, List<string>> _executionJobIds = new();
     private readonly ConcurrentDictionary<string, ReduceObservation> _reduces = new();
+    private readonly ConcurrentDictionary<string, MapHold> _mapHolds = new();
 
     /// <summary>Records one handler execution for the correlation id and returns the running execution count
     /// (1 on the first run, 2 on the first retry, …) so retry scenarios can assert how many attempts ran.</summary>
     public int RecordExecution(string correlationId, object payload, string? user, IReadOnlyDictionary<string, string> headers, string jobId)
     {
         var count = _executions.AddOrUpdate(correlationId, 1, (_, current) => current + 1);
+        var jobIds = _executionJobIds.GetOrAdd(correlationId, _ => []);
+        lock (jobIds)
+        {
+            jobIds.Add(jobId);
+        }
+
         _jobs[correlationId] = new JobObservation
         {
             Payload = payload,
@@ -63,11 +72,52 @@ public sealed class ConformanceProbe
     public Task WaitCancelledAsync(string correlationId, TimeSpan timeout, CancellationToken cancellationToken)
         => Cancelled(correlationId).Task.WaitAsync(timeout, cancellationToken);
 
+    /// <summary>
+    /// Holds the first map task that arrives for <paramref name="gateId"/> until <see cref="ReleaseHeldMapTask"/>; every
+    /// later one passes at once, so a batch blocks one worker, not the pool its retries need.
+    /// </summary>
+    public async Task HoldFirstMapTaskAsync(string gateId, CancellationToken cancellationToken)
+    {
+        var hold = MapHoldFor(gateId);
+        if (Interlocked.Exchange(ref hold.Claimed, 1) == 1)
+        {
+            return;
+        }
+
+        await hold.Released.Task.WaitAsync(cancellationToken);
+        hold.ResumedSignal.TrySetResult();
+    }
+
+    /// <summary>Lets the map task held for <paramref name="gateId"/> run; also covers one that arrives later.</summary>
+    public void ReleaseHeldMapTask(string gateId) => MapHoldFor(gateId).Released.TrySetResult();
+
+    /// <summary>Waits until the held map task of <paramref name="gateId"/> ran on past its hold, or throws <see cref="TimeoutException"/>.</summary>
+    public Task WaitHeldMapTaskResumedAsync(string gateId, TimeSpan timeout, CancellationToken cancellationToken)
+        => MapHoldFor(gateId).ResumedSignal.Task.WaitAsync(timeout, cancellationToken);
+
     public JobObservation? Job(string correlationId) => _jobs.TryGetValue(correlationId, out var value) ? value : null;
 
     public int ExecutionCount(string correlationId) => _executions.TryGetValue(correlationId, out var value) ? value : 0;
 
+    /// <summary>
+    /// The job id the context carried on each execution of <paramref name="correlationId"/>, in execution order.
+    /// </summary>
+    public IReadOnlyList<string> ExecutionJobIds(string correlationId)
+    {
+        if (!_executionJobIds.TryGetValue(correlationId, out var jobIds))
+        {
+            return [];
+        }
+
+        lock (jobIds)
+        {
+            return jobIds.ToList();
+        }
+    }
+
     public ReduceObservation? Reduce(string correlationId) => _reduces.TryGetValue(correlationId, out var value) ? value : null;
+
+    private MapHold MapHoldFor(string gateId) => _mapHolds.GetOrAdd(gateId, _ => new MapHold());
 
     private TaskCompletionSource Completion(string correlationId)
         => _completions.GetOrAdd(correlationId, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
@@ -77,6 +127,13 @@ public sealed class ConformanceProbe
 
     private TaskCompletionSource Cancelled(string correlationId)
         => _cancelled.GetOrAdd(correlationId, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+
+    private sealed class MapHold
+    {
+        public int Claimed;
+        public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ResumedSignal { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 
     public sealed record JobObservation
     {

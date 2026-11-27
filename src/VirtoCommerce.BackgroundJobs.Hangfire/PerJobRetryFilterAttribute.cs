@@ -1,9 +1,9 @@
 #nullable enable
 using System;
 using System.Linq;
+using Hangfire;
 using Hangfire.Common;
 using Hangfire.States;
-using Newtonsoft.Json;
 using VirtoCommerce.BackgroundJobs.Core.Models;
 
 namespace VirtoCommerce.BackgroundJobs.Hangfire;
@@ -12,16 +12,11 @@ namespace VirtoCommerce.BackgroundJobs.Hangfire;
 /// Honors the per-job <see cref="JobEnvelope.MaxRetryAttempts"/> (set through <c>EnqueueOptions.MaxRetryAttempts</c>)
 /// on top of the engine-wide <see cref="global::Hangfire.AutomaticRetryAttribute"/>. Hangfire has no per-job retry
 /// count: the global filter decides for every job alike, and an attribute cannot be attached to a single enqueue. So
-/// this filter runs <b>after</b> it (filter order 30 vs 20) and undoes a reschedule the job did not ask for, putting
-/// the original failure back — the replacement for Hangfire's <c>[AutomaticRetry(Attempts = N)]</c>.
+/// this filter runs <b>after</b> it (filter order 30 vs 20) and corrects what it elected — the replacement for
+/// Hangfire's <c>[AutomaticRetry(Attempts = N)]</c>: it puts the failure back when the global filter would retry past
+/// the job's limit, and elects a retry when the global filter gave up (Failed, or Deleted after a failure) before it.
 /// <para>
-/// It can only <b>tighten</b> the global count, never raise it: there is nothing to override unless
-/// <see cref="global::Hangfire.AutomaticRetryAttribute"/> elected a reschedule in the first place.
-/// </para>
-/// <para>
-/// Only jobs enqueued by this engine (whose body is <see cref="HangfireJobExecutor"/>) are inspected; anything else
-/// keeps the global behavior untouched. The envelope is deserialized only when a retry was actually elected, i.e. on
-/// failure, never on the success path.
+/// Only jobs enqueued by this engine with a per-job value are inspected; anything else keeps the global behavior.
 /// </para>
 /// </summary>
 public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectStateFilter
@@ -41,53 +36,96 @@ public sealed class PerJobRetryFilterAttribute : JobFilterAttribute, IElectState
 
     public void OnStateElection(ElectStateContext context)
     {
-        // A reschedule is the only thing worth overriding: any other election (Failed, Succeeded, Deleted) already
-        // matches "do not retry".
-        if (context.CandidateState is not ScheduledState)
+        if (!IsRetryRelevant(context, out var retryElected))
         {
             return;
         }
 
-        var maxRetryAttempts = GetMaxRetryAttempts(context.BackgroundJob?.Job);
+        var maxRetryAttempts = HangfireJobExecutor.TryReadEnvelope(context.BackgroundJob?.Job)?.MaxRetryAttempts;
         if (maxRetryAttempts is null)
         {
             // No per-job override — the global AutomaticRetryAttribute governs, as before.
             return;
         }
 
-        // allowStale: false on purpose. AutomaticRetryAttribute wrote the incremented count through the storage
-        // connection moments ago; the job's parameter snapshot still holds the value from before this failure.
-        var retryCount = context.GetJobParameter<int>(RetryCountParameter, allowStale: false);
-        if (retryCount <= maxRetryAttempts)
-        {
-            return;
-        }
+        var limit = Math.Max(0, maxRetryAttempts.Value);
 
-        // Restore the failure AutomaticRetryAttribute replaced, so the job lands in Failed with its real exception
-        // rather than being retried past the limit this job asked for.
+        // allowStale: false on purpose. When AutomaticRetryAttribute elected a retry it wrote the incremented count
+        // through the storage connection moments ago; the job's parameter snapshot still holds the value from before
+        // this failure.
+        var retryCount = context.GetJobParameter<int>(RetryCountParameter, allowStale: false);
+
+        if (retryElected)
+        {
+            if (retryCount > limit)
+            {
+                RestoreFailure(context, limit);
+            }
+        }
+        else if (retryCount < limit)
+        {
+            RaiseRetryLimit(context, limit);
+        }
+    }
+
+    private static bool IsRetryRelevant(ElectStateContext context, out bool retryElected)
+    {
+        // Enqueued counts as a retry only after a traversed failure: an ordinary enqueue produces it too.
+        var failureTraversed = context.TraversedStates.Any(x => x is FailedState);
+        retryElected = context.CandidateState is ScheduledState
+            || (context.CandidateState is EnqueuedState && failureTraversed);
+        var failed = context.CandidateState is FailedState;
+
+        var deletedAfterFailure = context.CandidateState is DeletedState && failureTraversed;
+
+        return retryElected || failed || deletedAfterFailure;
+    }
+
+    /// <summary>
+    /// Put back the failure <see cref="global::Hangfire.AutomaticRetryAttribute"/> replaced, so the job lands in Failed
+    /// with its real exception rather than being retried past the limit this job asked for.
+    /// </summary>
+    private static void RestoreFailure(ElectStateContext context, int limit)
+    {
         var failedState = context.TraversedStates.OfType<FailedState>().FirstOrDefault();
 
         context.CandidateState = failedState
             ?? new FailedState(new InvalidOperationException(
-                $"Job failed and exceeded its per-job retry limit of {maxRetryAttempts}."));
+                $"Job failed and exceeded its per-job retry limit of {limit}."));
     }
 
-    private static int? GetMaxRetryAttempts(Job? job)
+    /// <summary>
+    /// Elects the retry the global filter would have elected with this job's limit, through a copy of the registered
+    /// attribute so delays, exception filters and <c>RetryCount</c> bookkeeping stay Hangfire's own.
+    /// </summary>
+    private static void RaiseRetryLimit(ElectStateContext context, int limit)
     {
-        // The engine enqueues exactly one shape of job: HangfireJobExecutor.Execute(envelopeJson, context, token).
-        if (job?.Type != typeof(HangfireJobExecutor) || job.Args.Count == 0 || job.Args[0] is not string envelopeJson)
+        var global = HangfireGlobalRetry.Current();
+        if (global is null)
         {
-            return null;
+            return;
         }
 
-        try
+        if (context.CandidateState is DeletedState)
         {
-            return JsonConvert.DeserializeObject<JobEnvelope>(envelopeJson)?.MaxRetryAttempts;
+            // The last failure traversed is the one the global filter deleted the job for.
+            context.CandidateState = context.TraversedStates.OfType<FailedState>().Last();
         }
-        catch (JsonException)
+
+        // Every settable member of the attribute (Hangfire 1.8.23) is copied explicitly: a member left out would fall
+        // back to the constructor default and silently change what this job's retry does.
+        var raised = new AutomaticRetryAttribute
         {
-            // An envelope we cannot read is not a reason to change the retry decision — fall back to the global one.
-            return null;
-        }
+            Attempts = limit,
+            DelaysInSeconds = global.DelaysInSeconds,
+            DelayInSecondsByAttemptFunc = global.DelayInSecondsByAttemptFunc,
+            OnAttemptsExceeded = global.OnAttemptsExceeded,
+            LogEvents = global.LogEvents,
+            OnlyOn = global.OnlyOn,
+            ExceptOn = global.ExceptOn,
+            Order = global.Order,
+        };
+
+        raised.OnStateElection(context);
     }
 }

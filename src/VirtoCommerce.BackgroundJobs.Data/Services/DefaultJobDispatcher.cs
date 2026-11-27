@@ -7,10 +7,13 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.Security;
 
@@ -27,11 +30,56 @@ public sealed class DefaultJobDispatcher(
     // Optional so the dispatcher stays constructible in minimal harnesses (the shipped conformance TestKit builds it
     // with just the two required deps). Production DI injects both; when absent, telemetry is simply skipped.
     JobTelemetry? telemetry = null,
-    IOptions<BackgroundJobsOptions>? options = null) : IJobDispatcher
+    IOptions<BackgroundJobsOptions>? options = null,
+    ILogger<DefaultJobDispatcher>? logger = null) : IJobDispatcher
 {
     private readonly string _engine = options?.Value.Provider ?? "unknown";
+    private readonly ILogger _logger = logger ?? NullLogger<DefaultJobDispatcher>.Instance;
 
     public async Task Dispatch(JobEnvelope envelope, IJobExecutionContext context, CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var outcome = "success";
+        try
+        {
+            try
+            {
+                if (envelope.CompletesProgressNotification)
+                {
+                    await TrySend(() => context.Progress.Report(new JobProgressInfo()), "report the start of the attempt", envelope, context, cancellationToken);
+                }
+
+                await Invoke(envelope, context, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // MethodInfo.Invoke wraps a SYNCHRONOUS throw from the handler (a guard before its first await, or a
+                // non-async handler) in TargetInvocationException — unwrap so cancellation is recognized and the real
+                // cause (not the "Exception has been thrown by the target of an invocation" wrapper) is surfaced.
+                var actual = (ex as TargetInvocationException)?.InnerException ?? ex;
+                outcome = actual is OperationCanceledException && cancellationToken.IsCancellationRequested ? "canceled" : "failure";
+
+                // Cancellation (shutdown / token) is NOT a job failure: leave the progress notification open and let
+                // the engine honor it (RabbitMQ requeue, Hangfire re-run) rather than marking the job finished/failed.
+                if (!(actual is OperationCanceledException && cancellationToken.IsCancellationRequested))
+                {
+                    await ReportFailedAttempt(envelope, context, actual.Message, cancellationToken);
+                }
+
+                ExceptionDispatchInfo.Throw(actual); // preserves the original stack; never returns
+            }
+
+            await TrySend(() => context.Progress.Complete(JobOutcome.Succeeded), "close the notification as succeeded", envelope, context, cancellationToken);
+        }
+        finally
+        {
+            stopwatch.Stop();
+            telemetry?.JobCompleted(_engine, HandlerName(envelope), outcome, GetRunId(envelope),
+                stopwatch.Elapsed.TotalMilliseconds, GetQueueLatencyMs(envelope));
+        }
+    }
+
+    private async Task Invoke(JobEnvelope envelope, IJobExecutionContext context, CancellationToken cancellationToken)
     {
         var payload = serializer.Deserialize(envelope.PayloadType, envelope.PayloadJson);
 
@@ -73,42 +121,9 @@ public sealed class DefaultJobDispatcher(
         var execute = handlerInterfaceType.GetMethod(nameof(IBackgroundJobHandler<object>.Execute))
             ?? throw new InvalidOperationException("IBackgroundJob<T>.Execute was not found.");
 
-        var stopwatch = Stopwatch.StartNew();
-        var outcome = "success";
-        try
+        if (execute.Invoke(handler, [payload, context, cancellationToken]) is Task task)
         {
-            try
-            {
-                if (execute.Invoke(handler, [payload, context, cancellationToken]) is Task task)
-                {
-                    await task;
-                }
-            }
-            catch (Exception ex)
-            {
-                // MethodInfo.Invoke wraps a SYNCHRONOUS throw from the handler (a guard before its first await, or a
-                // non-async handler) in TargetInvocationException — unwrap so cancellation is recognized and the real
-                // cause (not the "Exception has been thrown by the target of an invocation" wrapper) is surfaced.
-                var actual = (ex as TargetInvocationException)?.InnerException ?? ex;
-                outcome = actual is OperationCanceledException ? "canceled" : "failure";
-
-                // Cancellation (shutdown / token) is NOT a job failure: leave the progress notification open and let
-                // the engine honor it (RabbitMQ requeue, Hangfire re-run) rather than marking the job finished/failed.
-                if (actual is not OperationCanceledException)
-                {
-                    await TryCompleteProgress(envelope, context, actual.Message);
-                }
-
-                ExceptionDispatchInfo.Throw(actual); // preserves the original stack; never returns
-            }
-
-            await TryCompleteProgress(envelope, context, error: null);
-        }
-        finally
-        {
-            stopwatch.Stop();
-            telemetry?.JobCompleted(_engine, HandlerName(envelope), outcome, GetRunId(envelope),
-                stopwatch.Elapsed.TotalMilliseconds, GetQueueLatencyMs(envelope));
+            await task;
         }
     }
 
@@ -138,13 +153,35 @@ public sealed class DefaultJobDispatcher(
         return null;
     }
 
-    // When the job owns its progress notification end-to-end, close it (set Finished) so the admin UI bar doesn't
-    // stay open. Jobs reporting into a shared notification (map/reduce) leave it to the owner.
-    private static async Task TryCompleteProgress(JobEnvelope envelope, IJobExecutionContext context, string? error)
+    // No retry announcement once the token is cancelled: a cancel may be about to stop the retry.
+    private async Task ReportFailedAttempt(JobEnvelope envelope, IJobExecutionContext context, string message, CancellationToken cancellationToken)
     {
-        if (envelope.CompletesProgressNotification && context.Progress is PushNotificationJobProgress progress)
+        if (envelope.IsFinalAttempt())
         {
-            await progress.Complete(error);
+            await TrySend(() => context.Progress.Complete(JobOutcome.Failed, message), "close the notification as failed", envelope, context, cancellationToken);
         }
+        else if (envelope.CompletesProgressNotification && !cancellationToken.IsCancellationRequested)
+        {
+            await TrySend(
+                () => context.Progress.Report(new JobProgressInfo
+                {
+                    Message = $"Attempt {envelope.Attempt} of {envelope.TotalAttempts} failed, retrying: {message}",
+                }),
+                "announce the retry",
+                envelope,
+                context,
+                cancellationToken);
+        }
+    }
+
+    private Task TrySend(Func<Task> send, string operation, JobEnvelope envelope, IJobExecutionContext context, CancellationToken cancellationToken)
+    {
+        return BestEffortNotificationSend.TrySendAsync(
+            send,
+            ex => _logger.LogError(ex, "Could not {Operation} for job {JobId} (engine {Engine}, handler {Handler}); the job's outcome is unchanged.",
+                operation, context.JobId, _engine, HandlerName(envelope)),
+            ex => _logger.LogInformation(ex, "Could not {Operation} for job {JobId} (engine {Engine}, handler {Handler}): the job was canceled.",
+                operation, context.JobId, _engine, HandlerName(envelope)),
+            cancellationToken);
     }
 }

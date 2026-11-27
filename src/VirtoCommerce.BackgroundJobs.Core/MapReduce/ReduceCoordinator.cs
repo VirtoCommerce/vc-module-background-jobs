@@ -7,7 +7,6 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
@@ -53,18 +52,47 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
             return;
         }
 
-        var results = await _store.GetResultsAsync(envelope.BatchId, cancellationToken);
-        var failures = results.Count(x => !x.Succeeded);
+        var failures = 0;
+        var faulted = false;
+        try
+        {
+            var results = await _store.GetResultsAsync(envelope.BatchId, cancellationToken);
+            failures = results.Count(x => !x.Succeeded);
+            faulted = batch.FailurePolicy == FailurePolicy.FailFast && failures > 0;
 
-        if (batch.FailurePolicy == FailurePolicy.FailFast && failures > 0)
+            if (!faulted)
+            {
+                await ReduceAsync(batch, results, context, cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            // A synchronous throw from the reduce handler is wrapped by Invoke — surface the real exception (with its
+            // stack) so the engine retries/dead-letters on the actual cause, not the reflection wrapper.
+            var actual = ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
+
+            await MapReduceBatchNotification.CloseFailedOnFinalAttemptAsync(_store, _pushNotificationManager, batch, context, actual, "Reduce", _logger, cancellationToken);
+
+            ExceptionDispatchInfo.Throw(actual);
+        }
+
+        if (faulted)
         {
             _logger.LogError("Map/reduce batch {BatchId} faulted: {Failures}/{Total} map items failed (FailFast); reduce skipped.",
                 envelope.BatchId, failures, batch.Total);
-            await MarkFinishedAsync(batch, $"Faulted: {failures}/{batch.Total} map items failed.");
+            await MapReduceBatchNotification.CloseAsync(_store, _pushNotificationManager, batch, $"Faulted: {failures}/{batch.Total} map items failed.", JobOutcome.Failed, _logger);
             await _store.CompleteAsync(envelope.BatchId, cancellationToken);
             return;
         }
 
+        await MapReduceBatchNotification.CloseAsync(_store, _pushNotificationManager, batch, $"Completed ({batch.Total} items, {failures} failed).", JobOutcome.Succeeded, _logger);
+        await _store.CompleteAsync(envelope.BatchId, cancellationToken);
+        _logger.LogInformation("Map/reduce batch {BatchId} reduced ({Total} items, {Failures} failed).",
+            envelope.BatchId, batch.Total, failures);
+    }
+
+    private async Task ReduceAsync(MapReduceBatch batch, IReadOnlyCollection<MapResultRecord> results, IJobExecutionContext context, CancellationToken cancellationToken)
+    {
         var resultType = Type.GetType(batch.ResultType)
             ?? throw new InvalidOperationException($"Cannot resolve map result type '{batch.ResultType}'.");
         var stateType = Type.GetType(batch.StateType)
@@ -91,41 +119,7 @@ public sealed class ReduceCoordinator : IBackgroundJobHandler<ReduceTaskEnvelope
         }
 
         var reduceMethod = handlerInterfaceType.GetMethod(nameof(IReduceJobHandler<object, object>.Reduce))!;
-        try
-        {
-            await (Task)reduceMethod.Invoke(handler, [state, mapResults, context, cancellationToken])!;
-        }
-        catch (TargetInvocationException ex) when (ex.InnerException is not null)
-        {
-            // A synchronous throw from the reduce handler is wrapped by Invoke — surface the real exception (with its
-            // stack) so the engine retries/dead-letters on the actual cause, not the reflection wrapper.
-            ExceptionDispatchInfo.Throw(ex.InnerException);
-        }
-
-        await MarkFinishedAsync(batch, $"Completed ({batch.Total} items, {failures} failed).");
-        await _store.CompleteAsync(envelope.BatchId, cancellationToken);
-        _logger.LogInformation("Map/reduce batch {BatchId} reduced ({Total} items, {Failures} failed).",
-            envelope.BatchId, batch.Total, failures);
-    }
-
-    // Closes the shared progress notification (sets Finished) once the batch settles, since individual map tasks
-    // intentionally don't close the aggregate bar. Preserves the title so the notification isn't reset.
-    private async Task MarkFinishedAsync(MapReduceBatch batch, string description)
-    {
-        if (string.IsNullOrEmpty(batch.ProgressNotificationId))
-        {
-            return;
-        }
-
-        await _pushNotificationManager.SendAsync(new JobProgressPushNotification(batch.UserName ?? "system")
-        {
-            Id = batch.ProgressNotificationId,
-            Title = batch.Title,
-            Description = description,
-            ProcessedCount = batch.Total,
-            TotalCount = batch.Total,
-            Finished = DateTime.UtcNow,
-        });
+        await (Task)reduceMethod.Invoke(handler, [state, mapResults, context, cancellationToken])!;
     }
 
     // Re-hydrate the type-erased records into a List<MapResult<TResult>> the reduce handler can accept as

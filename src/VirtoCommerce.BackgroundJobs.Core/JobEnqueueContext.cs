@@ -12,6 +12,7 @@ namespace VirtoCommerce.BackgroundJobs;
 public static class JobEnqueueContext
 {
     private static readonly AsyncLocal<string?> _runId = new();
+    private static readonly AsyncLocal<DateTime?> _batchStartedAt = new();
 
     /// <summary>The current ambient run id, or null when none is active.</summary>
     public static string? RunId => _runId.Value;
@@ -24,10 +25,24 @@ public static class JobEnqueueContext
         ArgumentException.ThrowIfNullOrEmpty(runId);
         var previous = _runId.Value;
         _runId.Value = runId;
-        return new Scope(previous);
+        return new Scope<string?>(_runId, previous);
     }
 
-    private sealed class Scope(string? previous) : IDisposable
+    /// <summary>The start time of the map/reduce batch being fanned out, or null when none is active.</summary>
+    public static DateTime? BatchStartedAt => _batchStartedAt.Value;
+
+    /// <summary>
+    /// Sets the ambient batch start time for the current async scope; dispose the returned handle to restore the
+    /// previous value. The enqueue facade stamps it only on an enqueue that carries a progress notification id.
+    /// </summary>
+    public static IDisposable BeginBatch(DateTime started)
+    {
+        var previous = _batchStartedAt.Value;
+        _batchStartedAt.Value = started;
+        return new Scope<DateTime?>(_batchStartedAt, previous);
+    }
+
+    private sealed class Scope<T>(AsyncLocal<T> slot, T previous) : IDisposable
     {
         private bool _disposed;
 
@@ -39,7 +54,7 @@ public static class JobEnqueueContext
             }
 
             _disposed = true;
-            _runId.Value = previous;
+            slot.Value = previous;
         }
     }
 }

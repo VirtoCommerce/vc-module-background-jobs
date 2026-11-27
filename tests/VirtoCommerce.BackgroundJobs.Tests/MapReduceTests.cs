@@ -1,16 +1,20 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using VirtoCommerce.BackgroundJobs.Core.MapReduce;
 using VirtoCommerce.BackgroundJobs;
-using VirtoCommerce.BackgroundJobs.Data.Services;
+using VirtoCommerce.BackgroundJobs.Core;
+using VirtoCommerce.BackgroundJobs.Core.MapReduce;
+using VirtoCommerce.BackgroundJobs.Core.Models;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.BackgroundJobs.Data.MapReduce;
+using VirtoCommerce.BackgroundJobs.Data.Services;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 using VirtoCommerce.Platform.Core.Security;
@@ -50,12 +54,14 @@ public class MapReduceTests
     private sealed class SumReducer : IReduceJobHandler<SumState, SquareResult>
     {
         public bool Ran { get; private set; }
+        public int Calls { get; private set; }
         public int Total { get; private set; }
         public IReadOnlyCollection<MapResult<SquareResult>>? Captured { get; private set; }
 
         public Task Reduce(SumState state, IReadOnlyCollection<MapResult<SquareResult>> results, IJobExecutionContext ctx, CancellationToken ct = default)
         {
             Ran = true;
+            Calls++;
             Captured = results;
             Total = results.Where(r => r.Succeeded).Sum(r => r.Value!.Square);
             return Task.CompletedTask;
@@ -139,8 +145,8 @@ public class MapReduceTests
         userResolver.Setup(x => x.GetCurrentUserName()).Returns("tester");
 
         var facade = new MapReduceJob(bus, store, serializer, userResolver.Object, Mock.Of<IPushNotificationManager>());
-        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
-        var map = new MapCoordinator(sp, serializer, store, bus, NullLogger<MapCoordinator>.Instance);
+        var fanOut = new FanOutCoordinator(store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<FanOutCoordinator>.Instance);
+        var map = new MapCoordinator(sp, serializer, store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<MapCoordinator>.Instance);
         var reduce = new ReduceCoordinator(sp, serializer, store, Mock.Of<IPushNotificationManager>(), NullLogger<ReduceCoordinator>.Instance);
 
         return (facade, fanOut, map, reduce, bus, store, reducer);
@@ -313,7 +319,7 @@ public class MapReduceTests
 
         var serializer = new JsonJobPayloadSerializer();
         var store = new InMemoryMapReduceBatchStore();
-        var map = new MapCoordinator(sp, serializer, store, new ThrowOnReduceBackgroundJob(), NullLogger<MapCoordinator>.Instance);
+        var map = new MapCoordinator(sp, serializer, store, new ThrowOnReduceBackgroundJob(), Mock.Of<IPushNotificationManager>(), NullLogger<MapCoordinator>.Instance);
 
         await store.CreateAsync(new MapReduceBatch
         {
@@ -344,7 +350,7 @@ public class MapReduceTests
         var ct = TestContext.Current.CancellationToken;
         var store = new InMemoryMapReduceBatchStore();
         var bus = new CapturingBackgroundJob();
-        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
+        var fanOut = new FanOutCoordinator(store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<FanOutCoordinator>.Instance);
 
         await store.CreateAsync(new MapReduceBatch { BatchId = "b", Total = 2 }, ct); // expects 2 items; none stored
 
@@ -363,7 +369,7 @@ public class MapReduceTests
         var serializer = new JsonJobPayloadSerializer();
         var store = new InMemoryMapReduceBatchStore();
         var bus = new CapturingBackgroundJob();
-        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
+        var fanOut = new FanOutCoordinator(store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<FanOutCoordinator>.Instance);
 
         await store.CreateAsync(new MapReduceBatch { BatchId = "b", Total = 4 }, ct);
         var items = Enumerable.Range(0, 4)
@@ -394,7 +400,7 @@ public class MapReduceTests
         var serializer = new JsonJobPayloadSerializer();
         var store = new InMemoryMapReduceBatchStore();
         var bus = new CrashOnceBackgroundJob(throwOnCall: 2); // enqueue index 0, then "crash" on index 1
-        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
+        var fanOut = new FanOutCoordinator(store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<FanOutCoordinator>.Instance);
 
         await store.CreateAsync(new MapReduceBatch { BatchId = "b", Total = 3 }, ct);
         var items = Enumerable.Range(0, 3)
@@ -438,8 +444,8 @@ public class MapReduceTests
         userResolver.Setup(x => x.GetCurrentUserName()).Returns("tester");
 
         var facade = new MapReduceJob(bus, store, serializer, userResolver.Object, Mock.Of<IPushNotificationManager>());
-        var fanOut = new FanOutCoordinator(store, bus, NullLogger<FanOutCoordinator>.Instance);
-        var map = new MapCoordinator(sp, serializer, store, bus, NullLogger<MapCoordinator>.Instance);
+        var fanOut = new FanOutCoordinator(store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<FanOutCoordinator>.Instance);
+        var map = new MapCoordinator(sp, serializer, store, bus, Mock.Of<IPushNotificationManager>(), NullLogger<MapCoordinator>.Instance);
         var reduce = new ReduceCoordinator(sp, serializer, store, Mock.Of<IPushNotificationManager>(), NullLogger<ReduceCoordinator>.Instance);
 
         // Batch A — SquareHandler: 1,2,3 -> 1,4,9 = 14
@@ -461,5 +467,461 @@ public class MapReduceTests
             [new SquareItem(1), new SquareItem(2), new SquareItem(3)], new SumState("squares"), cancellationToken: ct);
         await PumpMaps(fanOut, map, bus, ct);
         await reduce.Execute(bus.Enqueued.OfType<ReduceTaskEnvelope>().Single(), Context(), ct);
+    }
+
+    public sealed record BatchPayload(int Value);
+
+    private sealed class FailingMapTaskHandler : IBackgroundJobHandler<BatchPayload>
+    {
+        public Task Execute(BatchPayload payload, IJobExecutionContext context, CancellationToken cancellationToken = default)
+            => payload.Value == 0 ? throw new InvalidOperationException("boom") : Task.CompletedTask;
+    }
+
+    // A reporter built for another envelope may be handed the close, so the test asks the reporter directly.
+    [Fact]
+    public async Task MapTaskProgress_DoesNotCloseSharedNotification()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var sent = new List<JobProgressPushNotification>();
+        var manager = new Mock<IPushNotificationManager>();
+        manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+            .Callback<PushNotification>(x => sent.Add((JobProgressPushNotification)x))
+            .Returns(Task.CompletedTask);
+
+        var services = new ServiceCollection();
+        services.AddTransient<IBackgroundJobHandler<BatchPayload>, FailingMapTaskHandler>();
+        using var provider = services.BuildServiceProvider();
+
+        var serializer = new JsonJobPayloadSerializer();
+        var dispatcher = new DefaultJobDispatcher(provider, serializer);
+
+        async Task<Exception?> DispatchMapTask(int value)
+        {
+            var (payloadType, payloadJson) = serializer.Serialize(new BatchPayload(value));
+            var envelope = new JobEnvelope
+            {
+                JobType = typeof(BatchPayload).AssemblyQualifiedName!,
+                PayloadType = payloadType,
+                PayloadJson = payloadJson,
+                ProgressNotificationId = "batch-1",
+                CompletesProgressNotification = false,
+                Attempt = 1,
+                TotalAttempts = 1,
+            };
+            var progress = new PushNotificationJobProgress(manager.Object, envelope, "job-1");
+            var context = new JobExecutionContext("job-1", progress, new Dictionary<string, string>());
+
+            try
+            {
+                await dispatcher.Dispatch(envelope, context, ct);
+                await progress.Complete(JobOutcome.Succeeded, cancellationToken: ct);
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                await progress.Complete(JobOutcome.Failed, ex.Message, ct);
+
+                return ex;
+            }
+        }
+
+        Assert.Null(await DispatchMapTask(1));
+        Assert.IsType<InvalidOperationException>(await DispatchMapTask(0));
+
+        Assert.DoesNotContain(sent, x => x.Finished is not null || x.Outcome is not null);
+    }
+
+    // Runs the real facade over a capturing engine, so the batch-start header path is exercised end to end.
+    private sealed class NotifyingHarness
+    {
+        public List<JobProgressPushNotification> Sent { get; } = [];
+        public List<JobEnvelope> Enqueued { get; } = [];
+        public InMemoryMapReduceBatchStore Store { get; } = new();
+        public JsonJobPayloadSerializer Serializer { get; } = new();
+        public Mock<IPushNotificationManager> Manager { get; } = new();
+        public MapReduceJob Facade { get; }
+        public FanOutCoordinator FanOut { get; }
+        public MapCoordinator Map { get; }
+        public ReduceCoordinator Reduce { get; }
+        public SumReducer Reducer { get; } = new();
+        public string? BatchId { get; private set; }
+
+        public NotifyingHarness(IMapJobHandler<SquareItem, SquareResult> mapHandler)
+        {
+            Manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+                .Callback<PushNotification>(x => Sent.Add((JobProgressPushNotification)x))
+                .Returns(Task.CompletedTask);
+
+            var engine = new Mock<IJobEngine>();
+            engine.SetupGet(x => x.ProviderName).Returns("Test");
+            engine.Setup(x => x.Enqueue(It.IsAny<JobEnvelope>(), It.IsAny<EnqueueOptions>(), It.IsAny<CancellationToken>()))
+                .Callback<JobEnvelope, EnqueueOptions, CancellationToken>((env, _, _) => Enqueued.Add(env))
+                .ReturnsAsync("job-1");
+
+            var userResolver = new Mock<IUserNameResolver>();
+            userResolver.Setup(x => x.GetCurrentUserName()).Returns("tester");
+
+            var bus = new JobEngineBackgroundJob(
+                Serializer,
+                Microsoft.Extensions.Options.Options.Create(new BackgroundJobsOptions { DefaultQueue = "default" }),
+                Manager.Object,
+                userResolver.Object,
+                engine.Object);
+
+            var services = new ServiceCollection();
+            services.AddSingleton(mapHandler.GetType(), mapHandler);
+            services.AddSingleton(Reducer);
+            var sp = services.BuildServiceProvider();
+
+            Facade = new MapReduceJob(bus, Store, Serializer, userResolver.Object, Manager.Object);
+            FanOut = new FanOutCoordinator(Store, bus, Manager.Object, NullLogger<FanOutCoordinator>.Instance);
+            Map = new MapCoordinator(sp, Serializer, Store, bus, Manager.Object, NullLogger<MapCoordinator>.Instance);
+            Reduce = new ReduceCoordinator(sp, Serializer, Store, Manager.Object, NullLogger<ReduceCoordinator>.Instance);
+        }
+
+        // Returns the initial send, the map updates and the reduce close; beforeReduce runs after the map tasks.
+        public async Task<(JobProgressPushNotification Initial, IReadOnlyList<JobProgressPushNotification> MapUpdates, JobProgressPushNotification Close)>
+            RunAsync<TMap>(SquareItem[] items, CancellationToken ct, Action? beforeReduce = null)
+            where TMap : class
+        {
+            var batchId = await Facade.Enqueue<TMap, SumReducer>(
+                items, new SumState("squares"), new MapReduceOptions { ReportProgress = true }, ct);
+            BatchId = batchId;
+            var initial = Sent.Single();
+
+            await FanOut.Execute(new MapFanOutEnvelope { BatchId = batchId }, Context(), ct);
+
+            var mapTasks = Enqueued.Where(x => x.JobType == typeof(MapTaskEnvelope).AssemblyQualifiedName).ToList();
+            Assert.Equal(items.Length, mapTasks.Count);
+
+            foreach (var mapTask in mapTasks)
+            {
+                var payload = (MapTaskEnvelope)Serializer.Deserialize(mapTask.PayloadType, mapTask.PayloadJson);
+                var progress = new PushNotificationJobProgress(Manager.Object, mapTask, "map-job");
+                await Map.Execute(payload, new JobExecutionContext("map-job", progress, new Dictionary<string, string>()), ct);
+            }
+
+            var mapUpdates = Sent.Skip(1).ToList();
+            beforeReduce?.Invoke();
+            await Reduce.Execute(new ReduceTaskEnvelope { BatchId = batchId }, Context(), ct);
+
+            return (initial, mapUpdates, Sent[^1]);
+        }
+    }
+
+    [Fact]
+    public async Task SharedNotification_MapUpdatesAndReduceClose_ClosesSucceededAsUnread()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new NotifyingHarness(new SquareHandler());
+
+        var (initial, mapUpdates, close) = await harness.RunAsync<SquareHandler>(
+            [new SquareItem(1), new SquareItem(2)], ct);
+
+        Assert.NotEmpty(mapUpdates);
+        Assert.All(mapUpdates, x =>
+        {
+            Assert.Equal(initial.Id, x.Id);
+            Assert.Equal(initial.Created, x.Created);
+            Assert.Null(x.Finished);
+            Assert.Null(x.Outcome);
+        });
+
+        Assert.Equal(initial.Id, close.Id);
+        Assert.Equal(initial.Created, close.Created);
+        Assert.Null(close.JobId);
+        Assert.NotNull(close.Finished);
+        Assert.Equal(nameof(JobOutcome.Succeeded), close.Outcome);
+        Assert.True(close.IsNew);
+        Assert.Contains("2 items", close.Description);
+    }
+
+    [Fact]
+    public async Task SharedNotification_MapUpdatesAndReduceClose_LeaveStartedNullAndKeepCreatedAtBatchStart()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new NotifyingHarness(new SquareHandler());
+
+        var (initial, mapUpdates, close) = await harness.RunAsync<SquareHandler>(
+            [new SquareItem(1), new SquareItem(2)], ct);
+
+        var mapTask = harness.Enqueued.First(x => x.Headers.ContainsKey(JobHeaders.BatchStartedAt));
+        var batchStarted = new DateTime(long.Parse(mapTask.Headers[JobHeaders.BatchStartedAt], CultureInfo.InvariantCulture), DateTimeKind.Utc);
+
+        Assert.NotEmpty(mapUpdates);
+        Assert.All(mapUpdates.Prepend(initial).Append(close), x =>
+        {
+            Assert.Null(x.Started);
+            Assert.Equal(batchStarted, x.Created);
+        });
+    }
+
+    [Fact]
+    public async Task SharedNotification_FailFastFault_ClosesFailed()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new NotifyingHarness(new FlakySquareHandler());
+
+        var (_, _, close) = await harness.RunAsync<FlakySquareHandler>(
+            [new SquareItem(1), new SquareItem(3)], ct);
+
+        Assert.NotNull(close.Finished);
+        Assert.Equal(nameof(JobOutcome.Failed), close.Outcome);
+        Assert.Contains("1/2", close.Description);
+    }
+
+    // Platform storage folds notifications with the same title, type and description into one.
+    [Fact]
+    public async Task Enqueue_TwoBatches_InitialNotificationsDiffer()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new NotifyingHarness(new SquareHandler());
+        var options = new MapReduceOptions { ReportProgress = true };
+
+        await harness.Facade.Enqueue<SquareHandler, SumReducer>([new SquareItem(1)], new SumState("squares"), options, ct);
+        await harness.Facade.Enqueue<SquareHandler, SumReducer>([new SquareItem(1)], new SumState("squares"), options, ct);
+
+        Assert.Equal(2, harness.Sent.Count);
+        Assert.NotEqual(harness.Sent[0].Id, harness.Sent[1].Id);
+        Assert.NotEqual(harness.Sent[0].Description, harness.Sent[1].Description);
+        Assert.All(harness.Sent, x => Assert.Equal(1, x.TotalCount));
+    }
+
+    // Fails ONLY when the fan-out is enqueued — after the batch is stored and its Queued notification is sent.
+    private sealed class ThrowOnFanOutBackgroundJob(Exception error) : IBackgroundJob
+    {
+        public Task<string> Enqueue<THandler>(object payload, EnqueueOptions? options = null, CancellationToken ct = default)
+            where THandler : class
+            => Enqueue(typeof(THandler), payload, options, ct);
+
+        public Task<string> Enqueue(Type handlerType, object payload, EnqueueOptions? options = null, CancellationToken ct = default)
+            => handlerType == typeof(FanOutCoordinator)
+                ? throw error
+                : Task.FromResult(Guid.NewGuid().ToString("N"));
+    }
+
+    private static (MapReduceJob Facade, List<JobProgressPushNotification> Sent) CreateReportingFacade(IBackgroundJob bus)
+    {
+        var sent = new List<JobProgressPushNotification>();
+        var manager = new Mock<IPushNotificationManager>();
+        manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+            .Callback<PushNotification>(x => sent.Add((JobProgressPushNotification)x))
+            .Returns(Task.CompletedTask);
+
+        var userResolver = new Mock<IUserNameResolver>();
+        userResolver.Setup(x => x.GetCurrentUserName()).Returns("tester");
+
+        var facade = new MapReduceJob(bus, new InMemoryMapReduceBatchStore(), new JsonJobPayloadSerializer(), userResolver.Object, manager.Object);
+
+        return (facade, sent);
+    }
+
+    [Fact]
+    public async Task Enqueue_FanOutEnqueueThrows_ClosesBatchNotificationAsFailed_AndRethrows()
+    {
+        var error = new InvalidOperationException("fan-out enqueue failed");
+        var (facade, sent) = CreateReportingFacade(new ThrowOnFanOutBackgroundJob(error));
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => facade.Enqueue<SquareHandler, SumReducer>(
+            [new SquareItem(1), new SquareItem(2)], new SumState("squares"), new MapReduceOptions { ReportProgress = true }, TestContext.Current.CancellationToken));
+
+        Assert.Same(error, thrown);
+        Assert.Equal(2, sent.Count);
+        var closing = sent[1];
+        Assert.Equal(sent[0].Id, closing.Id);
+        Assert.Equal(2, closing.TotalCount);
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.Equal("fan-out enqueue failed", closing.Error);
+        Assert.NotNull(closing.Finished);
+    }
+
+    [Fact]
+    public async Task Enqueue_ItemOfWrongType_ClosesBatchNotificationAsFailed_AndThrowsArgumentException()
+    {
+        var (facade, sent) = CreateReportingFacade(new CapturingBackgroundJob());
+
+        var thrown = await Assert.ThrowsAsync<ArgumentException>(() => facade.Enqueue<SquareHandler, SumReducer>(
+            [new SquareItem(1), "not a square item"], new SumState("squares"), new MapReduceOptions { ReportProgress = true }, TestContext.Current.CancellationToken));
+
+        Assert.Equal(2, sent.Count);
+        var closing = sent[1];
+        Assert.Equal(sent[0].Id, closing.Id);
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.Equal(thrown.Message, closing.Error);
+        Assert.NotNull(closing.Finished);
+    }
+
+    [Fact]
+    public async Task Reduce_SuccessCloseSendThrows_DoesNotFailTheAttempt()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new NotifyingHarness(new SquareHandler());
+
+        await harness.RunAsync<SquareHandler>(
+            [new SquareItem(1), new SquareItem(2)],
+            ct,
+            beforeReduce: () => harness.Manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+                .ThrowsAsync(new InvalidOperationException("push channel down")));
+
+        Assert.Equal(1, harness.Reducer.Calls);
+        Assert.Null(await harness.Store.GetAsync(harness.BatchId!, ct));
+    }
+
+    private sealed class ThrowOnProcessedCountProgress(long processedCount) : IJobProgress
+    {
+        public Task Report(JobProgressInfo progress, CancellationToken cancellationToken = default)
+            => progress.ProcessedCount == processedCount ? throw new InvalidOperationException("push channel down") : Task.CompletedTask;
+
+        public Task Complete(JobOutcome outcome, string? error = null, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
+    // Otherwise the engine re-runs the map item and the reduce is never enqueued.
+    [Fact]
+    public async Task MapTask_ProgressReportOnLastItemThrows_StillEnqueuesReduce()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (facade, fanOut, map, _, bus, _, _) = BuildHarness(new SquareHandler());
+
+        await facade.Enqueue<SquareHandler, SumReducer>(
+            [new SquareItem(1), new SquareItem(2)], new SumState("squares"), new MapReduceOptions { ReportProgress = true }, ct);
+        await fanOut.Execute(bus.Enqueued.OfType<MapFanOutEnvelope>().Single(), Context(), ct);
+
+        var context = new JobExecutionContext("map-job", new ThrowOnProcessedCountProgress(2), new Dictionary<string, string>());
+        foreach (var task in bus.Enqueued.OfType<MapTaskEnvelope>().ToList())
+        {
+            await map.Execute(task, context, ct);
+        }
+
+        Assert.Single(bus.Enqueued.OfType<ReduceTaskEnvelope>());
+    }
+
+    // One map task left to run on a two-item reporting batch, over a store the test scripts.
+    private sealed class MapTaskHarness
+    {
+        public Mock<IMapReduceBatchStore> Store { get; } = new();
+        public Mock<IPushNotificationManager> Manager { get; } = new();
+        public List<JobProgressPushNotification> Sent { get; } = [];
+        public MapReduceBatch Batch { get; }
+        public MapCoordinator Map { get; }
+        public MapTaskEnvelope Envelope { get; }
+        public IJobExecutionContext Context { get; }
+
+        public MapTaskHarness(bool finalAttempt = false)
+        {
+            Batch = new MapReduceBatch
+            {
+                BatchId = "batch-1",
+                Total = 2,
+                ItemType = typeof(SquareItem).AssemblyQualifiedName!,
+                ResultType = typeof(SquareResult).AssemblyQualifiedName!,
+                StateType = typeof(SumState).AssemblyQualifiedName!,
+                MapHandlerType = typeof(SquareHandler).AssemblyQualifiedName,
+                ProgressNotificationId = "progress-1",
+                Title = "Squares",
+                Started = DateTime.UtcNow,
+            };
+            Store.Setup(x => x.GetAsync(Batch.BatchId, It.IsAny<CancellationToken>())).ReturnsAsync(Batch);
+            Store.Setup(x => x.SaveResultAndCountAsync(Batch.BatchId, It.IsAny<MapResultRecord>(), It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+            Manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+                .Callback<PushNotification>(x => Sent.Add((JobProgressPushNotification)x))
+                .Returns(Task.CompletedTask);
+
+            var services = new ServiceCollection();
+            services.AddSingleton(new SquareHandler());
+            var serializer = new JsonJobPayloadSerializer();
+
+            Map = new MapCoordinator(services.BuildServiceProvider(), serializer, Store.Object, new CapturingBackgroundJob(), Manager.Object,
+                NullLogger<MapCoordinator>.Instance);
+
+            var (itemType, itemJson) = serializer.Serialize(new SquareItem(2));
+            Envelope = new MapTaskEnvelope { BatchId = Batch.BatchId, Index = 0, ItemType = itemType, ItemJson = itemJson };
+
+            Context = JobExecutionContextFactory.Create(
+                Manager.Object,
+                new JobEnvelope
+                {
+                    JobType = typeof(MapTaskEnvelope).AssemblyQualifiedName!,
+                    PayloadType = itemType,
+                    PayloadJson = itemJson,
+                    ProgressNotificationId = Batch.ProgressNotificationId,
+                    Attempt = 1,
+                    TotalAttempts = finalAttempt ? 1 : 2,
+                },
+                "map-job");
+        }
+    }
+
+    [Fact]
+    public async Task MapTask_BatchClosedDuringItsReport_SendsTheCloseAgainAfterTheReport()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new MapTaskHarness();
+        var close = new ProgressClose("Faulted: 1/2 map items failed.", JobOutcome.Failed, new DateTime(2026, 11, 26, 10, 0, 0, DateTimeKind.Utc));
+        harness.Store.SetupSequence(x => x.GetProgressCloseAsync(harness.Batch.BatchId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProgressClose?)null)
+            .ReturnsAsync(close);
+
+        await harness.Map.Execute(harness.Envelope, harness.Context, ct);
+
+        Assert.Equal(2, harness.Sent.Count);
+        Assert.Null(harness.Sent[0].Outcome);
+        var last = harness.Sent[^1];
+        Assert.Equal(harness.Batch.ProgressNotificationId, last.Id);
+        Assert.Equal(nameof(JobOutcome.Failed), last.Outcome);
+        Assert.Equal(close.Finished, last.Finished);
+        Assert.Equal(close.Description, last.Description);
+    }
+
+    [Fact]
+    public async Task MapTask_ReportSendThrowsAfterItWasStored_SendsTheCloseAgain()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new MapTaskHarness();
+        var close = new ProgressClose("Faulted: 1/2 map items failed.", JobOutcome.Failed, new DateTime(2026, 11, 26, 10, 0, 0, DateTimeKind.Utc));
+        harness.Store.SetupSequence(x => x.GetProgressCloseAsync(harness.Batch.BatchId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProgressClose?)null)
+            .ReturnsAsync(close);
+        harness.Manager.Setup(x => x.SendAsync(It.IsAny<PushNotification>()))
+            .Returns<PushNotification>(x =>
+            {
+                var notification = (JobProgressPushNotification)x;
+                harness.Sent.Add(notification);
+
+                return notification.Outcome is null ? throw new InvalidOperationException("hub down") : Task.CompletedTask;
+            });
+
+        await harness.Map.Execute(harness.Envelope, harness.Context, ct);
+
+        Assert.Equal(2, harness.Sent.Count);
+        var last = harness.Sent[^1];
+        Assert.Equal(harness.Batch.ProgressNotificationId, last.Id);
+        Assert.Equal(nameof(JobOutcome.Failed), last.Outcome);
+        Assert.Equal(close.Finished, last.Finished);
+        Assert.Equal(close.Description, last.Description);
+    }
+
+    // A batch the reduce already completed, or one that expired, has nothing left to close.
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 0)]
+    public async Task MapTask_FailsOnFinalAttempt_ClosesFailedOnlyWhileTheBatchExists(bool batchGone, int expectedCloses)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new MapTaskHarness(finalAttempt: true);
+        harness.Store.SetupSequence(x => x.GetAsync(harness.Batch.BatchId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(harness.Batch)
+            .ReturnsAsync(batchGone ? null : harness.Batch);
+        harness.Store.Setup(x => x.SaveResultAndCountAsync(harness.Batch.BatchId, It.IsAny<MapResultRecord>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("store down"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Map.Execute(harness.Envelope, harness.Context, ct));
+
+        Assert.Equal(expectedCloses, harness.Sent.Count(x => x.Outcome == nameof(JobOutcome.Failed)));
+        harness.Store.Verify(
+            x => x.MarkProgressClosedAsync(harness.Batch.BatchId, It.IsAny<ProgressClose>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(expectedCloses));
     }
 }

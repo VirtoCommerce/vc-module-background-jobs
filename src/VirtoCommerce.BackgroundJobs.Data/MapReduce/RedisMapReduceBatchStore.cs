@@ -112,14 +112,23 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
             .ToList();
     }
 
+    public Task MarkProgressClosedAsync(string batchId, ProgressClose close, CancellationToken cancellationToken = default)
+        => _connection.GetDatabase().StringSetAsync(ProgressClosedKey(batchId), JsonConvert.SerializeObject(close), _ttl);
+
+    public async Task<ProgressClose?> GetProgressCloseAsync(string batchId, CancellationToken cancellationToken = default)
+    {
+        var value = await _connection.GetDatabase().StringGetAsync(ProgressClosedKey(batchId));
+        return value.IsNullOrEmpty ? null : JsonConvert.DeserializeObject<ProgressClose>(value!);
+    }
+
     public async Task CompleteAsync(string batchId, CancellationToken cancellationToken = default)
     {
         var db = _connection.GetDatabase();
-        await db.KeyDeleteAsync([MetaKey(batchId), ResultsKey(batchId), ReduceKey(batchId), ItemsKey(batchId), FanOutProgressKey(batchId)]);
+        await db.KeyDeleteAsync([MetaKey(batchId), ResultsKey(batchId), ReduceKey(batchId), ItemsKey(batchId), FanOutProgressKey(batchId), ProgressClosedKey(batchId)]);
     }
 
     // The batch id is wrapped in a Redis hash tag "{...}" so every key for one batch maps to the SAME cluster slot.
-    // Redis Cluster requires all keys of a multi-key command to be in a single slot; without the tag the five keys
+    // Redis Cluster requires all keys of a multi-key command to be in a single slot; without the tag the keys
     // scatter across slots and CompleteAsync's multi-key KeyDelete fails with a CROSSSLOT error. (On a single node the
     // tag is inert.)
     private static string Key(string batchId, string suffix) => $"vc:mapreduce:{{{batchId}}}:{suffix}";
@@ -128,4 +137,5 @@ public sealed class RedisMapReduceBatchStore : IMapReduceBatchStore
     private static string ReduceKey(string batchId) => Key(batchId, "reduce");
     private static string ItemsKey(string batchId) => Key(batchId, "items");
     private static string FanOutProgressKey(string batchId) => Key(batchId, "fanoutprogress");
+    private static string ProgressClosedKey(string batchId) => Key(batchId, "progressclosed");
 }

@@ -1,3 +1,4 @@
+using System;
 using VirtoCommerce.Platform.Core.Jobs;
 
 namespace VirtoCommerce.BackgroundJobs.Core.MapReduce;
@@ -42,4 +43,9 @@ public sealed class MapReduceBatch
     public string? ProgressNotificationId { get; set; }
 
     public string? UserName { get; set; }
+
+    /// <summary>
+    /// When the batch started (its shared notification's <c>Created</c>); null on a batch stored by an earlier version.
+    /// </summary>
+    public DateTime? Started { get; set; }
 }

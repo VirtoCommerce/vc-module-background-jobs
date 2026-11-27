@@ -341,6 +341,7 @@ ASALocalRun/
 dist/
 **/Properties/launchSettings.json
 /.serena
+src/VirtoCommerce.BackgroundJobs.Web/plugins/
 
 # Exclude Visual Studio test run settings
 *.runsettings

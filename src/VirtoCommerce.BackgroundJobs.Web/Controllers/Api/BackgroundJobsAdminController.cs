@@ -1,15 +1,16 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Admin;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Web.Models;
 using VirtoCommerce.Platform.Core.Jobs;
 
@@ -56,9 +57,14 @@ public class BackgroundJobsAdminController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<string>> Enqueue([FromBody] EnqueueJobRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request?.Name))
+        if (!ModelState.IsValid)
         {
-            return BadRequest("A registered job 'name' is required.");
+            return BadRequest(ModelState);
+        }
+
+        if (GetRequestRejection(request) is { } rejection)
+        {
+            return BadRequest(rejection);
         }
 
         var descriptor = query.FindRegisteredJob(request.Name);
@@ -74,10 +80,9 @@ public class BackgroundJobsAdminController(
             return BadRequest($"Background job '{descriptor.Name}' is internal and cannot be triggered on demand.");
         }
 
-        // Bind the request payload JSON to the handler's payload type. Missing/empty payload ⇒ default instance.
-        var payloadJson = request.Payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
+        var payloadJson = request.Payload is null
             ? "{}"
-            : request.Payload.GetRawText();
+            : request.Payload.ToString(Formatting.None);
 
         object payload;
         try
@@ -110,5 +115,20 @@ public class BackgroundJobsAdminController(
             // Handler/payload mismatch (should be rare — the payload was already bound to the descriptor's type).
             return BadRequest(ex.Message);
         }
+    }
+
+    private static string? GetRequestRejection(EnqueueJobRequest? request)
+    {
+        if (!string.IsNullOrEmpty(request?.Options?.ProgressNotificationId))
+        {
+            return "'options.progressNotificationId' is not accepted over REST: a progress notification is created by the endpoint when 'options.reportProgress' is set.";
+        }
+
+        if (string.IsNullOrWhiteSpace(request?.Name))
+        {
+            return "A registered job 'name' is required.";
+        }
+
+        return null;
     }
 }

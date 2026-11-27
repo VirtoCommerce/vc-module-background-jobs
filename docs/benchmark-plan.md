@@ -58,7 +58,7 @@ modules; nothing is subscribed by default). Broker/store depth: RabbitMQ managem
 | Cold start | warm (~queue latency) | poll + schedule + warmup + connect | activation p50/p95 |
 | Burst of K | fixed N drains | ramps to maxReplicas | drain time, ramp curve |
 | Sustained X/s | right-sized N | KEDA holds N | throughput, p95, CPU/1k |
-| Scale-down | n/a | drain mid-scale-down | 0 lost, dedup verified |
+| Scale-down | n/a | drain mid-scale-down | 0 lost, duplicates harmless (idempotent handlers) |
 
 Pull steady-state + knob tuning ≈ local; Push cold-start/ramp/scale-to-zero = cloud-only. Hangfire is Pull-only.
 
@@ -97,8 +97,8 @@ queues today; note this as the scale-up path. Set `disk_free_limit`; budget for 
 
 See [`deploy/k8s/keda-scaledobject.yaml`](../deploy/k8s/keda-scaledobject.yaml). Tune `value` (target ready messages
 per replica) to worker capacity (a replica drains ≈ `ConsumerDispatchConcurrency / avg-job-seconds` jobs/s). Keep
-`PrefetchCount` modest so few messages requeue on scale-down; idempotent handlers + `UniqueKey` cover the requeue
-duplicate case; generous `terminationGracePeriodSeconds` for in-flight acks.
+`PrefetchCount` modest so few messages requeue on scale-down; idempotent handlers cover the requeue duplicate case
+(`UniqueKey` does not: no shipped engine de-duplicates by it); generous `terminationGracePeriodSeconds` for in-flight acks.
 
 ## Payload & result rules
 
@@ -106,7 +106,7 @@ duplicate case; generous `terminationGracePeriodSeconds` for in-flight acks.
   result → ~2× amplification. Keep items < ~4–32 KB (avoid > 128 KB); externalize big inputs to blob/DB + pass a key.
 - **Results stay tiny.** No result path back to the producer; the reducer persists a compact outcome (counts/refs) to
   DB/blob — never inflate the Redis results hash.
-- **Correctness:** idempotent handlers, `UniqueKey` dedup, `MaxRetryAttempts` + DLQ. RabbitMQ keeps no status ledger —
+- **Correctness:** idempotent handlers (no shipped engine de-duplicates by `UniqueKey`), `MaxRetryAttempts` + DLQ. RabbitMQ keeps no status ledger —
   use progress + metrics, not `GET /api/platform/jobs/{id}`.
 
 ## Workload profiles

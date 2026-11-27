@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.Platform.Core.Jobs;
 using Xunit;
 
@@ -230,5 +231,353 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
 
         // The handler's token must trip within a bounded window (cooperative engines poll on an interval).
         await fixture.Probe.WaitCancelledAsync(id, ConformanceConstants.CancellationTimeout, TestContext.Current.CancellationToken);
+    }
+
+    // The facade sends the owned notification before Enqueue returns; a scenario finds it by its unique title.
+    private string NotificationIdOf(string title)
+        => fixture.ProgressNotifications.First(x => x.Title == title).Id;
+
+    private async Task<(string JobId, string NotificationId)> EnqueueWithNotificationAsync(ConformancePayload payload)
+    {
+        var jobId = await EnqueueAsync(payload, new EnqueueOptions { ReportProgress = true, Title = payload.CorrelationId });
+
+        return (jobId, NotificationIdOf(payload.CorrelationId));
+    }
+
+    // 14 — a failed attempt with a retry pending keeps the notification open and names the attempt.
+    [Fact]
+    public async Task Retry_Pending_Keeps_Notification_Open()
+    {
+        RequireEngine();
+        Assert.SkipUnless(fixture.Capabilities.SupportsRetry, "engine does not retry failed jobs.");
+        var id = NewId();
+
+        var (_, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "retry-pending", FailAttempts = 1, ReportProgress = true });
+
+        if (fixture.Capabilities.ReportsAttemptBudget)
+        {
+            var total = fixture.RetryBudget + 1;
+            var update = await fixture.WaitForProgressAsync(
+                notificationId,
+                x => x.Description is not null && x.Description.StartsWith($"Attempt 1 of {total} failed, retrying"),
+                ConformanceConstants.DefaultTimeout);
+
+            Assert.Null(update.Finished);
+            Assert.Null(update.Outcome);
+            Assert.Equal(1, update.Attempt);
+            Assert.Equal(total, update.TotalAttempts);
+        }
+        else
+        {
+            var update = await fixture.WaitForProgressAsync(
+                notificationId, x => x.Outcome == nameof(JobOutcome.Failed), ConformanceConstants.DefaultTimeout);
+
+            Assert.NotNull(update.Finished);
+        }
+    }
+
+    // 15 — the failure that exhausts the attempts closes the notification Failed, with the error and the finish time.
+    [Fact]
+    public async Task Final_Failure_Closes_Notification_Failed()
+    {
+        RequireEngine();
+        var id = NewId();
+
+        var (_, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "final-failure", FailAlways = true, ReportProgress = true });
+
+        var closing = await fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.False(string.IsNullOrEmpty(closing.Error));
+        Assert.NotNull(closing.Finished);
+
+        if (fixture.Capabilities.ReportsAttemptBudget)
+        {
+            Assert.NotNull(closing.TotalAttempts);
+            Assert.Equal(closing.TotalAttempts, closing.Attempt);
+        }
+    }
+
+    // 16 — a job that returns closes its notification Succeeded.
+    [Fact]
+    public async Task Success_Closes_Notification_Succeeded()
+    {
+        RequireEngine();
+        var id = NewId();
+
+        var (_, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "success", ReportProgress = true });
+
+        var closing = await fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(nameof(JobOutcome.Succeeded), closing.Outcome);
+        Assert.Null(closing.Error);
+        Assert.NotNull(closing.Finished);
+    }
+
+    // How long a scenario watches for a send that must not happen: an absence has no signal.
+    private static readonly TimeSpan _noCloseObservation = TimeSpan.FromSeconds(1);
+
+    // 17 — a requested cancel of a running job closes its notification Canceled.
+    [Fact]
+    public async Task Running_Job_Cancel_Closes_Notification_Canceled()
+    {
+        RequireEngine();
+        Assert.SkipUnless(fixture.Capabilities.SupportsCancellation, "engine does not support cancellation.");
+        var id = NewId();
+
+        var (jobId, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "cancel-notification", BlockUntilCancelled = true, ReportProgress = true });
+        await fixture.Probe.WaitStartedAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+
+        var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
+        Assert.True(accepted, "the engine must accept the cancellation request for a known, running job.");
+
+        await AssertCancelOutcomeAsync(id, jobId, notificationId, observeHandlerCancel: true);
+    }
+
+    // 18 — the same for a job that never ran: it is canceled while still queued, so no worker will ever close it.
+    [Fact]
+    public async Task Queued_Job_Cancel_Closes_Notification_Canceled()
+    {
+        RequireEngine();
+        Assert.SkipUnless(fixture.Capabilities.CanHoldQueuedJob, "engine cannot hold a job queued.");
+        Assert.SkipUnless(fixture.Capabilities.SupportsDelete, "engine does not support delete.");
+        var id = NewId();
+
+        var jobId = await EnqueueAsync(
+            new ConformancePayload { CorrelationId = id, Value = "cancel-queued" },
+            new EnqueueOptions { ReportProgress = true, Title = id, Queue = fixture.UnservedQueue });
+        var notificationId = NotificationIdOf(id);
+
+        var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
+        Assert.True(accepted, "the engine must accept the cancellation request for a known, queued job.");
+
+        await AssertCancelOutcomeAsync(id, jobId, notificationId, observeHandlerCancel: false);
+        Assert.Equal(0, fixture.Probe.ExecutionCount(id));
+    }
+
+    // 19 — a cancel wins over a handler that then fails with another exception: it closes Canceled and the handler does
+    // not run again.
+    [Fact]
+    public async Task Running_Job_Cancel_Then_Handler_Failure_Closes_Canceled()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            fixture.Capabilities.SupportsCancellation && fixture.Capabilities.SupportsRetry && fixture.Capabilities.ClosesCanceledNotification,
+            "engine cannot cancel a retryable job and close it Canceled.");
+        var id = NewId();
+
+        var (jobId, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "cancel-then-fail", BlockUntilCancelled = true, FailOnCancel = true, ReportProgress = true });
+        await fixture.Probe.WaitStartedAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+
+        var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
+        Assert.True(accepted, "the engine must accept the cancellation request for a known, running job.");
+
+        var closing = await fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome == nameof(JobOutcome.Canceled), ConformanceConstants.DefaultTimeout);
+
+        Assert.NotNull(closing.Finished);
+        Assert.Null(closing.Error);
+        Assert.DoesNotContain("retrying", closing.Description ?? string.Empty);
+
+        if (fixture.Capabilities.ReportsAttemptBudget)
+        {
+            Assert.Equal(fixture.RetryBudget + 1, closing.TotalAttempts);
+            // Hangfire closes at the failed attempt (1); the other engines at the next one (2).
+            const int failedAttempt = 1;
+            const int nextAttempt = 2;
+            Assert.NotNull(closing.Attempt);
+            Assert.InRange(closing.Attempt.Value, failedAttempt, nextAttempt);
+        }
+
+        await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, fixture.Probe.ExecutionCount(id));
+    }
+
+    // 20 — the same on the final attempt is a failure: the notification closes Failed with the handler's error.
+    [Fact]
+    public async Task Running_Job_Cancel_Then_Handler_Failure_On_Final_Attempt_Closes_Failed()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            fixture.Capabilities.SupportsCancellation && fixture.Capabilities.ClosesCanceledNotification && fixture.Capabilities.ReportsAttemptBudget,
+            "engine cannot cancel a job, close it Canceled or report its attempt budget.");
+        var id = NewId();
+
+        var jobId = await EnqueueAsync(
+            new ConformancePayload { CorrelationId = id, Value = "cancel-then-fail-final", BlockUntilCancelled = true, FailOnCancel = true, ReportProgress = true },
+            new EnqueueOptions { ReportProgress = true, Title = id, MaxRetryAttempts = 0 });
+        var notificationId = NotificationIdOf(id);
+        await fixture.Probe.WaitStartedAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+
+        var accepted = await fixture.Services.GetRequiredService<IJobEngine>().Delete(jobId, TestContext.Current.CancellationToken);
+        Assert.True(accepted, "the engine must accept the cancellation request for a known, running job.");
+
+        var closing = await fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome == nameof(JobOutcome.Failed) && !string.IsNullOrEmpty(x.Error), ConformanceConstants.DefaultTimeout);
+
+        Assert.NotNull(closing.Finished);
+
+        await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(fixture.ProgressUpdates(notificationId), x => x.Outcome == nameof(JobOutcome.Canceled));
+        Assert.Equal(1, fixture.Probe.ExecutionCount(id));
+    }
+
+    // 21 — a cancel of a finished job is refused and the job keeps its state.
+    [Fact]
+    public async Task Delete_Of_Succeeded_Job_Returns_False_And_Keeps_State()
+    {
+        RequireEngine();
+        Assert.SkipUnless(fixture.Capabilities.SupportsStatusQuery && fixture.Capabilities.SupportsDelete, "engine cannot report status or delete.");
+        var engine = fixture.Services.GetRequiredService<IJobEngine>();
+
+        var jobId = await EnqueueAndWaitAsync(new ConformancePayload { CorrelationId = NewId(), Value = "delete-finished" });
+        await fixture.WaitForStatusAsync(jobId, x => x.State == "Succeeded", ConformanceConstants.DefaultTimeout);
+
+        var deleted = await engine.Delete(jobId, TestContext.Current.CancellationToken);
+
+        Assert.False(deleted, "a finished job has nothing left to cancel.");
+        var status = await engine.GetStatus(jobId, TestContext.Current.CancellationToken);
+        Assert.NotNull(status);
+        Assert.Equal("Succeeded", status.State);
+    }
+
+    // 22 — a per-job retry limit above the engine's global count runs the job limit + 1 times.
+    [Fact]
+    public async Task MaxRetryAttempts_Above_Global_Runs_N_Plus_One()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            fixture.Capabilities.SupportsRetry && fixture.Capabilities.ReportsAttemptBudget,
+            "engine does not retry failed jobs or does not report its attempt budget.");
+        var id = NewId();
+        var limit = fixture.RetryBudget + 2;
+
+        await EnqueueAsync(
+            new ConformancePayload { CorrelationId = id, Value = "retry-above-global", FailAlways = true, ReportProgress = true },
+            new EnqueueOptions { ReportProgress = true, Title = id, MaxRetryAttempts = limit });
+        var closing = await fixture.WaitForProgressAsync(
+            NotificationIdOf(id), x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.Equal(limit + 1, closing.TotalAttempts);
+        Assert.Equal(limit + 1, fixture.Probe.ExecutionCount(id));
+    }
+
+    // 23 — a per-job retry limit below the engine's global count stops the job early: limit + 1 runs.
+    [Fact]
+    public async Task MaxRetryAttempts_Below_Global_Runs_N_Plus_One()
+    {
+        RequireEngine();
+        Assert.SkipUnless(
+            fixture.Capabilities.SupportsRetry && fixture.Capabilities.ReportsAttemptBudget,
+            "engine does not retry failed jobs or does not report its attempt budget.");
+        var id = NewId();
+        const int limit = 1;
+        Assert.True(limit < fixture.RetryBudget, "the scenario needs a global count above the per-job limit.");
+
+        await EnqueueAsync(
+            new ConformancePayload { CorrelationId = id, Value = "retry-below-global", FailAlways = true, ReportProgress = true },
+            new EnqueueOptions { ReportProgress = true, Title = id, MaxRetryAttempts = limit });
+        var closing = await fixture.WaitForProgressAsync(
+            NotificationIdOf(id), x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
+        Assert.Equal(limit + 1, closing.TotalAttempts);
+        Assert.Equal(limit + 1, fixture.Probe.ExecutionCount(id));
+    }
+
+    // 24 — the worker's context carries the job id Enqueue returned.
+    [Fact]
+    public async Task Worker_JobId_Equals_Enqueue_Result()
+    {
+        RequireEngine();
+        var id = NewId();
+
+        var jobId = await EnqueueAndWaitAsync(new ConformancePayload { CorrelationId = id, Value = "job-id" });
+
+        Assert.Equal(jobId, fixture.Probe.Job(id)!.JobId);
+    }
+
+    // 25 — the same job id on every attempt; the facade's first "Queued" send carries none by design.
+    [Fact]
+    public async Task Worker_JobId_Is_Stable_Across_Retries()
+    {
+        RequireEngine();
+        Assert.SkipUnless(fixture.Capabilities.SupportsRetry, "engine does not retry failed jobs.");
+        var id = NewId();
+
+        var (jobId, notificationId) = await EnqueueWithNotificationAsync(
+            new ConformancePayload { CorrelationId = id, Value = "job-id-retry", FailAttempts = 1, ReportProgress = true });
+        await fixture.Probe.WaitAsync(id, ConformanceConstants.DefaultTimeout, TestContext.Current.CancellationToken);
+        await fixture.WaitForProgressAsync(
+            notificationId, x => x.Outcome == nameof(JobOutcome.Succeeded), ConformanceConstants.DefaultTimeout);
+
+        Assert.Equal([jobId, jobId], fixture.Probe.ExecutionJobIds(id));
+
+        var workerUpdates = fixture.ProgressUpdates(notificationId).Skip(1).ToList();
+        Assert.NotEmpty(workerUpdates);
+        Assert.All(workerUpdates, x => Assert.Equal(jobId, x.JobId));
+    }
+
+    private async Task AssertCancelOutcomeAsync(string correlationId, string jobId, string notificationId, bool observeHandlerCancel)
+    {
+        if (fixture.Capabilities.ClosesCanceledNotification)
+        {
+            var closing = await fixture.WaitForProgressAsync(
+                notificationId, x => x.Outcome is not null, ConformanceConstants.DefaultTimeout);
+
+            Assert.Equal(nameof(JobOutcome.Canceled), closing.Outcome);
+            Assert.NotNull(closing.Finished);
+            Assert.Null(closing.Error);
+
+            Assert.Equal(jobId, closing.JobId);
+
+            // A job canceled while queued never began.
+            if (observeHandlerCancel)
+            {
+                Assert.NotNull(closing.Started);
+            }
+            else
+            {
+                Assert.Null(closing.Started);
+            }
+
+            if (fixture.Capabilities.ReportsAttemptBudget)
+            {
+                if (observeHandlerCancel)
+                {
+                    var previous = fixture.ProgressUpdates(notificationId).TakeWhile(x => !ReferenceEquals(x, closing)).Last();
+
+                    Assert.NotNull(previous.TotalAttempts);
+                    Assert.Equal(previous.Attempt, closing.Attempt);
+                    Assert.Equal(previous.TotalAttempts, closing.TotalAttempts);
+                }
+                else
+                {
+                    Assert.Equal(1, closing.Attempt);
+                    Assert.Equal(fixture.RetryBudget + 1, closing.TotalAttempts);
+                }
+            }
+        }
+        else
+        {
+            if (observeHandlerCancel)
+            {
+                await fixture.Probe.WaitCancelledAsync(correlationId, ConformanceConstants.CancellationTimeout, TestContext.Current.CancellationToken);
+            }
+
+            await Task.Delay(_noCloseObservation, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain(fixture.ProgressUpdates(notificationId), x => x.Outcome is not null);
+        }
     }
 }

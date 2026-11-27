@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.BackgroundJobs.Core;
 using VirtoCommerce.BackgroundJobs.Core.Models;
-using VirtoCommerce.BackgroundJobs;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 
@@ -67,6 +67,11 @@ public sealed class InMemoryJobEngine(
         {
             for (var attempt = 1; attempt <= maxRetries + 1; attempt++)
             {
+                // Built before the cancellation check, so a cancel before this attempt closes with its attempt and
+                // total, not the envelope's defaults.
+                var attemptEnvelope = envelope with { Attempt = attempt, TotalAttempts = maxRetries + 1 };
+                var context = JobExecutionContextFactory.Create(pushNotificationManager, attemptEnvelope, jobId);
+
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -76,30 +81,32 @@ public sealed class InMemoryJobEngine(
                     // contract as the real engines' worker path.
                     using var scope = scopeFactory.CreateScope();
                     var dispatcher = scope.ServiceProvider.GetRequiredService<IJobDispatcher>();
-                    var context = JobExecutionContextFactory.Create(pushNotificationManager, envelope, jobId);
 
-                    await dispatcher.Dispatch(envelope with { Attempt = attempt }, context, cancellationToken);
+                    await dispatcher.Dispatch(attemptEnvelope, context, cancellationToken);
 
                     _states[jobId] = "Succeeded";
                     return;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    // Cancelled via Delete — a terminal outcome, not a failure; don't retry.
+                    // The job's token has no writer but Delete, so this is a requested cancel: close it Canceled (the
+                    // dispatcher leaves it open), never retry.
                     _states[jobId] = "Cancelled";
                     logger.LogInformation("In-memory job {JobId} ({JobType}) was cancelled.", jobId, envelope.JobType);
+                    await context.Progress.TryCompleteCanceledAsync(logger, jobId);
                     return;
                 }
                 catch (Exception ex)
                 {
-                    _states[jobId] = "Failed";
                     if (attempt <= maxRetries)
                     {
+                        // A retry is pending, so the job is still Processing: Failed is a terminal state.
                         logger.LogWarning(ex, "In-memory job {JobId} ({JobType}) failed on attempt {Attempt}; retrying (max {MaxRetries}).",
                             jobId, envelope.JobType, attempt, maxRetries);
                     }
                     else
                     {
+                        _states[jobId] = "Failed";
                         logger.LogError(ex, "In-memory job {JobId} ({JobType}) failed on final attempt {Attempt}.",
                             jobId, envelope.JobType, attempt);
                     }
@@ -117,20 +124,34 @@ public sealed class InMemoryJobEngine(
 
     public Task<Job?> GetStatus(string jobId, CancellationToken cancellationToken = default)
         => Task.FromResult(_states.TryGetValue(jobId, out var state)
-            ? new Job { Id = jobId, State = state, Completed = state is "Succeeded" or "Failed" }
+            ? new Job { Id = jobId, State = state, Completed = IsTerminal(state) }
             : null);
 
     public Task<bool> Delete(string jobId, CancellationToken cancellationToken = default)
     {
-        // Signal a running job to stop (its handler's token trips); RunAsync removes and disposes the source when it
-        // settles. A not-yet-started or already-finished job just has its state removed.
-        var known = _states.ContainsKey(jobId);
-        if (_running.TryGetValue(jobId, out var cts))
+        if (!_states.TryGetValue(jobId, out var state) || IsTerminal(state))
         {
-            cts.Cancel();
+            return Task.FromResult(false);
         }
 
-        _states.TryRemove(jobId, out _);
-        return Task.FromResult(known);
+        if (_running.TryGetValue(jobId, out var cts))
+        {
+            try
+            {
+                cts.Cancel();
+
+                return Task.FromResult(true);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Falls through to the settled check below.
+            }
+        }
+
+        // Settled between the check and the cancel: decide from its state, so a cancel racing a finishing job is
+        // refused.
+        return Task.FromResult(_states.TryGetValue(jobId, out var settled) && !IsTerminal(settled));
     }
+
+    private static bool IsTerminal(string state) => state is "Succeeded" or "Failed" or "Cancelled";
 }

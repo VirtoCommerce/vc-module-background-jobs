@@ -1,7 +1,7 @@
 #nullable enable
 using Microsoft.Extensions.DependencyInjection;
-using VirtoCommerce.BackgroundJobs.Conformance;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Conformance;
 using VirtoCommerce.BackgroundJobs.Data.Recurring;
 using VirtoCommerce.Platform.Core.DistributedLock;
 
@@ -23,7 +23,13 @@ public sealed class ReferenceEngineConformanceFixture : JobEngineConformanceFixt
         SupportsQueueRouting = true,
         SupportsRetry = true,
         SupportsRecurringScheduler = true,
+        SupportsCancellation = true,
+        ReportsAttemptBudget = true,
+        ClosesCanceledNotification = true,
+        CanHoldQueuedJob = false,
     };
+
+    public override int RetryBudget => 3;
 
     protected override bool TryConfigureEngine(IServiceCollection services, out string? unavailableReason)
     {

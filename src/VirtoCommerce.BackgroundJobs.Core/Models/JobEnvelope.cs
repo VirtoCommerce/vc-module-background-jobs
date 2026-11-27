@@ -34,7 +34,10 @@ public sealed record JobEnvelope
     /// </summary>
     public int? MaxRetryAttempts { get; init; }
 
-    /// <summary>De-duplication key.</summary>
+    /// <summary>
+    /// De-duplication key from <c>EnqueueOptions.UniqueKey</c>. Honored only by an engine that implements
+    /// de-duplication itself; any other engine carries it and runs duplicates.
+    /// </summary>
     public string? UniqueKey { get; init; }
 
     /// <summary>Push-notification id to report progress against, or null for fire-and-forget without progress.</summary>
@@ -54,6 +57,9 @@ public sealed record JobEnvelope
     public string? UserName { get; init; }
 
     public int Attempt { get; init; } = 1;
+
+    /// <summary>How many attempts the job gets in all (the first run plus its retries); null when unknown.</summary>
+    public int? TotalAttempts { get; init; }
 
     public IReadOnlyDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
 }

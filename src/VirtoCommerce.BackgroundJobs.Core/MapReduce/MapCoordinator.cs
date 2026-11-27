@@ -5,7 +5,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.Platform.Core.Jobs;
+using VirtoCommerce.Platform.Core.PushNotifications;
 
 namespace VirtoCommerce.BackgroundJobs.Core.MapReduce;
 
@@ -21,6 +23,7 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
     private readonly IJobPayloadSerializer _serializer;
     private readonly IMapReduceBatchStore _store;
     private readonly IBackgroundJob _backgroundJob;
+    private readonly IPushNotificationManager _pushNotificationManager;
     private readonly ILogger<MapCoordinator> _logger;
 
     public MapCoordinator(
@@ -28,12 +31,14 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
         IJobPayloadSerializer serializer,
         IMapReduceBatchStore store,
         IBackgroundJob backgroundJob,
+        IPushNotificationManager pushNotificationManager,
         ILogger<MapCoordinator> logger)
     {
         _serviceProvider = serviceProvider;
         _serializer = serializer;
         _store = store;
         _backgroundJob = backgroundJob;
+        _pushNotificationManager = pushNotificationManager;
         _logger = logger;
     }
 
@@ -49,6 +54,20 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
             return;
         }
 
+        try
+        {
+            await MapAndJoinAsync(envelope, batch, context, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await MapReduceBatchNotification.CloseFailedOnFinalAttemptAsync(_store, _pushNotificationManager, batch, context, ex, "Map", _logger, cancellationToken);
+
+            throw;
+        }
+    }
+
+    private async Task MapAndJoinAsync(MapTaskEnvelope envelope, MapReduceBatch batch, IJobExecutionContext context, CancellationToken cancellationToken)
+    {
         var record = await RunMapAsync(envelope, batch, context, cancellationToken);
         var completed = await _store.SaveResultAndCountAsync(envelope.BatchId, record, cancellationToken);
 
@@ -57,8 +76,33 @@ public sealed class MapCoordinator : IBackgroundJobHandler<MapTaskEnvelope>
         var step = Math.Max(1, batch.Total / 100);
         if (!string.IsNullOrEmpty(batch.ProgressNotificationId) && (completed >= batch.Total || completed % step == 0))
         {
-            await context.Progress.Report(
-                new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },
+            await BestEffortNotificationSend.TrySendAsync(
+                async () =>
+                {
+                    if (await _store.GetProgressCloseAsync(envelope.BatchId, cancellationToken) is not null)
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        await context.Progress.Report(
+                            new JobProgressInfo { Message = $"Mapped {completed}/{batch.Total}", ProcessedCount = completed, TotalCount = batch.Total },
+                            cancellationToken);
+                    }
+                    finally
+                    {
+                        // Not the job's token: a cancel after the report must not skip re-sending a close the report raced.
+                        if (await _store.GetProgressCloseAsync(envelope.BatchId, CancellationToken.None) is { } close)
+                        {
+                            await MapReduceBatchNotification.SendCloseAsync(_pushNotificationManager, batch, close, _logger);
+                        }
+                    }
+                },
+                ex => _logger.LogError(ex, "Could not report the map progress to notification {NotificationId}; the batch's outcome is unchanged.",
+                    batch.ProgressNotificationId),
+                ex => _logger.LogInformation(ex, "Could not report the map progress to notification {NotificationId}: the job was canceled.",
+                    batch.ProgressNotificationId),
                 cancellationToken);
         }
 

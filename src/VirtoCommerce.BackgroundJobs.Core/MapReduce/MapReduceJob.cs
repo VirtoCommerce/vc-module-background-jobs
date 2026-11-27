@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using VirtoCommerce.BackgroundJobs.Core.Notifications;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VirtoCommerce.BackgroundJobs;
+using VirtoCommerce.BackgroundJobs.Core.Notifications;
 using VirtoCommerce.Platform.Core.Jobs;
 using VirtoCommerce.Platform.Core.PushNotifications;
 using VirtoCommerce.Platform.Core.Security;
@@ -23,19 +25,22 @@ public sealed class MapReduceJob : IMapReduceJob
     private readonly IJobPayloadSerializer _serializer;
     private readonly IUserNameResolver _userNameResolver;
     private readonly IPushNotificationManager _pushNotificationManager;
+    private readonly ILogger _logger;
 
     public MapReduceJob(
         IBackgroundJob backgroundJob,
         IMapReduceBatchStore store,
         IJobPayloadSerializer serializer,
         IUserNameResolver userNameResolver,
-        IPushNotificationManager pushNotificationManager)
+        IPushNotificationManager pushNotificationManager,
+        ILogger<MapReduceJob>? logger = null)
     {
         _backgroundJob = backgroundJob;
         _store = store;
         _serializer = serializer;
         _userNameResolver = userNameResolver;
         _pushNotificationManager = pushNotificationManager;
+        _logger = logger ?? NullLogger<MapReduceJob>.Instance;
     }
 
     public async Task<string> Enqueue<TMap, TReduce>(
@@ -71,76 +76,84 @@ public sealed class MapReduceJob : IMapReduceJob
         var title = $"Map/reduce: {itemType.Name}";
         var (_, stateJson) = _serializer.Serialize(state);
 
-        var progressNotificationId = await TryCreateProgressNotificationAsync(options, itemList.Count, userName, title);
+        var started = DateTime.UtcNow;
+        var queued = await TryCreateProgressNotificationAsync(options, itemList.Count, userName, title, started);
+        var progressNotificationId = queued?.Id;
 
-        var batch = new MapReduceBatch
+        try
         {
-            BatchId = batchId,
-            Total = itemList.Count,
-            ItemType = itemType.AssemblyQualifiedName!,
-            ResultType = resultType.AssemblyQualifiedName!,
-            StateType = stateType.AssemblyQualifiedName!,
-            StateJson = stateJson,
-            MapHandlerType = typeof(TMap).AssemblyQualifiedName!,
-            ReduceHandlerType = typeof(TReduce).AssemblyQualifiedName!,
-            Queue = options?.Queue,
-            FailurePolicy = options?.FailurePolicy ?? FailurePolicy.FailFast,
-            ProgressNotificationId = progressNotificationId,
-            Title = title,
-            UserName = userName,
-        };
-
-        await _store.CreateAsync(batch, CancellationToken.None);
-
-        // Empty batch: nothing to map, run reduce immediately so the finalize step still happens.
-        if (itemList.Count == 0)
-        {
-            await _backgroundJob.Enqueue<ReduceCoordinator>(new ReduceTaskEnvelope { BatchId = batchId },
-                new EnqueueOptions { Queue = options?.Queue }, CancellationToken.None);
-            return batchId;
-        }
-
-        // Store the items and hand the actual fan-out (one map task per item) to a worker, so this call stays fast
-        // even for very large batches instead of publishing N messages inline on the request thread.
-        var mapItems = new List<MapItem>(itemList.Count);
-        foreach (var item in itemList)
-        {
-            ArgumentNullException.ThrowIfNull(item);
-            if (!itemType.IsInstanceOfType(item))
+            var batch = new MapReduceBatch
             {
-                throw new ArgumentException(
-                    $"Map handler '{typeof(TMap).Name}' expects items of type '{itemType.Name}', but got '{item.GetType().Name}'.",
-                    nameof(items));
+                BatchId = batchId,
+                Total = itemList.Count,
+                ItemType = itemType.AssemblyQualifiedName!,
+                ResultType = resultType.AssemblyQualifiedName!,
+                StateType = stateType.AssemblyQualifiedName!,
+                StateJson = stateJson,
+                MapHandlerType = typeof(TMap).AssemblyQualifiedName!,
+                ReduceHandlerType = typeof(TReduce).AssemblyQualifiedName!,
+                Queue = options?.Queue,
+                FailurePolicy = options?.FailurePolicy ?? FailurePolicy.FailFast,
+                ProgressNotificationId = progressNotificationId,
+                Title = title,
+                UserName = userName,
+                Started = started,
+            };
+
+            await _store.CreateAsync(batch, CancellationToken.None);
+
+            // Empty batch: nothing to map, run reduce immediately so the finalize step still happens.
+            if (itemList.Count == 0)
+            {
+                await _backgroundJob.Enqueue<ReduceCoordinator>(new ReduceTaskEnvelope { BatchId = batchId },
+                    new EnqueueOptions { Queue = options?.Queue }, CancellationToken.None);
+                return batchId;
             }
 
-            var (serializedType, itemJson) = _serializer.Serialize(item);
-            mapItems.Add(new MapItem { ItemType = serializedType, ItemJson = itemJson });
+            // Store the items and hand the actual fan-out (one map task per item) to a worker, so this call stays fast
+            // even for very large batches instead of publishing N messages inline on the request thread.
+            var mapItems = new List<MapItem>(itemList.Count);
+            foreach (var item in itemList)
+            {
+                ArgumentNullException.ThrowIfNull(item);
+                if (!itemType.IsInstanceOfType(item))
+                {
+                    throw new ArgumentException(
+                        $"Map handler '{typeof(TMap).Name}' expects items of type '{itemType.Name}', but got '{item.GetType().Name}'.",
+                        nameof(items));
+                }
+
+                var (serializedType, itemJson) = _serializer.Serialize(item);
+                mapItems.Add(new MapItem { ItemType = serializedType, ItemJson = itemJson });
+            }
+
+            await _store.SaveItemsAsync(batchId, mapItems, CancellationToken.None);
+
+            await _backgroundJob.Enqueue<FanOutCoordinator>(new MapFanOutEnvelope { BatchId = batchId },
+                new EnqueueOptions { Queue = options?.Queue }, CancellationToken.None);
+
+            return batchId;
         }
+        catch (Exception ex) when (queued is not null)
+        {
+            await _pushNotificationManager.TryCloseEnqueueFailedAsync(queued, ex.Message, _logger);
 
-        await _store.SaveItemsAsync(batchId, mapItems, CancellationToken.None);
-
-        await _backgroundJob.Enqueue<FanOutCoordinator>(new MapFanOutEnvelope { BatchId = batchId },
-            new EnqueueOptions { Queue = options?.Queue }, CancellationToken.None);
-
-        return batchId;
+            throw;
+        }
     }
 
-    private async Task<string?> TryCreateProgressNotificationAsync(MapReduceOptions? options, int total, string? userName, string title)
+    private async Task<JobProgressPushNotification?> TryCreateProgressNotificationAsync(MapReduceOptions? options, int total, string? userName, string title, DateTime started)
     {
         if (options?.ReportProgress != true)
         {
             return null;
         }
 
-        var notification = new JobProgressPushNotification(userName ?? "system")
-        {
-            Title = title,
-            Description = "Queued",
-            Started = DateTime.UtcNow,
-            TotalCount = total,
-        };
-        await _pushNotificationManager.SendAsync(notification);
+        var notification = JobProgressPushNotification.CreateQueued(userName ?? "system", title, started, total);
+        await BestEffortNotificationSend.TrySendAsync(
+            () => _pushNotificationManager.SendAsync(notification),
+            ex => _logger.LogError(ex, "Could not send the queued progress notification {NotificationId}; enqueueing continues.", notification.Id));
 
-        return notification.Id;
+        return notification;
     }
 }
