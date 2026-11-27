@@ -508,12 +508,13 @@ Hangfire and RabbitMQ. This delivery only adds scenarios and capability flags to
 
 - vc-platform#3175 sends `SendSystemEvents` to the creator's hub group only: the creator and the users an
   `IPushNotificationAudienceProvider` admits, administrators included in the restriction. With Redis configured the
-  history is shared by all instances, otherwise it stays in memory; both keep a user's newest 20 notifications for 24
-  hours by default. An audience provider admits users to the live
+  history is shared by all instances, otherwise it stays in memory. The pinned alpha keeps a user's newest 20
+  notifications for 24 hours by default, judged by creation time; vc-platform#3175 has since raised the defaults to 100
+  and 7 days, counted from the last save (`ebcafb80f`, not in a published alpha). An audience provider admits users to the live
   broadcasts only; the history holds a user's own notifications. A notification no user created (a recurring job's
   `system:<id>`) is in no user's history and reaches nobody live unless a provider admits them.
-- The Admin Shell host filters nothing. It requires the platform that carries the change, in its manifest and its
-  `Platform.Core` reference, as this module does.
+- The Admin Shell host filters nothing and declares no platform floor of its own: this module requires the platform,
+  so a host that has the module has the change. This delivery needs no change in the host (2026-11-27, see Change log).
 
 ## 4. Approaches considered
 
@@ -776,9 +777,10 @@ the same assertion; items an engine may not support are capability-gated with th
 - **Scale-out** (read-from-code at `318225a69`, not run): with Redis the history stores each notification with its
   concrete type (`PushNotificationJsonSerializer`), so `JobProgressPushNotification` with `JobId`, `Outcome` and
   attempts is what every instance serves, provided it survives the Newtonsoft round trip. E2E on the stand.
-- **A running job can leave the history** (read-from-code at `318225a69`): the history keeps a user's newest 20
-  notifications by creation time for 24 hours, and a job keeps its `Created` across updates. After a reload, the
-  progress page and the bell then have no notification for the job; an open page keeps receiving live updates.
+- **A running job can leave the history** (read-from-code at `318225a69`, the pinned alpha): the history keeps a
+  user's newest 20 notifications by creation time for 24 hours, and a job keeps its `Created` across updates. After a
+  reload, the progress page and the bell then have no notification for the job; an open page keeps receiving live
+  updates. Fixed upstream at `ebcafb80f`; it applies once the module pins a build that carries it.
 - **The platform floor rises** (§3.4): a host on an older platform cannot install this module version. The companion
   vc-platform PR ships first; the module pins its alpha, then its release.
 - **Live and stored enum shapes differ** (found 2026-11-24, outside this delivery): the hub uses System.Text.Json,
@@ -919,3 +921,7 @@ the same assertion; items an engine may not support are capability-gated with th
   counts elapsed time from `Created`. AC 13's batch-time check moves from E2E back to a test, reversing item (5) of
   the 2026-11-25 whole-branch review entry: a batch time in the wrong field, or a start time on a shared notification,
   is a wrong value that raises no error.
+- 2026-11-27 — This delivery needs no change in the Admin Shell: vc-module-admin-shell PR 24 updates vc-shell, and the
+  host declares no platform floor (§3.10). PR 23 of that repository keeps two host fixes that do not concern jobs. The
+  Run page sets its payload field's `maxlength` itself, because the plugin renders with the host's vc-shell, whose
+  default can cap the field.
