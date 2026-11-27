@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -622,18 +623,38 @@ public class MapReduceTests
         Assert.All(mapUpdates, x =>
         {
             Assert.Equal(initial.Id, x.Id);
-            Assert.Equal(initial.Started, x.Started);
+            Assert.Equal(initial.Created, x.Created);
             Assert.Null(x.Finished);
             Assert.Null(x.Outcome);
         });
 
         Assert.Equal(initial.Id, close.Id);
-        Assert.Equal(initial.Started, close.Started);
+        Assert.Equal(initial.Created, close.Created);
         Assert.Null(close.JobId);
         Assert.NotNull(close.Finished);
         Assert.Equal(nameof(JobOutcome.Succeeded), close.Outcome);
         Assert.True(close.IsNew);
         Assert.Contains("2 items", close.Description);
+    }
+
+    [Fact]
+    public async Task SharedNotification_MapUpdatesAndReduceClose_LeaveStartedNullAndKeepCreatedAtBatchStart()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var harness = new NotifyingHarness(new SquareHandler());
+
+        var (initial, mapUpdates, close) = await harness.RunAsync<SquareHandler>(
+            [new SquareItem(1), new SquareItem(2)], ct);
+
+        var mapTask = harness.Enqueued.First(x => x.Headers.ContainsKey(JobHeaders.BatchStartedAt));
+        var batchStarted = new DateTime(long.Parse(mapTask.Headers[JobHeaders.BatchStartedAt], CultureInfo.InvariantCulture), DateTimeKind.Utc);
+
+        Assert.NotEmpty(mapUpdates);
+        Assert.All(mapUpdates.Prepend(initial).Append(close), x =>
+        {
+            Assert.Null(x.Started);
+            Assert.Equal(batchStarted, x.Created);
+        });
     }
 
     [Fact]

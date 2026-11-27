@@ -45,7 +45,7 @@ public class PushNotificationJobProgressTests
     }
 
     [Fact]
-    public async Task Report_KeepsStartedCreatedAndJobIdStable()
+    public async Task Report_KeepsCreatedAndJobIdStable()
     {
         var (progress, sent) = CreateProgress(CreateEnvelope());
 
@@ -55,7 +55,6 @@ public class PushNotificationJobProgressTests
         Assert.Equal(2, sent.Count);
         Assert.All(sent, x =>
         {
-            Assert.Equal(_enqueuedAt, x.Started);
             Assert.Equal(_enqueuedAt, x.Created);
             Assert.Equal("job-1", x.JobId);
             Assert.Equal("notification-1", x.Id);
@@ -64,7 +63,7 @@ public class PushNotificationJobProgressTests
     }
 
     [Fact]
-    public async Task Report_AcrossAttempts_KeepsStartedCreatedAndJobId()
+    public async Task Report_AcrossAttempts_KeepsCreatedAndJobId()
     {
         var (first, firstSent) = CreateProgress(CreateEnvelope(attempt: 1));
         var (second, secondSent) = CreateProgress(CreateEnvelope(attempt: 2));
@@ -78,17 +77,51 @@ public class PushNotificationJobProgressTests
         Assert.Equal(2, b.Attempt);
         Assert.Equal(3, b.TotalAttempts);
 
-        // Against the expected values, not against each other: two sends that both lost the start time, the job id or the
-        // title would still be equal to one another.
+        // Against the expected values, not against each other: two sends that both lost the creation time, the job id or
+        // the title would still be equal to one another.
         Assert.All(new[] { a, b }, x =>
         {
-            Assert.Equal(_enqueuedAt, x.Started);
             Assert.Equal(_enqueuedAt, x.Created);
             Assert.Equal("job-1", x.JobId);
             Assert.Equal("Import", x.Title);
         });
         Assert.Equal(5, b.ProcessedCount);
         Assert.Equal(0, b.TotalCount);
+    }
+
+    [Fact]
+    public async Task Report_SetsStartedOnTheFirstReport_AndKeepsItThroughClose()
+    {
+        var (progress, sent) = CreateProgress(CreateEnvelope());
+
+        var before = DateTime.UtcNow;
+        await progress.Report(new JobProgressInfo { Message = "one" }, TestContext.Current.CancellationToken);
+        var after = DateTime.UtcNow;
+        await progress.Report(new JobProgressInfo { Message = "two" }, TestContext.Current.CancellationToken);
+        await progress.Complete(JobOutcome.Succeeded, error: null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, sent.Count);
+        var started = sent[0].Started;
+        Assert.NotNull(started);
+        Assert.InRange(started.Value, before, after);
+        Assert.All(sent, x =>
+        {
+            Assert.Equal(started, x.Started);
+            Assert.Equal(_enqueuedAt, x.Created);
+        });
+    }
+
+    // A cancel before the run, or between attempts, only completes the reporter.
+    [Fact]
+    public async Task Complete_WithoutReport_LeavesStartedNull()
+    {
+        var (progress, sent) = CreateProgress(CreateEnvelope());
+
+        await progress.Complete(JobOutcome.Canceled, error: null, TestContext.Current.CancellationToken);
+
+        var closing = Assert.Single(sent);
+        Assert.Null(closing.Started);
+        Assert.Equal(_enqueuedAt, closing.Created);
     }
 
     [Fact]

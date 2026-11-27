@@ -16,8 +16,8 @@ public class JobProgressPushNotification : PushNotification
     }
 
     /// <summary>
-    /// The notification a job gets when it is enqueued; <paramref name="enqueuedAt"/> is its start and creation time,
-    /// and <paramref name="totalCount"/> the work already known (0 when none).
+    /// The notification a job gets when it is enqueued; <paramref name="enqueuedAt"/> is its creation time (it has not
+    /// started yet), and <paramref name="totalCount"/> the work already known (0 when none).
     /// </summary>
     public static JobProgressPushNotification CreateQueued(string creator, string title, DateTime enqueuedAt, long totalCount)
     {
@@ -25,7 +25,8 @@ public class JobProgressPushNotification : PushNotification
             Guid.NewGuid().ToString(),
             creator,
             title,
-            enqueuedAt,
+            Created: enqueuedAt,
+            Started: null,
             $"Queued at {enqueuedAt:O}",
             ProcessedCount: 0,
             TotalCount: totalCount,
@@ -48,6 +49,7 @@ public class JobProgressPushNotification : PushNotification
             queued.Id,
             queued.Creator,
             queued.Title,
+            queued.Created,
             queued.Started,
             $"Enqueue failed: {error}",
             ProcessedCount: 0,
@@ -65,6 +67,10 @@ public class JobProgressPushNotification : PushNotification
         return notification;
     }
 
+    /// <summary>
+    /// When the attempt named by <see cref="Attempt"/> began executing; null if it never began, and always null on a
+    /// shared (map/reduce) notification. When the job was queued or the batch started is <c>Created</c>.
+    /// </summary>
     public DateTime? Started { get; set; }
 
     public DateTime? Finished { get; set; }

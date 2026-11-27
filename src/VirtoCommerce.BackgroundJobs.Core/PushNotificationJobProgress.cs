@@ -22,10 +22,11 @@ public sealed class PushNotificationJobProgress : IJobProgress
     private readonly string? _title;
     private readonly bool _owned;
     private readonly string? _jobId;
-    private readonly DateTime? _started;
+    private readonly DateTime? _created;
     private readonly int? _attempt;
     private readonly int? _totalAttempts;
 
+    private DateTime? _started;
     private long _processedCount;
     private long _totalCount;
     private string? _lastMessage;
@@ -63,7 +64,7 @@ public sealed class PushNotificationJobProgress : IJobProgress
         _title = envelope.Title;
         _owned = envelope.CompletesProgressNotification;
         _jobId = _owned ? jobId : null;
-        _started = ReadTicks(envelope, _owned ? JobHeaders.EnqueuedAt : JobHeaders.BatchStartedAt);
+        _created = ReadTicks(envelope, _owned ? JobHeaders.EnqueuedAt : JobHeaders.BatchStartedAt);
 
         // A shared bar's attempt is the batch's, not one task's.
         _attempt = _owned ? envelope.Attempt : null;
@@ -72,6 +73,12 @@ public sealed class PushNotificationJobProgress : IJobProgress
 
     public Task Report(JobProgressInfo progress, CancellationToken cancellationToken = default)
     {
+        // The first report, not the constructor, marks the start: reporters are also built for attempts that never run.
+        if (_owned)
+        {
+            _started ??= DateTime.UtcNow;
+        }
+
         _processedCount = progress.ProcessedCount ?? _processedCount;
         _totalCount = progress.TotalCount ?? _totalCount;
 
@@ -124,6 +131,7 @@ public sealed class PushNotificationJobProgress : IJobProgress
             _notificationId,
             _creator,
             _title,
+            _created,
             _started,
             description,
             _processedCount,

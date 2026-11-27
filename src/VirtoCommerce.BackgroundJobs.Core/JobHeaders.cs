@@ -11,7 +11,7 @@ public static class JobHeaders
     public const string EnqueuedAt = "vc-enqueued-at";
 
     /// <summary>UTC ticks (<see cref="System.DateTime.Ticks"/>, same format as <see cref="EnqueuedAt"/>) captured when a
-    /// map/reduce batch started; the shared batch notification takes its start time from it.</summary>
+    /// map/reduce batch started; the shared batch notification takes its <c>Created</c> from it.</summary>
     public const string BatchStartedAt = "vc-batch-started-at";
 
     /// <summary>Optional correlation id for a batch of enqueues (e.g. a load-test run), so all jobs from one run can

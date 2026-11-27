@@ -395,7 +395,9 @@ public class BackgroundJobsTests
         Assert.All(sent, x =>
         {
             Assert.True(x.IsNew);
-            Assert.NotNull(x.Started);
+            // The description carries the enqueue instant.
+            Assert.Equal($"Queued at {x.Created:O}", x.Description);
+            Assert.Null(x.Started);
             Assert.Null(x.JobId);
         });
     }
@@ -458,7 +460,8 @@ public class BackgroundJobsTests
         Assert.Equal(nameof(JobOutcome.Failed), closing.Outcome);
         Assert.Equal("boom", closing.Error);
         Assert.NotNull(closing.Finished);
-        Assert.Equal(sent[0].Started, closing.Started);
+        Assert.Equal(sent[0].Created, closing.Created);
+        Assert.Null(closing.Started);
         var entry = Assert.Single(closing.ProgressLog);
         Assert.Equal(ProgressMessageLevel.Error, entry.Level);
         Assert.Equal("boom", entry.Message);

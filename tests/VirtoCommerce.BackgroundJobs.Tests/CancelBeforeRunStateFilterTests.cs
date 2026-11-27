@@ -86,7 +86,8 @@ public class CancelBeforeRunStateFilterTests
         Assert.Equal(nameof(JobOutcome.Canceled), closing.Outcome);
         Assert.NotNull(closing.Finished);
         Assert.Equal(_hangfireJobId, closing.JobId);
-        Assert.Equal(_enqueuedAt, closing.Started);
+        Assert.Equal(_enqueuedAt, closing.Created);
+        Assert.Null(closing.Started);
         Assert.Equal(expectedAttempt, closing.Attempt);
         Assert.Equal(4, closing.TotalAttempts);
     }

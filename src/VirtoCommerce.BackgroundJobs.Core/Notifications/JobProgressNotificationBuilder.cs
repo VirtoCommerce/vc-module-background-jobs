@@ -6,6 +6,7 @@ internal sealed record JobProgressNotificationFields(
     string Id,
     string Creator,
     string? Title,
+    DateTime? Created,
     DateTime? Started,
     string? Description,
     long ProcessedCount,
@@ -43,9 +44,9 @@ internal static class JobProgressNotificationBuilder
             IsNew = fields.IsNew,
         };
 
-        if (fields.Started.HasValue)
+        if (fields.Created.HasValue)
         {
-            notification.Created = fields.Started.Value;
+            notification.Created = fields.Created.Value;
         }
 
         return notification;

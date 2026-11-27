@@ -53,8 +53,9 @@ but nothing in the admin lets a person start it, and once it runs there is no re
 **Goals**
 1. A person with the right permission starts any triggerable job from the Admin Shell, with an optional JSON payload,
    and lands on a page that follows that job to its end.
-2. The progress notification tells the truth on every engine: stable start time, counts, the job's current message, the
-   attempt number out of the total, and a final outcome (succeeded, failed with the error, canceled).
+2. The progress notification tells the truth on every engine: a stable queue time, when the attempt began, counts, the
+   job's current message, the attempt number out of the total, and a final outcome (succeeded, failed with the error,
+   canceled).
 3. A failed attempt that will be retried does not report the job as failed.
 4. The enqueue payload reaches the handler unchanged on every supported platform version, for the members the payload
    type declares.
@@ -206,7 +207,8 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   and is fixed (§3.8). The contract goes into the README custom-engine section and `CONFORMANCE.md`, with a
   conformance test.
 - **Initial notification.** `EnqueueCore` stamps `JobHeaders.EnqueuedAt` first and uses that same instant for the
-  notification's `Started` and `Created`, then sends it. `Started` therefore means "enqueued", queue wait included.
+  notification's `Created`, then sends it with `Started` null: nothing has run yet. The progress page counts elapsed
+  time from `Created`, queue wait included.
   The initial description is unique per enqueue (it carries the enqueue time), because platform storage folds a new
   notification with the same title, type and description into the previous one
   (`PushNotificationInMemoryStorage.cs:36-48`): two Runs of the same job would otherwise share one notification.
@@ -232,7 +234,13 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   `Complete`, `JobProgressPushNotification.CreateQueued` / `CreateEnqueueFailed` and
   `MapReduceBatchNotification.SendCloseAsync`). For an
   **owned** notification:
-  - `Started` and `Created` come from the envelope's `JobHeaders.EnqueuedAt` and stay the same on every update.
+  - `Created` comes from the envelope's `JobHeaders.EnqueuedAt` and stays the same on every update; without the
+    header, a send keeps the time it was built.
+  - `Started` is when the attempt named by `Attempt` began executing. The reporter records it on its first `Report`
+    (the dispatcher's attempt-start update, §3.5), before the send, and keeps it for the rest of the attempt. It is null
+    on the queued notification and on a close made without a `Report` (a cancel before the run or between attempts, a
+    failed enqueue). Building a reporter does not set it: engines and the Hangfire filter build reporters for attempts
+    that never run.
   - Progress updates send `IsNew = false`, so the notification is not raised again while the job runs and one the
     user has read stays read. The closing update (`Complete` of an owned notification, the reduce close of a shared
     one) sends `IsNew = true`: platform storage keeps the flag of the last send, so a finished job is unread until the
@@ -252,20 +260,21 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
     check for `"Failed"` would show a failure as a success. The enum is the C# contract; only the notification's
     field is serialized.
 - **State across attempts.** Counts and the current message belong to the attempt: a retry runs the work again, so
-  its first report starts from that attempt's own counts. `Started`, `Created`, `JobId` and the title stay the same
-  across attempts; `Attempt` and `TotalAttempts` show which attempt the counts belong to.
-- **Shared notifications** (map/reduce): a child envelope cannot carry stable `Started`/`JobId` for the batch.
-  `Started` = the batch start time recorded on `MapReduceBatch`; `JobId` stays null; the description is the latest map
-  message. A map task's progress update never closes the notification; a coordinator's final-attempt failure does
-  (§3.5).
+  its first report starts from that attempt's own counts. `Created`, `JobId` and the title stay the same
+  across attempts; `Started` is the attempt's own; `Attempt` and `TotalAttempts` show which attempt the counts belong
+  to.
+- **Shared notifications** (map/reduce): a child envelope cannot carry a stable `Created`/`JobId` for the batch.
+  `Created` = the batch start time recorded on `MapReduceBatch`; `Started` and `JobId` stay null; the description is
+  the latest map message. A map task's progress update never closes the notification; a coordinator's final-attempt
+  failure does (§3.5).
   - The batch start reaches the map children as the `JobHeaders.BatchStartedAt` header. `FanOutCoordinator` opens an
     ambient scope with `MapReduceBatch.Started` around its child enqueue loop through a public
     `JobEnqueueContext` member beside `BeginRun` (the same `AsyncLocal` shape), and `EnqueueCore` stamps the header only
     on an enqueue that carries a `ProgressNotificationId`. The platform `EnqueueOptions` has no header slot.
   - Every batch close (the reduce's outcome, and the final-attempt failure close of §3.5) is built through the
-    notification builder with `MapReduceBatch.Started`, so the closing replacement keeps the batch start time. One
-    internal helper, `MapReduceBatchNotification`, sends it for the fan-out, map and reduce coordinators. A batch stored
-    before the upgrade has no `Started` and behaves as before.
+    notification builder with `MapReduceBatch.Started` as `Created`, so the closing replacement keeps the batch start
+    time. One internal helper, `MapReduceBatchNotification`, sends it for the fan-out, map and reduce coordinators. A
+    batch stored before the upgrade has no `MapReduceBatch.Started` and behaves as before.
 
 ### 3.5 Attempts and outcome on every engine
 
@@ -296,9 +305,9 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
 - **A map/reduce batch closes `Failed` when a coordinator fails on its final attempt.** The fan-out and reduce jobs are
   enqueued without a `ProgressNotificationId`, so `context.Progress` does nothing for them, and a map task's `Complete`
   leaves the shared bar alone (§3.4). `FanOutCoordinator`, `MapCoordinator` and `ReduceCoordinator` therefore close the
-  batch's notification through `IPushNotificationManager` with the batch's own title, start and total, and the
-  description "Fan-out failed: <message>", "Map failed: <message>" or "Reduce failed: <message>". `FanOutCoordinator`
-  and `MapCoordinator` take `IPushNotificationManager` in their constructors for it.
+  batch's notification through `IPushNotificationManager` with the batch's own title, start (as `Created`) and total,
+  and the description "Fan-out failed: <message>", "Map failed: <message>" or "Reduce failed: <message>".
+  `FanOutCoordinator` and `MapCoordinator` take `IPushNotificationManager` in their constructors for it.
   - For the fan-out it covers any exception after the batch is loaded; for a map task, any exception after the batch is
     loaded (the batch store's `SaveResultAndCountAsync` and `TryBeginReduceAsync`, and the reduce enqueue, whose failure
     still releases the reduce claim first); for the reduce, the read of the map results, the `FailFast` check, the
@@ -585,14 +594,15 @@ Each criterion names its check: `test` only where the failure is silent and harm
     — test; E2E for a queued RabbitMQ message (§8 item 5)
 11. WHEN the dispatcher fails before the handler runs (payload, type or handler resolution), THEN the failure SHALL be
     handled like a handler failure: closed `Failed` on the final attempt, open while a retry is pending. — test
-12. FOR an owned notification, every update SHALL keep `Started`, `Created` and `JobId` unchanged, keep the last known
+12. FOR an owned notification, every update SHALL keep `Created` and `JobId` unchanged, keep the last known
     counts within an attempt when a report omits them, and keep the job's last message as the description on
-    completion. The exception: a job canceled before an attempt starts — a Hangfire job waiting for a retry, a
+    completion; `Started` SHALL be null until the attempt begins and SHALL then keep that attempt's start time. The
+    exception: a job canceled before an attempt starts — a Hangfire job waiting for a retry, a
     RabbitMQ retry re-published but not yet consumed, an InMemory or Reference job between attempts — is closed with
-    `JobId`, `Started` and its attempt numbers kept but without the previous attempt's last message and counts, which
-    no engine carries in the envelope (§3.5). — test
+    `Created` and `JobId` kept, `Started` null, and its attempt numbers kept but without the previous attempt's last
+    message and counts, which no engine carries in the envelope (§3.5). — test
 13. WHEN a job reports into a shared notification, THEN its updates SHALL NOT close that notification — test; and
-    SHALL carry the batch start time — E2E.
+    SHALL carry the batch start time as `Created`, with `Started` null — test.
 14. WHEN a job enqueued with `MaxRetryAttempts = N` (N >= 0; a negative value counts as 0) fails every time, THEN every
     engine SHALL run it N + 1 times, including when N exceeds the global default on Hangfire, and including zero-delay
     retries. — test
@@ -663,10 +673,11 @@ the same assertion; items an engine may not support are capability-gated with th
    so its discard close is checked by E2E on a stand with a broker, one consumer slot held by a blocking job. Wrong
    state. (AC 10)
 6. Dispatcher: payload that does not deserialize, on final and non-final attempts. Item left in a wrong state. (AC 11)
-7. Notification builder: stable `Started`/`Created`/`JobId` across updates and attempts, counts kept within an
-   attempt, the current message kept by a count-only update and on completion; `IsNew` false on progress updates and true on the close (owned
-   `Complete` and the shared reduce close). Lost or wrong value: a finished job stored as read is missed silently.
-   (AC 12, §3.4)
+7. Notification builder: stable `Created`/`JobId` across updates and attempts; `Started` set by the first report and
+   kept through the close, null on a close made without a report and on a shared notification; counts kept within an
+   attempt, the current message kept by a count-only update and on completion; `IsNew` false on progress updates and
+   true on the close (owned `Complete` and the shared reduce close). Lost or wrong value: a finished job stored as read
+   is missed silently, and a start time on a job that never ran reads as if it had. (AC 12, 13, §3.4)
 8. Shared notification: a map task's update does not close it. Wrong state. (AC 13)
 9. Conformance: `MaxRetryAttempts = N` above the global default gives N + 1 runs on every engine; on Hangfire also with
    zero-delay retries, and lowering below the global default. Data, a job given up early or retried too often. (AC 14)
@@ -766,7 +777,7 @@ the same assertion; items an engine may not support are capability-gated with th
   concrete type (`PushNotificationJsonSerializer`), so `JobProgressPushNotification` with `JobId`, `Outcome` and
   attempts is what every instance serves, provided it survives the Newtonsoft round trip. E2E on the stand.
 - **A running job can leave the history** (read-from-code at `318225a69`): the history keeps a user's newest 20
-  notifications by creation time for 24 hours, and a job keeps its start time across updates. After a reload, the
+  notifications by creation time for 24 hours, and a job keeps its `Created` across updates. After a reload, the
   progress page and the bell then have no notification for the job; an open page keeps receiving live updates.
 - **The platform floor rises** (§3.4): a host on an older platform cannot install this module version. The companion
   vc-platform PR ships first; the module pins its alpha, then its release.
@@ -903,3 +914,6 @@ the same assertion; items an engine may not support are capability-gated with th
   only and the history can live in Redis, so the Admin Shell broadcast filter is removed (§3.10, AC 19, test 12), the
   platform floor of both modules rises to the platform that carries the change, and the multi-instance and scale-out
   notes are rewritten (§3.5, §9). New risk: a running job can leave the history.
+- 2026-11-27 — `Started` is now the start of the attempt, `Created` keeps the queue/batch time; the old values were
+  identical, so a consumer could not tell when execution began (§2, §3.4, AC 12, AC 13, test 7). The progress page
+  counts elapsed time from `Created`.

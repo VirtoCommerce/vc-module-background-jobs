@@ -540,7 +540,16 @@ public abstract partial class JobEngineConformanceTests<TFixture>(TFixture fixtu
             Assert.Null(closing.Error);
 
             Assert.Equal(jobId, closing.JobId);
-            Assert.NotNull(closing.Started);
+
+            // A job canceled while queued never began.
+            if (observeHandlerCancel)
+            {
+                Assert.NotNull(closing.Started);
+            }
+            else
+            {
+                Assert.Null(closing.Started);
+            }
 
             if (fixture.Capabilities.ReportsAttemptBudget)
             {

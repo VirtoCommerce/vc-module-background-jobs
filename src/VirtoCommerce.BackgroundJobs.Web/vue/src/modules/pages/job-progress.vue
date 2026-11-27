@@ -99,9 +99,9 @@ watch(finished, (done) => done && clearInterval(tick));
 onBeforeUnmount(() => clearInterval(tick));
 
 const elapsed = computed(() => {
-  if (!job.value?.started) return "—";
+  if (!job.value?.created) return "—";
   const end = job.value.finished ? new Date(job.value.finished).getTime() : now.value;
-  const s = Math.max(0, Math.floor((end - new Date(job.value.started).getTime()) / 1000));
+  const s = Math.max(0, Math.floor((end - new Date(job.value.created).getTime()) / 1000));
   return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((x) => String(x).padStart(2, "0")).join(":");
 });
 
