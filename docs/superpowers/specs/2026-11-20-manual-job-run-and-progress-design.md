@@ -3,7 +3,8 @@
 **Date:** 2026-11-20
 **Ticket:** VCST-6934 (also takes the Hangfire part of VCST-6850 item 3, see Change log)
 **Scope:** `vc-module-background-jobs` (this repo). Companion PRs: `vc-platform` (completion contract, §3.4) and
-`vc-module-admin-shell` (broadcast filter, §3.10).
+`vc-module-admin-shell` (platform floor, §3.10); delivery of notifications
+changed by vc-platform#3175 (§3.10).
 One Platform.Core change (2026-11-24, see Change log): `IJobProgress.Complete` with a default implementation and the
 `JobOutcome` enum. The module's platform floor rises from **3.1097.0** to the platform version that carries them.
 **Code read at:** `vc-module-background-jobs` `5ba4054` (dev), `vc-platform` `7b08741c6` (dev, 3.1102.0),
@@ -44,7 +45,8 @@ but nothing in the admin lets a person start it, and once it runs there is no re
   overwrite it: storage replaces by id regardless of creator, and every notification id is broadcast to all clients.
 - In the Admin Shell every admin sees every other user's job progress: the platform broadcasts each notification as
   `SendSystemEvents` (the scale-out synchronizer depends on it, `PushNotificationSynchronizerTask.cs:47`), and the
-  Admin Shell host installs no broadcast filter. AngularJS listens to the per-user `Send` only.
+  Admin Shell host installs no broadcast filter. AngularJS listens to the per-user `Send` only. vc-platform#3175
+  removes this at the server (§3.10).
 
 ## 2. Goals, non-goals
 
@@ -208,6 +210,7 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   The initial description is unique per enqueue (it carries the enqueue time), because platform storage folds a new
   notification with the same title, type and description into the previous one
   (`PushNotificationInMemoryStorage.cs:36-48`): two Runs of the same job would otherwise share one notification.
+  The platform of §3.10 no longer folds; the unique description stays, and is harmless.
   `BackgroundJobs.Data` builds it through a public factory on `JobProgressPushNotification` for a queued job, so no
   assembly needs access to Core internals.
 - **Notification sends never change what a job does.** `BestEffortNotificationSend.TrySendAsync(send, onFailure,
@@ -243,10 +246,9 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
   - `Complete` keeps the last progress message as the description and records the outcome in `Outcome` and
     `Finished`; the error goes to `Error`.
   - New fields: `JobId`, `Outcome`, `Attempt`, `TotalAttempts`, `Error`.
-  - `Outcome` on the notification is a `string` holding the `JobOutcome` name, not the enum: the live channel's enum
-    shape depends on deployment — the default System.Text.Json hub protocol (an enum as a number) without
-    `PushNotifications:ScalabilityMode`, Newtonsoft with it (vc-platform `SignalRBuilderExtensions.cs:25-33`) — while
-    storage reads go through MVC's `StringEnumConverter`. An enum would reach the Admin Shell in two shapes, and a
+  - `Outcome` on the notification is a `string` holding the `JobOutcome` name, not the enum: the live channel and the
+    history read serialize an enum differently — the System.Text.Json hub protocol as a number, MVC's
+    `StringEnumConverter` as a string. An enum would reach the Admin Shell in two shapes, and a
     check for `"Failed"` would show a failure as a success. The enum is the C# contract; only the notification's
     field is serialized.
 - **State across attempts.** Counts and the current message belong to the attempt: a retry runs the work again, so
@@ -345,11 +347,10 @@ vc-module-marketplace-vendor (`pages/sync-details.vue`, which filters the shell'
       needed for either. Both are rare: the reduce's close has to fall inside that short gap in one task.
     - A failed marker write returns the race for that batch: the close is still sent and only an error is logged, so a
       map task finds no record and its report can replace the close.
-    - Several instances (a platform limitation, not fixable in the module): with the platform's
-      `PushNotifications:ScalabilityMode`, an instance stores its own sends at once and another instance's sends when
-      they arrive over the backplane, so the storage order across instances is not global. A map report sent on one
-      instance before the close was marked can be stored on the closing instance after that close, and the handshake's
-      re-read, which saw no record, does not repair it.
+    - Several instances: with Redis configured, the platform of §3.10 keeps one notification history for all of them,
+      so the storage order is global and the handshake holds across instances. With Azure SignalR Service and no Redis
+      each instance keeps its own history, which no module can reconcile. Read from the platform code, not run on
+      several instances.
     - On the Redis store, a `Failed` closer that read the batch before the reduce's `CompleteAsync` and marks after it
       recreates the `progressclosed` key as an orphan, which expires with the store's TTL (7 days). A map task still in
       its report step can read it and re-send that `Failed` close, which is the case of the `Failed`-after-`Succeeded`
@@ -494,16 +495,15 @@ Hangfire and RabbitMQ. This delivery only adds scenarios and capability flags to
   for members typed `object` / `JToken` (string instead of `DateTime`, decimal instead of `double`, a fractional number
   outside the decimal range fails); the bulk-actions date-property shift on non-UTC hosts (§9).
 
-### 3.10 Companion PR: Admin Shell broadcast filter (`vc-module-admin-shell`)
+### 3.10 Companion changes: delivery (`vc-platform`) and the Admin Shell (`vc-module-admin-shell`)
 
-- The host `App.vue` installs `setBroadcastFilter` keeping a broadcast only when its creator equals the current user
-  name, ignoring case (user names are unique by their normalized form), matching the AngularJS per-user behaviour and
-  the vendor-portal and import apps. The platform keeps broadcasting (the scale-out synchronizer and vendor-portal need
-  it).
-- The filter covers every notification type, because the platform broadcasts every notification that has a creator;
-  the user's own ones also arrive on the per-user channel, which is not filtered. A notification no user created (a
-  recurring job's `system:<id>`, a module install's `system`) is shown to nobody, as in AngularJS. Until the user name
-  is known every broadcast is dropped.
+- vc-platform#3175 sends `SendSystemEvents` to the creator's hub group only: the creator and the users an
+  `IPushNotificationAudienceProvider` admits, administrators included in the restriction. With Redis configured the
+  history is shared by all instances, otherwise it stays in memory; both keep a user's newest 20 notifications for 24
+  hours by default. A notification no user created (a recurring job's `system:<id>`, a module install's `system`)
+  reaches nobody live.
+- The Admin Shell host filters nothing. It requires the platform that carries the change, in its manifest and its
+  `Platform.Core` reference, as this module does.
 
 ## 4. Approaches considered
 
@@ -518,7 +518,7 @@ Hangfire and RabbitMQ. This delivery only adds scenarios and capability flags to
 | Cancel of a finished job | engine `Delete` refuses it (`false`) | hide Cancel in the UI only: the API still rewrites history for any other caller |
 | Hangfire cancel of a running job | the executor reads the job's state from Hangfire storage on `OperationCanceledException` | a `Deleted` filter records the intent in `IJobCancellationStore`: without Redis that store lives in one process, so a cancel accepted by a web instance is invisible to the worker running the job and the notification stays open; the filter is synchronous while the store is asynchronous, and runs before the state is committed; `HangfireJobEngine.Delete` records it: misses a delete from the Hangfire dashboard |
 | User cancel vs shutdown | each engine classifies its own cancel and closes `Canceled` | any `OperationCanceledException` in the dispatcher: a lost lock or host shutdown would close a job the engine re-runs; `IJobCancellationStore.IsCancelRequested` in the dispatcher: only RabbitMQ writes that store today; Hangfire `JobAbortedException`: raised outside the executor and also on requeue |
-| Broadcast leak | host filter in `vc-module-admin-shell` | filter in this plugin: one filter per app, the plugin would overwrite the host's; stop broadcasting in the platform: breaks scale-out sync |
+| Broadcast leak | the platform sends each notification to its creator's group only (vc-platform#3175) | host filter in `vc-module-admin-shell` (built first, removed 2026-11-27): hides other users' notifications while the data still reaches the browser, and would drop the ones an audience provider delivers; filter in this plugin: one filter per app |
 
 ## 5. External contract
 
@@ -538,8 +538,8 @@ token. Rows still marked `read-from-code` are re-observed by the smoke call afte
 | same | no `payload`, `PruneExpiredTokensJob` | 200 `"696289"`; stored `PayloadJson` = `"{}"`; job `Succeeded` | observed (default payload) |
 | Swagger schema of `payload` after the change to `JToken` (`/docs/VirtoCommerce.BackgroundJobs/swagger.json`) | — | `EnqueueJobRequest.payload` = `{ "description": "The job payload as JSON; …" }` — no `type`, i.e. any JSON value; a generated client types it as `any` | observed |
 | Stored notification, `POST api/platform/pushnotifications` `{ take, skip }` | — | `{ totalCount, newCount, notifyEvents[] }`; the probe's item: `notifyType: "JobProgressPushNotification"`, `id`, `creator`, `title`, `description: "Completed"`, `started: null`, `finished`, `created` (= completion time), `isNew: true`, `processedCount: 0`, `totalCount: 0`, `progressLog: []`, `repeatCount: 0`, `serverId: null` | observed (MVC serialization of the stored copy) |
-| Platform storage, new notification equal to the previous one in title, type and description | — | folded into the previous notification (`PushNotificationInMemoryStorage.cs:36-48`) | read-from-code |
-| SignalR `Send` (creator) / `SendSystemEvents` (all) | — | same members; the hub protocol's serializer settings differ from MVC (camelCase, `$type` only in scale-out mode) | read-from-code |
+| Platform storage, new notification equal to the previous one in title, type and description | — | folded into the previous notification (`PushNotificationInMemoryStorage.cs:36-48`); vc-platform#3175 stops folding | read-from-code |
+| SignalR `Send` (creator) / `SendSystemEvents` (all) | — | same members; the hub protocol's serializer settings differ from MVC (camelCase, `$type` only in scale-out mode). vc-platform#3175 (`318225a69`): `SendSystemEvents` goes to the creator's group, and every mode uses the default JSON protocol | read-from-code |
 | Enum members of a notification, by channel | — | MVC (REST history): string (`StringEnumConverter`, platform `Startup.cs:202`); SignalR default protocol (System.Text.Json, `AddSignalR()` at `Startup.cs:137`, aspnetcore `JsonHubProtocol` defaults): number; SignalR scale-out (Newtonsoft, `SignalRBuilderExtensions.cs:30-34`): number. `ProgressMessage.Level`'s Newtonsoft-only attribute does not reach System.Text.Json. Hence `Outcome` is a string (§3.4) | read-from-code; E2E reads a SignalR frame |
 | `GET api/platform/jobs/{id}` | (`background_jobs:manage`) | 200 `{ state: "Succeeded", completed: true, id }`; unknown id → 200 `{ state: null, completed: true, id }` (never 404) | observed |
 | `POST api/platform/jobs/{id}/cancel` | (`background_jobs:manage`) | on a **finished** Hangfire job: 200, and the job's state becomes `Deleted` (`GET` then answers `state: "Deleted"`); 404 when the engine rejects, 501 when the engine cannot cancel | observed (finished job); read-from-code (404/501, `JobsController.cs:57-68`) |
@@ -606,8 +606,8 @@ Each criterion names its check: `test` only where the failure is silent and harm
     line — E2E.
 18. WHILE an InMemory job waits for a retry, THE engine SHALL NOT report it completed; WHEN it is canceled, THEN the
     engine SHALL report it completed. — E2E (development engine)
-19. WHERE the Admin Shell host has the broadcast filter (companion PR), THE user SHALL NOT see notifications created
-    by another user. — test (in `vc-module-admin-shell`); E2E
+19. WHILE the platform carries vc-platform#3175, THE user SHALL NOT receive a notification created by another user,
+    live or from the history, unless an audience provider admits them. — E2E (platform behaviour)
 20. THE README SHALL state that the per-job retry limit is honored on every engine with no upper bound, that no shipped
     engine de-duplicates by `UniqueKey`, that REST refuses `options.progressNotificationId`, and the engine duties of
     §3.8. — E2E (review)
@@ -672,8 +672,7 @@ the same assertion; items an engine may not support are capability-gated with th
 10. Conformance: the job id in the worker's context equals the id `Enqueue` returned, on the first attempt and on a
     retry; the facade sends nothing after `Enqueue` returns. Lost message (the page never finds its job). (AC 21)
 11. Two enqueues of the same job in a row produce two notifications. Lost message. (AC 22)
-12. `vc-module-admin-shell`: the host filter drops a broadcast from another creator and keeps one from the current
-    user. Privacy. (AC 19)
+12. Retired 2026-11-27 with the Admin Shell broadcast filter (§3.10).
 13. Conformance (`SupportsStatusQuery` and `SupportsDelete`): `Delete` of a succeeded job returns `false` and its
     status stays `Succeeded`. Data, a finished job's history rewritten. (AC 24)
 14. Dispatcher: for a job that owns its notification, an update carrying the job id and the attempt reaches the
@@ -762,21 +761,19 @@ the same assertion; items an engine may not support are capability-gated with th
   at "queued". E2E (AC 7).
 - **The vc-module-search controller has the race this design avoids** (`SearchIndexationModuleController.IndexDocuments`
   sends its notification after `EnqueueAsync`). Outside this repo; recorded for the search module.
-- **Scale-out** (read-from-code, not run): with `PushNotifications:ScalabilityMode` set, the hub protocol serializes
-  with `TypeNameHandling.Objects` ("store full type information in JSON to deserialize push notifications on other
-  instances", `SignalRBuilderExtensions.cs:29-34`), and `PushNotificationSynchronizerTask` reads with the same setting
-  (`:35-39`) before saving into the local store (`:74-82`). So the derived `JobProgressPushNotification`, with
-  `JobId`, `Outcome` and attempts, is what other instances store and serve. The same path already carries other
-  modules' derived notifications. Not reproduced on a multi-instance stand; the single-instance 3.1097 stand cannot
-  observe it.
+- **Scale-out** (read-from-code at `318225a69`, not run): with Redis the history stores each notification with its
+  concrete type (`PushNotificationJsonSerializer`), so `JobProgressPushNotification` with `JobId`, `Outcome` and
+  attempts is what every instance serves, provided it survives the Newtonsoft round trip. E2E on the stand.
+- **A running job can leave the history** (read-from-code at `318225a69`): the history keeps a user's newest 20
+  notifications by creation time for 24 hours, and a job keeps its start time across updates. The progress page then
+  finds no notification for the job id.
 - **The platform floor rises** (§3.4): a host on an older platform cannot install this module version. The companion
   vc-platform PR ships first; the module pins its alpha, then its release.
-- **Live enum shape varies by deployment** (found 2026-11-24, outside this delivery): with no
-  `PushNotifications:ScalabilityMode` the hub uses System.Text.Json, which ignores the Newtonsoft
-  `[JsonConverter(typeof(StringEnumConverter))]` on `ProgressMessage.Level`, so the level arrives as a number live and
-  as a string from storage, and admin code comparing `level === 'Error'` (vc-module-admin-angular-js
-  `module-wizard-progress-step.js:34`) misses it on a single-instance host. Unifying the hub protocol changes the live
-  shape of every module's notification; a separate vc-platform ticket, not this PR.
+- **Live and stored enum shapes differ** (found 2026-11-24, outside this delivery): the hub uses System.Text.Json,
+  which ignores the Newtonsoft `[JsonConverter(typeof(StringEnumConverter))]` on `ProgressMessage.Level`, so the level
+  arrives as a number live and as a string from the history, and admin code comparing `level === 'Error'`
+  (vc-module-admin-angular-js `module-wizard-progress-step.js:34`) misses it. Unifying the hub protocol changes the
+  live shape of every module's notification; a separate vc-platform ticket, not this PR.
 
 ## 10. Change log
 
@@ -901,3 +898,7 @@ the same assertion; items an engine may not support are capability-gated with th
   marker write, the storage order across instances, and an orphan marker left by a `Failed` closer, and the reasoning
   of the `Failed`-after-`Succeeded` case is corrected: no `CompleteAsync` is needed for it. (3) §3.4 names the
   builder `SendCloseAsync`. (4) §8 item 19 states that its scenario needs an engine that runs two jobs at once.
+- 2026-11-27 — The release requires vc-platform#3175 (operator decision). Notifications reach their creator's group
+  only and the history can live in Redis, so the Admin Shell broadcast filter is removed (§3.10, AC 19, test 12), the
+  platform floor of both modules rises to the platform that carries the change, and the multi-instance and scale-out
+  notes are rewritten (§3.5, §9). New risk: a running job can leave the history.
